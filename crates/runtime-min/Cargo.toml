@@ -1,0 +1,55 @@
+[package]
+name = "runtime-min"
+description = "Aster minimal runtime build path"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["runtime-min"]
+runtime-min = [
+    "engine-assets/runtime-min",
+    "engine-core/runtime-min",
+    "engine-ecs/runtime-min",
+    "engine-platform/runtime-min",
+    "engine-render/runtime-min",
+]
+runtime-game = [
+    "runtime-min",
+    "engine-assets/runtime-game",
+    "engine-core/runtime-game",
+    "engine-ecs/runtime-game",
+    "engine-platform/runtime-game",
+    "engine-render/runtime-game",
+]
+editor = [
+    "engine-assets/editor",
+    "engine-core/editor",
+    "engine-ecs/editor",
+    "engine-platform/editor",
+    "engine-render/editor",
+]
+agent-tools = [
+    "engine-assets/agent-tools",
+    "engine-core/agent-tools",
+    "engine-ecs/agent-tools",
+    "engine-platform/agent-tools",
+    "engine-render/agent-tools",
+]
+script-python = [
+    "engine-assets/script-python",
+    "engine-core/script-python",
+    "engine-ecs/script-python",
+    "engine-platform/script-python",
+    "engine-render/script-python",
+]
+dev-full = ["runtime-game", "editor", "agent-tools", "script-python"]
+
+[dependencies]
+engine-assets.workspace = true
+engine-core.workspace = true
+engine-ecs.workspace = true
+engine-platform.workspace = true
+engine-render.workspace = true
