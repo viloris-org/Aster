@@ -135,6 +135,8 @@ pub enum ProjectDeletionDecision {
 pub enum HubAction {
     /// Open a folder in the host file browser.
     OpenFolder(PathBuf),
+    /// Ask the host platform to select a parent directory for a new project.
+    SelectProjectLocation,
     /// Launch the editor with a project and toolchain version.
     LaunchEditor {
         /// Project root path.
@@ -151,6 +153,8 @@ pub struct NewProjectDialog {
     pub name: String,
     /// Location input (string form for editing).
     pub location: String,
+    /// Selected project template index.
+    pub template_idx: usize,
     /// Selected toolchain version index.
     pub version_idx: usize,
     /// Validation error to display.

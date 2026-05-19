@@ -311,6 +311,7 @@ fn draw_projects_page(ui: &mut egui::Ui, hub: &mut HubState, pal: &Palette) {
                             .unwrap_or_default();
                         hub.new_project_dialog = Some(NewProjectDialog {
                             location: last_loc,
+                            template_idx: 0,
                             version_idx: 0,
                             name: String::new(),
                             error: None,
@@ -631,15 +632,28 @@ fn draw_new_project_dialog(ctx: &egui::Context, hub: &mut HubState, pal: &Palett
     }
 
     let installs = hub.installs().to_vec();
+    let templates = [
+        (
+            "3D",
+            "three_d",
+            "Perspective camera, lighting, 3D transform defaults.",
+        ),
+        (
+            "2D",
+            "two_d",
+            "Orthographic camera, pixel-friendly scene defaults.",
+        ),
+    ];
     let mut dialog = hub.new_project_dialog.take().unwrap();
     let mut is_open = true;
     let mut submit_req = None;
     let mut close_dialog = false;
 
-    egui::Window::new("New Project")
+    egui::Window::new("Create Project")
         .id(egui::Id::new("hub_new_project_dialog"))
         .collapsible(false)
         .resizable(false)
+        .fixed_size(Vec2::new(560.0, 430.0))
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .frame(
             Frame::window(&ctx.style())
@@ -648,44 +662,100 @@ fn draw_new_project_dialog(ctx: &egui::Context, hub: &mut HubState, pal: &Palett
         )
         .open(&mut is_open)
         .show(ctx, |ui| {
+            ui.set_width(528.0);
             ui.add_space(8.0);
 
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Project Name:").color(pal.text_primary));
-                ui.text_edit_singleline(&mut dialog.name);
-            });
-            ui.add_space(8.0);
+            ui.label(
+                RichText::new("Start with the right scene preset.")
+                    .size(13.0)
+                    .color(pal.text_secondary),
+            );
+            ui.add_space(16.0);
 
+            ui.label(
+                RichText::new("Template")
+                    .size(12.0)
+                    .strong()
+                    .color(pal.text_secondary),
+            );
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Location:").color(pal.text_primary));
-                ui.text_edit_singleline(&mut dialog.location);
+                for (idx, (title, _, description)) in templates.iter().enumerate() {
+                    let selected = dialog.template_idx == idx;
+                    if template_choice(ui, title, description, selected, pal).clicked() {
+                        dialog.template_idx = idx;
+                    }
+                    if idx + 1 != templates.len() {
+                        ui.add_space(8.0);
+                    }
+                }
             });
-            ui.add_space(8.0);
+            ui.add_space(16.0);
+
+            ui.label(
+                RichText::new("Project Name")
+                    .size(12.0)
+                    .strong()
+                    .color(pal.text_secondary),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut dialog.name)
+                    .hint_text("My Aster Project")
+                    .desired_width(ui.available_width()),
+            );
+            ui.add_space(12.0);
+
+            ui.label(
+                RichText::new("Location")
+                    .size(12.0)
+                    .strong()
+                    .color(pal.text_secondary),
+            );
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.location)
+                        .hint_text("Choose a parent folder")
+                        .desired_width(ui.available_width() - 92.0),
+                );
+                if ui.button("Browse").clicked() {
+                    hub.pending_action = Some(HubAction::SelectProjectLocation);
+                }
+            });
+            ui.add_space(12.0);
 
             if installs.is_empty() {
                 ui.label(RichText::new("Warning: No toolchains installed.").color(pal.danger));
             } else {
                 dialog.version_idx = dialog.version_idx.min(installs.len().saturating_sub(1));
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Toolchain Version").color(pal.text_primary));
-                    egui::ComboBox::from_id_salt("hub_new_project_toolchain_version")
-                        .selected_text(&installs[dialog.version_idx].version)
-                        .show_ui(ui, |ui| {
-                            for (i, install) in installs.iter().enumerate() {
-                                ui.selectable_value(&mut dialog.version_idx, i, &install.version);
-                            }
-                        });
-                });
+                ui.label(
+                    RichText::new("Toolchain")
+                        .size(12.0)
+                        .strong()
+                        .color(pal.text_secondary),
+                );
+                egui::ComboBox::from_id_salt("hub_new_project_toolchain_version")
+                    .width(ui.available_width())
+                    .selected_text(&installs[dialog.version_idx].version)
+                    .show_ui(ui, |ui| {
+                        for (i, install) in installs.iter().enumerate() {
+                            ui.selectable_value(&mut dialog.version_idx, i, &install.version);
+                        }
+                    });
             }
-            ui.add_space(8.0);
+            ui.add_space(12.0);
 
             if let Some(err) = &dialog.error {
                 ui.label(RichText::new(err).color(pal.danger));
                 ui.add_space(8.0);
             }
 
-            ui.horizontal(|ui| {
-                if ui.button("Create").clicked() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button(RichText::new("Create").size(14.0).strong())
+                    .clicked()
+                {
+                    dialog.template_idx =
+                        dialog.template_idx.min(templates.len().saturating_sub(1));
                     submit_req = Some(NewProjectRequest {
                         name: dialog.name.clone(),
                         location: if dialog.location.is_empty() {
@@ -693,12 +763,13 @@ fn draw_new_project_dialog(ctx: &egui::Context, hub: &mut HubState, pal: &Palett
                         } else {
                             Some(PathBuf::from(&dialog.location))
                         },
-                        template_id: Some("empty".to_owned()),
+                        template_id: Some(templates[dialog.template_idx].1.to_owned()),
                         toolchain_version: installs
                             .get(dialog.version_idx)
                             .map(|i| i.version.clone()),
                     });
                 }
+                ui.add_space(8.0);
                 if ui.button("Cancel").clicked() {
                     close_dialog = true;
                 }
@@ -731,6 +802,46 @@ fn draw_new_project_dialog(ctx: &egui::Context, hub: &mut HubState, pal: &Palett
     } else {
         hub.new_project_dialog = None;
     }
+}
+
+fn template_choice(
+    ui: &mut egui::Ui,
+    title: &str,
+    description: &str,
+    selected: bool,
+    pal: &Palette,
+) -> egui::Response {
+    let width = (ui.available_width() - 8.0) / 2.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 92.0), egui::Sense::click());
+    let bg = if selected {
+        pal.surface_selected
+    } else if response.hovered() {
+        pal.surface_hover
+    } else {
+        pal.surface
+    };
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(8),
+        bg,
+        Stroke::new(1.0, if selected { pal.accent } else { pal.border }),
+        StrokeKind::Outside,
+    );
+    ui.painter().text(
+        rect.min + Vec2::new(14.0, 14.0),
+        egui::Align2::LEFT_TOP,
+        title,
+        egui::FontId::proportional(18.0),
+        pal.text_primary,
+    );
+    ui.painter().text(
+        rect.min + Vec2::new(14.0, 46.0),
+        egui::Align2::LEFT_TOP,
+        description,
+        egui::FontId::proportional(12.0),
+        pal.text_secondary,
+    );
+    response
 }
 
 fn draw_confirm_delete_dialog(ctx: &egui::Context, hub: &mut HubState, pal: &Palette) {

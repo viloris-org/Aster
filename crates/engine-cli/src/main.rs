@@ -274,6 +274,19 @@ fn open_editor() -> EngineResult<()> {
                                             },
                                         );
                                     }
+                                    engine_editor_ui::HubAction::SelectProjectLocation => {
+                                        if let Some(folder) = rfd::FileDialog::new()
+                                            .set_title("Choose project location")
+                                            .pick_folder()
+                                        {
+                                            if let Some(dialog) =
+                                                self.hub.new_project_dialog.as_mut()
+                                            {
+                                                dialog.location =
+                                                    folder.to_string_lossy().into_owned();
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
