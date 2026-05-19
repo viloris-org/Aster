@@ -11,13 +11,17 @@ rust-version.workspace = true
 default = []
 runtime-min = ["engine-core/runtime-min"]
 runtime-game = ["runtime-min"]
+physics = ["dep:engine-physics"]
+audio = ["dep:engine-audio"]
 editor = ["engine-core/editor"]
 agent-tools = ["engine-core/agent-tools"]
 script-python = ["engine-core/script-python"]
-dev-full = ["runtime-game", "editor", "agent-tools", "script-python", "engine-core/dev-full"]
+dev-full = ["runtime-game", "editor", "agent-tools", "script-python", "engine-core/dev-full", "physics", "audio"]
 
 [dependencies]
 engine-core.workspace = true
+engine-physics = { workspace = true, optional = true }
+engine-audio = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

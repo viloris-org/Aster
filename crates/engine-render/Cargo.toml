@@ -11,10 +11,11 @@ rust-version.workspace = true
 default = []
 runtime-min = ["engine-core/runtime-min"]
 runtime-game = ["runtime-min"]
-editor = ["engine-core/editor"]
+editor = ["engine-core/editor", "dep:egui"]
 agent-tools = ["engine-core/agent-tools"]
 script-python = ["engine-core/script-python"]
 dev-full = ["runtime-game", "editor", "agent-tools", "script-python", "engine-core/dev-full"]
 
 [dependencies]
 engine-core.workspace = true
+egui = { workspace = true, optional = true }

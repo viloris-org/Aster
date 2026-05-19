@@ -14,6 +14,13 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "agent-tools")]
 pub mod agent;
 
+pub mod native;
+pub mod render;
+pub use native::{
+    GizmoOperation, GizmoService, GizmoSpace, OutlineEntry, OutlineService, PickRequest,
+    PickResult, PickingService, PreviewKind, PreviewRequest, PreviewService, PreviewState,
+};
+
 /// Theme preference used by Hub and editor shells.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -308,6 +315,75 @@ pub struct EditorCommand {
     pub shortcut: Option<String>,
 }
 
+/// Reversible editor operation captured by the command stack.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UndoCommand {
+    /// Display label shown in history menus.
+    pub label: String,
+    /// Stable target identifier, such as an entity id or asset path.
+    pub target: String,
+    /// Serialized state before the command.
+    pub before: String,
+    /// Serialized state after the command.
+    pub after: String,
+}
+
+impl UndoCommand {
+    /// Creates a reversible command record.
+    pub fn new(
+        label: impl Into<String>,
+        target: impl Into<String>,
+        before: impl Into<String>,
+        after: impl Into<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            target: target.into(),
+            before: before.into(),
+            after: after.into(),
+        }
+    }
+}
+
+/// Linear undo/redo stack used by editor tools and panels.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct UndoRedoStack {
+    undo: Vec<UndoCommand>,
+    redo: Vec<UndoCommand>,
+}
+
+impl UndoRedoStack {
+    /// Pushes a completed command and clears redo history.
+    pub fn push(&mut self, command: UndoCommand) {
+        self.undo.push(command);
+        self.redo.clear();
+    }
+
+    /// Pops the most recent undo command and moves it to redo history.
+    pub fn undo(&mut self) -> Option<UndoCommand> {
+        let command = self.undo.pop()?;
+        self.redo.push(command.clone());
+        Some(command)
+    }
+
+    /// Pops the most recent redo command and moves it back to undo history.
+    pub fn redo(&mut self) -> Option<UndoCommand> {
+        let command = self.redo.pop()?;
+        self.undo.push(command.clone());
+        Some(command)
+    }
+
+    /// Returns whether an undo command is available.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    /// Returns whether a redo command is available.
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+}
+
 /// Registry for menu, toolbar, and command-palette commands.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CommandRegistry {
@@ -532,6 +608,8 @@ pub fn register_core_commands(registry: &mut CommandRegistry) {
         ("play", "Play"),
         ("pause", "Pause"),
         ("stop", "Stop"),
+        ("undo", "Undo"),
+        ("redo", "Redo"),
         ("reload", "Reload"),
         ("save", "Save"),
         ("build", "Build"),
@@ -607,7 +685,9 @@ mod tests {
         ] {
             assert!(panels.get(id).is_some(), "missing panel {id}");
         }
-        for id in ["play", "pause", "stop", "reload", "save", "build"] {
+        for id in [
+            "play", "pause", "stop", "undo", "redo", "reload", "save", "build",
+        ] {
             assert!(commands.get(id).is_some(), "missing command {id}");
         }
     }
@@ -651,5 +731,21 @@ mod tests {
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].source.file, Some(PathBuf::from("build.rs")));
+    }
+
+    #[test]
+    fn undo_redo_stack_moves_commands_between_histories() {
+        let mut stack = UndoRedoStack::default();
+        stack.push(UndoCommand::new(
+            "Rename",
+            "entity:player",
+            "Player",
+            "Hero",
+        ));
+
+        assert!(stack.can_undo());
+        assert_eq!(stack.undo().unwrap().before, "Player");
+        assert!(stack.can_redo());
+        assert_eq!(stack.redo().unwrap().after, "Hero");
     }
 }

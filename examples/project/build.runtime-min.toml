@@ -1,6 +1,6 @@
 target = "native"
 release = false
-features = ["runtime-min"]
+features = ["runtime-game", "physics", "audio"]
 
 [format]
 version = 1

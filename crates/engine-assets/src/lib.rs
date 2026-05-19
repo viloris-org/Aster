@@ -5,7 +5,9 @@
 
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
-    fmt,
+    fmt, fs,
+    hash::{Hash, Hasher},
+    io::Read,
     path::{Path, PathBuf},
     sync::Arc,
     thread,
@@ -902,6 +904,146 @@ pub fn available_importers() -> Vec<ImporterBackend> {
     importers
 }
 
+/// Infers the resource kind and importer name for a source asset path.
+pub fn infer_importer(path: &Path) -> Option<(ResourceKind, &'static str)> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)?;
+    match extension.as_str() {
+        "png" | "jpg" | "jpeg" => Some((ResourceKind::Texture, "image")),
+        "gltf" | "glb" => Some((ResourceKind::Model, "gltf")),
+        "json" if path.to_string_lossy().contains("material") => {
+            Some((ResourceKind::Material, "material-json"))
+        }
+        "toml" if path.to_string_lossy().contains("material") => {
+            Some((ResourceKind::Material, "material-toml"))
+        }
+        "wgsl" | "glsl" => Some((ResourceKind::Shader, "shader-source")),
+        "wav" | "ogg" => Some((ResourceKind::Audio, "audio")),
+        _ => None,
+    }
+}
+
+fn stable_guid_for_path(path: &Path) -> AssetGuid {
+    let mut first = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut first);
+    let first = first.finish() as u128;
+    let mut second = std::collections::hash_map::DefaultHasher::new();
+    "aster-asset-guid-v1".hash(&mut second);
+    path.hash(&mut second);
+    let second = second.finish() as u128;
+    AssetGuid::from_u128((first << 64) | second)
+}
+
+/// Result of scanning a project asset root.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AssetScanReport {
+    /// Metadata discovered or generated during the scan.
+    pub metas: Vec<ResourceMetaFormat>,
+    /// Files ignored because no importer accepts them.
+    pub ignored: Vec<PathBuf>,
+}
+
+/// Scans a project asset root and registers supported resources in the database.
+pub fn scan_project_assets(
+    asset_root: impl AsRef<Path>,
+    database: &mut AssetDatabase,
+) -> EngineResult<AssetScanReport> {
+    let asset_root = asset_root.as_ref();
+    let mut report = AssetScanReport::default();
+    if !asset_root.exists() {
+        return Ok(report);
+    }
+
+    let mut stack = vec![asset_root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        let entries = fs::read_dir(&path).map_err(|source| EngineError::Filesystem {
+            path: path.clone(),
+            source,
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|source| EngineError::Filesystem {
+                path: path.clone(),
+                source,
+            })?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().and_then(|value| value.to_str()) == Some("meta") {
+                continue;
+            }
+            let relative = path.strip_prefix(asset_root).unwrap_or(&path).to_path_buf();
+            let Some((kind, importer)) = infer_importer(&relative) else {
+                report.ignored.push(relative);
+                continue;
+            };
+            let meta = ResourceMetaFormat {
+                version: CURRENT_SCHEMA_VERSION,
+                guid: stable_guid_for_path(&relative),
+                source_path: relative,
+                kind,
+                importer: importer.to_string(),
+                dependencies: Vec::new(),
+            };
+            database
+                .upsert_meta(meta.clone())
+                .map_err(EngineError::from)?;
+            report.metas.push(meta);
+        }
+    }
+    report
+        .metas
+        .sort_by(|left, right| left.source_path.cmp(&right.source_path));
+    report.ignored.sort();
+    Ok(report)
+}
+
+/// Runs a built-in import task into CPU cache and queues a GPU upload.
+pub fn import_builtin_asset(
+    project_asset_root: impl AsRef<Path>,
+    registry: &mut AssetRegistry,
+    task: ImportTask,
+) -> EngineResult<ImportOutcome> {
+    let handle = registry.register(task.guid, task.kind)?;
+    registry.set_state(handle, ResourceState::LoadingCpu)?;
+    let path = project_asset_root.as_ref().join(&task.source_path);
+    let mut file = fs::File::open(&path).map_err(|source| EngineError::Filesystem {
+        path: path.clone(),
+        source,
+    })?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|source| EngineError::Filesystem {
+            path: path.clone(),
+            source,
+        })?;
+    registry.put_cpu(
+        handle,
+        CpuResource {
+            kind: task.kind,
+            bytes: Arc::from(bytes),
+        },
+    )?;
+    registry.set_preview(
+        handle,
+        PreviewData {
+            thumbnail: None,
+            summary: format!("{} bytes imported by {}", path.display(), task.importer),
+        },
+    )?;
+    Ok(ImportOutcome {
+        guid: task.guid,
+        diagnostics: Vec::new(),
+        upload: Some(GpuUploadTask {
+            handle,
+            kind: task.kind,
+        }),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1026,5 +1168,45 @@ mod tests {
         expected.push(ImporterBackend::Assimp);
 
         assert_eq!(available_importers(), expected);
+    }
+
+    #[test]
+    fn scans_and_imports_supported_assets() {
+        let root = std::env::temp_dir().join(format!("aster-assets-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("textures")).unwrap();
+        std::fs::write(root.join("textures/player.png"), [1_u8, 2, 3, 4]).unwrap();
+
+        let mut database = AssetDatabase::new(&root, "builtin");
+        let report = scan_project_assets(&root, &mut database).unwrap();
+        let meta = report
+            .metas
+            .iter()
+            .find(|meta| meta.source_path == PathBuf::from("textures/player.png"))
+            .unwrap();
+
+        let mut registry = AssetRegistry::default();
+        let outcome = import_builtin_asset(
+            &root,
+            &mut registry,
+            ImportTask {
+                guid: meta.guid,
+                source_path: meta.source_path.clone(),
+                kind: meta.kind,
+                importer: meta.importer.clone(),
+            },
+        )
+        .unwrap();
+
+        assert!(outcome.upload.is_some());
+        assert_eq!(
+            registry
+                .record(outcome.upload.unwrap().handle)
+                .unwrap()
+                .state,
+            ResourceState::CpuReady
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

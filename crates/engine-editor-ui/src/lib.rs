@@ -3,16 +3,34 @@
 
 //! Native Hub and editor shell state for the first Aster UI surface.
 //!
-//! This crate intentionally keeps the first shell free of concrete UI framework dependencies.
-//! A future egui or native backend can render this state without entering `runtime-min`.
+//! When compiled with the `editor` feature, the `hub` and `shell` modules
+//! provide egui rendering functions for [`HubState`] and [`EditorShell`].
 
-use std::path::{Path, PathBuf};
+#[cfg(feature = "editor")]
+pub mod hub;
+#[cfg(feature = "editor")]
+pub mod shell;
 
+#[cfg(feature = "editor")]
+pub use hub::draw_hub;
+#[cfg(feature = "editor")]
+pub use shell::{draw_shell, ShellUiState};
+
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+use engine_assets::{
+    scan_project_assets, AssetDatabase, AssetGuid, ResourceKind, ResourceMetaFormat,
+};
 use engine_core::{EngineError, EngineResult};
+use engine_ecs::{ProjectManifest, Scene};
 use engine_editor::{
-    register_core_commands, register_core_panels, CommandRegistry, ConsoleService,
-    EditorPreferences, MemoryProjectStore, NewProjectRequest, PanelRegistry, ProjectCreationPlan,
-    ProjectMetadata, ProjectStore, SelectionService, ThemePreference, ToolchainInstall,
+    register_core_commands, register_core_panels, CommandRegistry, ConsoleEntry, ConsoleLevel,
+    ConsoleService, ConsoleSource, EditorPreferences, MemoryProjectStore, NewProjectRequest,
+    PanelRegistry, ProjectCreationPlan, ProjectMetadata, ProjectStore, Selection, SelectionService,
+    ThemePreference, ToolchainInstall, UndoCommand, UndoRedoStack,
 };
 
 /// UI color tokens for a dense tool layout.
@@ -126,6 +144,28 @@ pub enum HubAction {
     },
 }
 
+/// New-project dialog transient state.
+#[derive(Clone, Debug, Default)]
+pub struct NewProjectDialog {
+    /// Project name input.
+    pub name: String,
+    /// Location input (string form for editing).
+    pub location: String,
+    /// Selected toolchain version index.
+    pub version_idx: usize,
+    /// Validation error to display.
+    pub error: Option<String>,
+}
+
+/// Confirm-delete dialog transient state.
+#[derive(Clone, Debug)]
+pub struct ConfirmDeleteDialog {
+    /// Path being deleted.
+    pub path: PathBuf,
+    /// Deletion mode.
+    pub mode: ProjectDeletionMode,
+}
+
 /// First Hub state model.
 #[derive(Clone, Debug)]
 pub struct HubState {
@@ -136,6 +176,14 @@ pub struct HubState {
     preferences: EditorPreferences,
     open_project: Option<PathBuf>,
     new_project_error: Option<String>,
+    /// Currently selected project path (transient UI state).
+    pub selected_project: Option<PathBuf>,
+    /// Open new-project dialog state; `None` means dialog is closed.
+    pub new_project_dialog: Option<NewProjectDialog>,
+    /// Open confirm-delete dialog state; `None` means dialog is closed.
+    pub confirm_delete: Option<ConfirmDeleteDialog>,
+    /// Pending hub action produced by the UI this frame.
+    pub pending_action: Option<HubAction>,
 }
 
 impl HubState {
@@ -149,6 +197,10 @@ impl HubState {
             preferences,
             open_project: None,
             new_project_error: None,
+            selected_project: None,
+            new_project_dialog: None,
+            confirm_delete: None,
+            pending_action: None,
         }
     }
 
@@ -305,13 +357,15 @@ impl HubState {
 }
 
 /// First native editor shell state.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct EditorShell {
     panels: PanelRegistry,
     commands: CommandRegistry,
     selection: SelectionService,
     console: ConsoleService,
+    undo: UndoRedoStack,
     preferences: EditorPreferences,
+    project: Option<ProjectContext>,
 }
 
 impl EditorShell {
@@ -324,6 +378,124 @@ impl EditorShell {
         register_core_panels(&mut shell.panels);
         register_core_commands(&mut shell.commands);
         shell
+    }
+
+    /// Opens a project folder, loads its default scene, and scans its asset root.
+    pub fn open_project(&mut self, project_root: impl Into<PathBuf>) -> EngineResult<()> {
+        let project_root = project_root.into();
+        let manifest_path = project_root.join("aster.project.toml");
+        let manifest_text =
+            fs::read_to_string(&manifest_path).map_err(|source| EngineError::Filesystem {
+                path: manifest_path.clone(),
+                source,
+            })?;
+        let manifest = toml::from_str::<ProjectManifest>(&manifest_text).map_err(|error| {
+            EngineError::config(format!("project manifest parse failed: {error}"))
+        })?;
+        if let Some(diagnostic) = manifest.diagnostics().into_iter().next() {
+            return Err(EngineError::config(format!(
+                "{}: {}",
+                diagnostic.path, diagnostic.message
+            )));
+        }
+        let scene_path = project_root.join(&manifest.default_scene);
+        let scene_text =
+            fs::read_to_string(&scene_path).map_err(|source| EngineError::Filesystem {
+                path: scene_path.clone(),
+                source,
+            })?;
+        let scene = Scene::from_json(&scene_text)?;
+        let mut database = AssetDatabase::new(
+            project_root.join(&manifest.asset_root),
+            project_root.join("builtin"),
+        );
+        let scan = scan_project_assets(project_root.join(&manifest.asset_root), &mut database)?;
+        self.project = Some(ProjectContext {
+            root: project_root.clone(),
+            manifest,
+            scene,
+            database,
+            assets: scan.metas,
+            scene_dirty: false,
+            scene_path,
+        });
+        self.selection.clear();
+        self.console.push(ConsoleEntry {
+            timestamp: "now".to_string(),
+            level: ConsoleLevel::Info,
+            source: ConsoleSource {
+                subsystem: "editor".to_string(),
+                file: None,
+                line: None,
+            },
+            message: format!("opened project {}", project_root.display()),
+        });
+        Ok(())
+    }
+
+    /// Saves the active scene to the project's default scene path.
+    pub fn save_scene(&mut self) -> EngineResult<()> {
+        let Some(project) = self.project.as_mut() else {
+            return Err(EngineError::config("no project is open"));
+        };
+        let scene_name = project
+            .scene_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Scene");
+        let json = project.scene.to_json(scene_name)?;
+        fs::write(&project.scene_path, json).map_err(|source| EngineError::Filesystem {
+            path: project.scene_path.clone(),
+            source,
+        })?;
+        project.scene_dirty = false;
+        Ok(())
+    }
+
+    /// Records an undoable editor command.
+    pub fn push_undo(&mut self, command: UndoCommand) {
+        self.undo.push(command);
+    }
+
+    /// Returns the undo/redo command stack.
+    pub const fn undo_stack(&self) -> &UndoRedoStack {
+        &self.undo
+    }
+
+    /// Pops an undo command for the host/editor tool to apply.
+    pub fn pop_undo(&mut self) -> Option<UndoCommand> {
+        self.undo.undo()
+    }
+
+    /// Pops a redo command for the host/editor tool to apply.
+    pub fn pop_redo(&mut self) -> Option<UndoCommand> {
+        self.undo.redo()
+    }
+
+    /// Returns the open project context.
+    pub const fn project(&self) -> Option<&ProjectContext> {
+        self.project.as_ref()
+    }
+
+    /// Returns the open project context mutably.
+    pub fn project_mut(&mut self) -> Option<&mut ProjectContext> {
+        self.project.as_mut()
+    }
+
+    /// Selects a scene object by stable ID.
+    pub fn select_entity_id(&mut self, id: engine_core::EntityId) {
+        self.selection
+            .select(Selection::Entity(format!("{:032x}", id.as_u128())));
+    }
+
+    /// Returns the selected scene object ID, if the selection is an entity.
+    pub fn selected_entity_id(&self) -> Option<engine_core::EntityId> {
+        let Selection::Entity(value) = self.selection.selected()? else {
+            return None;
+        };
+        u128::from_str_radix(value, 16)
+            .ok()
+            .map(engine_core::EntityId::from_u128)
     }
 
     /// Returns panel registry.
@@ -360,6 +532,57 @@ impl EditorShell {
     pub const fn preferences(&self) -> &EditorPreferences {
         &self.preferences
     }
+}
+
+/// Open editor project data bound to shell panels.
+#[derive(Debug)]
+pub struct ProjectContext {
+    /// Project root path.
+    pub root: PathBuf,
+    /// Parsed project manifest.
+    pub manifest: ProjectManifest,
+    /// Editable scene.
+    pub scene: Scene,
+    /// Asset database for GUID/path resolution.
+    pub database: AssetDatabase,
+    /// Last asset scan results shown by the Project panel.
+    pub assets: Vec<ResourceMetaFormat>,
+    /// Whether the scene has unsaved edits.
+    pub scene_dirty: bool,
+    /// Absolute path to the loaded scene.
+    pub scene_path: PathBuf,
+}
+
+impl ProjectContext {
+    /// Returns a display name for the project.
+    pub fn name(&self) -> &str {
+        &self.manifest.name
+    }
+
+    /// Returns assets sorted by source path.
+    pub fn sorted_assets(&self) -> Vec<&ResourceMetaFormat> {
+        let mut assets = self.assets.iter().collect::<Vec<_>>();
+        assets.sort_by(|left, right| left.source_path.cmp(&right.source_path));
+        assets
+    }
+}
+
+/// Formats asset kind for compact UI labels.
+pub fn resource_kind_label(kind: ResourceKind) -> &'static str {
+    match kind {
+        ResourceKind::Texture => "Texture",
+        ResourceKind::Material => "Material",
+        ResourceKind::Shader => "Shader",
+        ResourceKind::Audio => "Audio",
+        ResourceKind::Model => "Model",
+        ResourceKind::SkinnedModel => "Skinned Model",
+        ResourceKind::Animation => "Animation",
+    }
+}
+
+/// Formats an asset GUID as lowercase hex.
+pub fn asset_guid_label(guid: AssetGuid) -> String {
+    format!("{guid}")
 }
 
 #[cfg(test)]
@@ -478,8 +701,20 @@ mod tests {
         ] {
             assert!(shell.panels().get(id).is_some(), "missing panel {id}");
         }
-        for id in ["play", "pause", "stop", "reload", "save", "build"] {
+        for id in [
+            "play", "pause", "stop", "undo", "redo", "reload", "save", "build",
+        ] {
             assert!(shell.commands().get(id).is_some(), "missing command {id}");
         }
+    }
+
+    #[test]
+    fn editor_shell_records_undo_commands() {
+        let mut shell = EditorShell::with_core_services(EditorPreferences::default());
+        shell.push_undo(UndoCommand::new("Rename", "entity:1", "A", "B"));
+
+        assert!(shell.undo_stack().can_undo());
+        assert_eq!(shell.pop_undo().unwrap().after, "B");
+        assert!(shell.undo_stack().can_redo());
     }
 }

@@ -7,6 +7,7 @@ use std::{
 };
 
 use engine_core::{EngineError, EngineResult};
+use engine_ecs::{BuildConfiguration, ProjectManifest};
 
 fn main() -> ExitCode {
     match run() {
@@ -32,8 +33,8 @@ fn run() -> EngineResult<()> {
             "agent-tools",
         ]),
         Some("package") => {
-            let profile = parse_package_profile(args)?;
-            package(profile)
+            let request = parse_package_request(args)?;
+            package(request)
         }
         Some("test") => cargo(["test", "--workspace"]),
         Some("check") => cargo(["check", "--workspace", "--all-features"]),
@@ -83,14 +84,56 @@ impl Profile {
     }
 }
 
-fn parse_package_profile(mut args: impl Iterator<Item = String>) -> EngineResult<Profile> {
-    match (args.next().as_deref(), args.next()) {
-        (Some("--profile"), Some(profile)) => Profile::parse(&profile),
-        (Some(profile), None) => Profile::parse(profile),
-        _ => Err(EngineError::config(
-            "expected package --profile <runtime-game|editor>",
-        )),
+#[derive(Clone, Debug)]
+struct PackageRequest {
+    profile: Profile,
+    project: PathBuf,
+}
+
+fn parse_package_request(args: impl Iterator<Item = String>) -> EngineResult<PackageRequest> {
+    let mut profile = None;
+    let mut project = None;
+    let mut args = args.peekable();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--profile" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| EngineError::config("expected value after --profile"))?;
+                profile = Some(Profile::parse(&value)?);
+            }
+            "--project" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| EngineError::config("expected value after --project"))?;
+                project = Some(PathBuf::from(value));
+            }
+            value if value.starts_with("--") => {
+                return Err(EngineError::config(format!(
+                    "unsupported package flag `{value}`"
+                )));
+            }
+            value => {
+                if profile.is_none() && matches!(value, "runtime-game" | "editor") {
+                    profile = Some(Profile::parse(value)?);
+                } else if project.is_none() {
+                    project = Some(PathBuf::from(value));
+                } else {
+                    return Err(EngineError::config(format!(
+                        "unexpected package argument `{value}`"
+                    )));
+                }
+            }
+        }
     }
+
+    let project = project.unwrap_or_else(|| PathBuf::from("examples/project"));
+    let profile = match profile {
+        Some(profile) => profile,
+        None => profile_from_project_config(&project)?,
+    };
+
+    Ok(PackageRequest { profile, project })
 }
 
 fn build_profile(profile: Profile) -> EngineResult<()> {
@@ -116,7 +159,8 @@ fn build_profile(profile: Profile) -> EngineResult<()> {
     }
 }
 
-fn package(profile: Profile) -> EngineResult<()> {
+fn package(request: PackageRequest) -> EngineResult<()> {
+    let profile = request.profile;
     match profile {
         Profile::RuntimeGame | Profile::Editor => {}
         unsupported => {
@@ -162,9 +206,76 @@ fn package(profile: Profile) -> EngineResult<()> {
         create_editor_app_layout(&package_root, &cli_dest)?;
     }
 
+    copy_project_payload(&request.project, &package_root)?;
     write_manifest(&package_root, profile)?;
     write_marker_artifact(&package_root, profile)?;
-    println!("packaged {} at {}", profile.name(), package_root.display());
+    println!(
+        "packaged {} project {} at {}",
+        profile.name(),
+        request.project.display(),
+        package_root.display()
+    );
+    Ok(())
+}
+
+fn profile_from_project_config(project_root: &Path) -> EngineResult<Profile> {
+    let config_path = project_root.join("build.runtime-min.toml");
+    let text = fs::read_to_string(&config_path).map_err(|source| EngineError::Filesystem {
+        path: config_path.clone(),
+        source,
+    })?;
+    let config = toml::from_str::<BuildConfiguration>(&text)
+        .map_err(|error| EngineError::config(format!("build config parse failed: {error}")))?;
+    if config
+        .features
+        .iter()
+        .any(|feature| feature == "runtime-game")
+    {
+        Ok(Profile::RuntimeGame)
+    } else if config.features.iter().any(|feature| feature == "editor") {
+        Ok(Profile::Editor)
+    } else {
+        Ok(Profile::RuntimeGame)
+    }
+}
+
+fn copy_project_payload(project_root: &Path, package_root: &Path) -> EngineResult<()> {
+    let manifest_path = project_root.join("aster.project.toml");
+    let manifest_text =
+        fs::read_to_string(&manifest_path).map_err(|source| EngineError::Filesystem {
+            path: manifest_path.clone(),
+            source,
+        })?;
+    let manifest = toml::from_str::<ProjectManifest>(&manifest_text)
+        .map_err(|error| EngineError::config(format!("project manifest parse failed: {error}")))?;
+    if let Some(diagnostic) = manifest.diagnostics().into_iter().next() {
+        return Err(EngineError::config(format!(
+            "{}: {}",
+            diagnostic.path, diagnostic.message
+        )));
+    }
+
+    let project_dest = package_root.join("project");
+    recreate_dir(&project_dest)?;
+    copy_file(&manifest_path, &project_dest.join("aster.project.toml"))?;
+    copy_file(
+        &project_root.join("build.runtime-min.toml"),
+        &project_dest.join("build.runtime-min.toml"),
+    )?;
+    copy_file(
+        &project_root.join(&manifest.default_scene),
+        &project_dest.join(&manifest.default_scene),
+    )?;
+    copy_dir_if_exists(
+        &project_root.join(&manifest.asset_root),
+        &project_dest.join(&manifest.asset_root),
+    )?;
+    fs::create_dir_all(project_dest.join("import-cache")).map_err(|source| {
+        EngineError::Filesystem {
+            path: project_dest.join("import-cache"),
+            source,
+        }
+    })?;
     Ok(())
 }
 
@@ -225,6 +336,53 @@ fn recreate_dir(path: &Path) -> EngineResult<()> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn copy_file(source: &Path, dest: &Path) -> EngineResult<()> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|source| EngineError::Filesystem {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    fs::copy(source, dest)
+        .map(|_| ())
+        .map_err(|source_error| EngineError::Filesystem {
+            path: source.to_path_buf(),
+            source: source_error,
+        })
+}
+
+fn copy_dir_if_exists(source: &Path, dest: &Path) -> EngineResult<()> {
+    if !source.exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(dest).map_err(|source_error| EngineError::Filesystem {
+        path: dest.to_path_buf(),
+        source: source_error,
+    })?;
+    for entry in fs::read_dir(source).map_err(|source_error| EngineError::Filesystem {
+        path: source.to_path_buf(),
+        source: source_error,
+    })? {
+        let entry = entry.map_err(|source_error| EngineError::Filesystem {
+            path: source.to_path_buf(),
+            source: source_error,
+        })?;
+        let file_type = entry
+            .file_type()
+            .map_err(|source_error| EngineError::Filesystem {
+                path: entry.path(),
+                source: source_error,
+            })?;
+        let dest_path = dest.join(entry.file_name());
+        if file_type.is_dir() {
+            copy_dir_if_exists(&entry.path(), &dest_path)?;
+        } else if file_type.is_file() {
+            copy_file(&entry.path(), &dest_path)?;
+        }
+    }
+    Ok(())
 }
 
 fn executable_name(stem: &str) -> String {

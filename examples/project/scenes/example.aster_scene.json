@@ -10,7 +10,19 @@
         "layer": 0,
         "camera_role": "Main",
         "active": true,
-        "scripts": []
+        "scripts": [],
+        "components": [
+          {
+            "type": "Camera",
+            "data": {
+              "vertical_fov_degrees": 60.0,
+              "near": 0.01,
+              "far": 1000.0,
+              "aspect_ratio": null,
+              "primary": true
+            }
+          }
+        ]
       },
       "local_transform": {
         "translation": { "x": 0.0, "y": 1.5, "z": -6.0 },
@@ -34,6 +46,36 @@
             "script": "scripts/player_controller.py",
             "state_json": null,
             "pending_recovery": true
+          }
+        ],
+        "components": [
+          {
+            "type": "MeshRenderer",
+            "data": {
+              "mesh": null,
+              "builtin_mesh": "debug/cube",
+              "material": {
+                "asset": null,
+                "builtin": "debug/default"
+              },
+              "casts_shadows": true
+            }
+          },
+          {
+            "type": "Rigidbody",
+            "data": {
+              "body_type": "kinematic",
+              "mass": 1.0,
+              "use_gravity": false
+            }
+          },
+          {
+            "type": "Collider",
+            "data": {
+              "shape": "box",
+              "size": { "x": 1.0, "y": 1.0, "z": 1.0 },
+              "is_trigger": false
+            }
           }
         ]
       },

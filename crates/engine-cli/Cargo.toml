@@ -7,11 +7,32 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[dependencies]
+engine-core.workspace = true
+engine-editor = { workspace = true, optional = true }
+engine-editor-ui = { workspace = true, optional = true }
+runtime-min.workspace = true
+egui = { workspace = true, optional = true }
+egui-winit = { workspace = true, optional = true }
+winit = { workspace = true, optional = true }
+egui-wgpu = { version = "0.34", optional = true }
+pollster = { version = "0.4", optional = true }
+
 [features]
-default = ["runtime-min"]
+default = ["runtime-game"]
 runtime-min = ["runtime-min/runtime-min"]
 runtime-game = ["runtime-min/runtime-game"]
-editor = ["runtime-min/editor", "engine-editor/editor", "engine-editor-ui/editor"]
+editor = [
+    "runtime-min/editor",
+    "engine-editor/editor",
+    "engine-editor-ui/editor",
+    "dep:egui",
+    "dep:egui-winit",
+    "dep:winit",
+    "dep:egui-wgpu",
+    "dep:pollster"
+
+]
 agent-tools = ["runtime-min/agent-tools", "engine-editor/agent-tools"]
 script-python = ["runtime-min/script-python"]
 dev-full = [
@@ -23,9 +44,3 @@ dev-full = [
     "engine-editor/dev-full",
     "engine-editor-ui/dev-full",
 ]
-
-[dependencies]
-engine-core.workspace = true
-engine-editor = { workspace = true, optional = true }
-engine-editor-ui = { workspace = true, optional = true }
-runtime-min.workspace = true

@@ -1,6 +1,65 @@
-use runtime_min::smoke_runtime_min;
+use engine_core::EngineConfig;
+use engine_render::{RenderFrame, RenderGraphBuilder};
+use runtime_min::{build_default_render_graph, smoke_runtime_min, RuntimeServices};
 
 #[test]
 fn native_runtime_min_smoke_test() {
     assert_eq!(smoke_runtime_min().unwrap(), 1);
+}
+
+#[test]
+fn default_render_graph_pass_order() {
+    let graph = build_default_render_graph();
+    assert_eq!(graph.pass_count(), 3);
+    assert_eq!(graph.passes[0].name, "shadow");
+    assert_eq!(graph.passes[1].name, "forward");
+    assert_eq!(graph.passes[2].name, "post");
+}
+
+#[test]
+fn runtime_services_ticks_multiple_frames() {
+    let mut services = RuntimeServices::minimal(EngineConfig::default());
+    for _ in 0..5 {
+        services.tick().unwrap();
+    }
+    assert_eq!(services.frame_index(), 5);
+}
+
+#[test]
+fn custom_render_graph_replaces_default() {
+    let mut services = RuntimeServices::minimal(EngineConfig::default());
+    let mut builder = RenderGraphBuilder::new();
+    let a = builder.add_pass("deferred");
+    let b = builder.add_pass("lighting");
+    builder.order_before(a, b);
+    services.set_render_graph(builder.build());
+    assert_eq!(services.render_graph.pass_count(), 2);
+    services.tick().unwrap();
+}
+
+/// Script-driven render path: a graph built from a description table.
+#[test]
+fn script_driven_render_path() {
+    // Simulate what a script backend would do: build a graph from a list of
+    // pass names and ordering rules, then execute it.
+    let pass_names = ["shadow", "forward", "post"];
+    let edges = [(0usize, 1usize), (1, 2)];
+
+    let mut builder = RenderGraphBuilder::new();
+    let ids: Vec<_> = pass_names.iter().map(|n| builder.add_pass(*n)).collect();
+    for (before, after) in edges {
+        builder.order_before(ids[before], ids[after]);
+    }
+    let graph = builder.build();
+
+    assert_eq!(graph.pass_count(), 3);
+    let names: Vec<&str> = graph.passes.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["shadow", "forward", "post"]);
+
+    // Execute via headless device.
+    use engine_render::{HeadlessRenderDevice, RenderDevice};
+    let mut device = HeadlessRenderDevice::default();
+    device
+        .execute_graph(&graph, RenderFrame { frame_index: 0 })
+        .unwrap();
 }

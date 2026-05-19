@@ -31,3 +31,28 @@ pub trait WindowProvider {
     /// Creates a window.
     fn create_window(&self, descriptor: &WindowDescriptor) -> EngineResult<Self::Window>;
 }
+
+/// winit-backed window provider. Only available with the `editor` feature.
+#[cfg(feature = "editor")]
+pub struct WinitWindowProvider;
+
+#[cfg(feature = "editor")]
+impl WindowProvider for WinitWindowProvider {
+    type Window = winit::window::Window;
+
+    fn create_window(&self, descriptor: &WindowDescriptor) -> EngineResult<Self::Window> {
+        use engine_core::EngineError;
+        use winit::{dpi::LogicalSize, event_loop::EventLoop, window::WindowAttributes};
+
+        let event_loop = EventLoop::new().map_err(|e| EngineError::other(e.to_string()))?;
+        let attrs = WindowAttributes::default()
+            .with_title(&descriptor.title)
+            .with_inner_size(LogicalSize::new(descriptor.width, descriptor.height));
+
+        #[allow(deprecated)]
+        let window = event_loop
+            .create_window(attrs)
+            .map_err(|e| EngineError::other(e.to_string()))?;
+        Ok(window)
+    }
+}

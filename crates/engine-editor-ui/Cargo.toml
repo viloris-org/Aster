@@ -9,9 +9,13 @@ rust-version.workspace = true
 
 [features]
 default = []
-editor = ["engine-editor/editor", "engine-core/editor"]
+editor = ["engine-editor/editor", "engine-core/editor", "dep:egui"]
 dev-full = ["editor", "engine-editor/dev-full", "engine-core/dev-full"]
 
 [dependencies]
+engine-assets.workspace = true
 engine-core.workspace = true
+engine-ecs.workspace = true
 engine-editor.workspace = true
+egui = { workspace = true, optional = true }
+toml.workspace = true

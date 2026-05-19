@@ -2,7 +2,10 @@
 
 use std::{collections::HashMap, fmt};
 
-use engine_core::{math::Transform, EngineError, EngineResult, EntityId};
+use engine_core::{
+    math::{Transform, Vec3},
+    AssetId, EngineError, EngineResult, EntityId,
+};
 
 use crate::{
     transform::TransformHierarchy,
@@ -96,8 +99,200 @@ pub struct ScriptComponentProxy {
     pub pending_recovery: bool,
 }
 
-/// Game object metadata.
+/// Serializable camera component.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct CameraComponentData {
+    /// Vertical field of view in degrees.
+    pub vertical_fov_degrees: f32,
+    /// Near clipping plane.
+    pub near: f32,
+    /// Far clipping plane.
+    pub far: f32,
+    /// Optional fixed aspect ratio. Runtime derives it from the target when unset.
+    pub aspect_ratio: Option<f32>,
+    /// Whether this camera should render to Game View.
+    pub primary: bool,
+}
+
+impl Default for CameraComponentData {
+    fn default() -> Self {
+        Self {
+            vertical_fov_degrees: 60.0,
+            near: 0.01,
+            far: 1000.0,
+            aspect_ratio: None,
+            primary: true,
+        }
+    }
+}
+
+/// Serializable material reference.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct MaterialRef {
+    /// Optional asset GUID for a project material.
+    pub asset: Option<AssetId>,
+    /// Built-in material name used when no asset is assigned.
+    pub builtin: Option<String>,
+}
+
+impl MaterialRef {
+    /// Debug material used for fallback rendering.
+    pub fn debug() -> Self {
+        Self {
+            asset: None,
+            builtin: Some("debug/default".to_string()),
+        }
+    }
+}
+
+/// Serializable mesh renderer component.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct MeshRendererComponentData {
+    /// Optional mesh asset GUID.
+    pub mesh: Option<AssetId>,
+    /// Built-in mesh name used when no asset is assigned.
+    pub builtin_mesh: Option<String>,
+    /// Material binding.
+    pub material: MaterialRef,
+    /// Whether this renderer casts shadows.
+    pub casts_shadows: bool,
+}
+
+impl Default for MeshRendererComponentData {
+    fn default() -> Self {
+        Self {
+            mesh: None,
+            builtin_mesh: Some("debug/cube".to_string()),
+            material: MaterialRef::debug(),
+            casts_shadows: true,
+        }
+    }
+}
+
+/// Serializable light component.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct LightComponentData {
+    /// RGB light color.
+    pub color: Vec3,
+    /// Light intensity in engine units.
+    pub intensity: f32,
+    /// Whether this is directional, point, or spot.
+    pub kind: String,
+}
+
+impl Default for LightComponentData {
+    fn default() -> Self {
+        Self {
+            color: Vec3::ONE,
+            intensity: 1.0,
+            kind: "directional".to_string(),
+        }
+    }
+}
+
+/// Serializable rigidbody component.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct RigidbodyComponentData {
+    /// `dynamic`, `kinematic`, or `static`.
+    pub body_type: String,
+    /// Rigidbody mass.
+    pub mass: f32,
+    /// Whether gravity affects the body.
+    pub use_gravity: bool,
+}
+
+impl Default for RigidbodyComponentData {
+    fn default() -> Self {
+        Self {
+            body_type: "dynamic".to_string(),
+            mass: 1.0,
+            use_gravity: true,
+        }
+    }
+}
+
+/// Serializable collider component.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ColliderComponentData {
+    /// `box`, `sphere`, or `capsule`.
+    pub shape: String,
+    /// Shape dimensions.
+    pub size: Vec3,
+    /// Whether this collider is a trigger.
+    pub is_trigger: bool,
+}
+
+impl Default for ColliderComponentData {
+    fn default() -> Self {
+        Self {
+            shape: "box".to_string(),
+            size: Vec3::ONE,
+            is_trigger: false,
+        }
+    }
+}
+
+/// Serializable audio source component.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct AudioSourceComponentData {
+    /// Optional clip asset GUID.
+    pub clip: Option<AssetId>,
+    /// Volume multiplier.
+    pub volume: f32,
+    /// Whether the clip loops.
+    pub looping: bool,
+    /// Whether playback starts on scene start.
+    pub play_on_start: bool,
+}
+
+impl Default for AudioSourceComponentData {
+    fn default() -> Self {
+        Self {
+            clip: None,
+            volume: 1.0,
+            looping: false,
+            play_on_start: false,
+        }
+    }
+}
+
+/// Versioned component payload used by scenes and prefabs.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "type", content = "data")]
+pub enum ComponentData {
+    /// Camera component.
+    Camera(CameraComponentData),
+    /// Mesh renderer component.
+    MeshRenderer(MeshRendererComponentData),
+    /// Light component.
+    Light(LightComponentData),
+    /// Rigidbody component.
+    Rigidbody(RigidbodyComponentData),
+    /// Collider component.
+    Collider(ColliderComponentData),
+    /// Audio source component.
+    AudioSource(AudioSourceComponentData),
+    /// Script proxy component.
+    Script(ScriptComponentProxy),
+}
+
+impl ComponentData {
+    /// Stable component type ID used by schema registries and serialized data.
+    pub fn type_id(&self) -> &'static str {
+        match self {
+            Self::Camera(_) => "Camera",
+            Self::MeshRenderer(_) => "MeshRenderer",
+            Self::Light(_) => "Light",
+            Self::Rigidbody(_) => "Rigidbody",
+            Self::Collider(_) => "Collider",
+            Self::AudioSource(_) => "AudioSource",
+            Self::Script(_) => "Script",
+        }
+    }
+}
+
+/// Game object metadata.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GameObject {
     /// Runtime-session stable object ID.
     pub id: EntityId,
@@ -112,7 +307,11 @@ pub struct GameObject {
     /// Whether this object is active.
     pub active: bool,
     /// Optional script proxy records.
+    #[serde(default)]
     pub scripts: Vec<ScriptComponentProxy>,
+    /// Serializable non-transform components attached to this object.
+    #[serde(default)]
+    pub components: Vec<ComponentData>,
 }
 
 impl GameObject {
@@ -126,6 +325,7 @@ impl GameObject {
             camera_role: None,
             active: true,
             scripts: Vec::new(),
+            components: Vec::new(),
         }
     }
 }
@@ -264,10 +464,56 @@ impl Scene {
         self.active().objects.get(&entity)
     }
 
+    /// Returns all active object entities and metadata in deterministic order.
+    pub fn objects(&self) -> Vec<(Entity, &GameObject)> {
+        let mut objects = self
+            .active()
+            .objects
+            .iter()
+            .map(|(entity, object)| (*entity, object))
+            .collect::<Vec<_>>();
+        objects.sort_by_key(|(_, object)| object.id.as_u128());
+        objects
+    }
+
     /// Returns mutable object metadata and bumps scene version.
     pub fn object_mut(&mut self, entity: Entity) -> Option<&mut GameObject> {
         self.active_mut().bump_version();
         self.active_mut().objects.get_mut(&entity)
+    }
+
+    /// Returns serialized components attached to an object.
+    pub fn components(&self, entity: Entity) -> Option<&[ComponentData]> {
+        self.active()
+            .objects
+            .get(&entity)
+            .map(|object| object.components.as_slice())
+    }
+
+    /// Replaces or inserts a serialized component by component type.
+    pub fn upsert_component(
+        &mut self,
+        entity: Entity,
+        component: ComponentData,
+    ) -> EngineResult<()> {
+        let state = self.active_mut();
+        Self::ensure_alive(state, entity)?;
+        let object = state
+            .objects
+            .get_mut(&entity)
+            .ok_or_else(|| EngineError::invalid_handle("object metadata is missing"))?;
+        let component_type = component.type_id();
+        if let Some(existing) = object
+            .components
+            .iter_mut()
+            .find(|candidate| candidate.type_id() == component_type)
+        {
+            *existing = component;
+        } else {
+            object.components.push(component);
+        }
+        state.bump_version();
+        Ok(())
     }
 
     /// Finds the first object by name.
@@ -276,6 +522,11 @@ impl Scene {
             .objects
             .iter()
             .find_map(|(entity, object)| (object.name == name).then_some(*entity))
+    }
+
+    /// Finds an object by its stable scene object ID.
+    pub fn find_by_id(&self, id: EntityId) -> Option<Entity> {
+        self.active().by_id.get(&id).copied()
     }
 
     /// Finds all objects with a tag.
@@ -572,6 +823,30 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(loaded.find_by_tag("Enemy").len(), 1);
+    }
+
+    #[test]
+    fn serializes_regular_components() {
+        let mut scene = Scene::new();
+        let camera = scene.create_object("Camera").unwrap();
+        scene
+            .upsert_component(
+                camera,
+                ComponentData::Camera(CameraComponentData {
+                    primary: true,
+                    ..CameraComponentData::default()
+                }),
+            )
+            .unwrap();
+
+        let json = scene.to_json("Components").unwrap();
+        let loaded = Scene::from_json(&json).unwrap();
+        let camera = loaded.find_by_name("Camera").unwrap();
+
+        assert!(matches!(
+            loaded.components(camera).unwrap()[0],
+            ComponentData::Camera(_)
+        ));
     }
 
     #[test]

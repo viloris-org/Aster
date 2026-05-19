@@ -60,6 +60,159 @@ pub struct FormatDiagnostic {
     pub message: String,
 }
 
+/// Serializable component field kind used by editor Inspector generation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum ComponentFieldKind {
+    /// Boolean value.
+    Bool,
+    /// 32-bit floating point value.
+    F32,
+    /// UTF-8 string value.
+    String,
+    /// 3D vector value.
+    Vec3,
+    /// Asset GUID reference.
+    AssetRef,
+    /// Nested object value.
+    Object,
+}
+
+/// Component field metadata for Inspector and migration tooling.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ComponentFieldSchema {
+    /// Serialized field name.
+    pub name: String,
+    /// Field data kind.
+    pub kind: ComponentFieldKind,
+    /// Human-readable default value.
+    pub default_value: String,
+}
+
+/// Component type metadata for scene and prefab serialization.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ComponentSchema {
+    /// Stable component type ID.
+    pub type_id: String,
+    /// Human-readable component name.
+    pub display_name: String,
+    /// Schema version for migration.
+    pub version: u32,
+    /// Field metadata.
+    pub fields: Vec<ComponentFieldSchema>,
+    /// Migration policy.
+    pub evolution: SchemaEvolution,
+}
+
+/// Registry of serializable component schemas.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ComponentSchemaRegistry {
+    schemas: Vec<ComponentSchema>,
+}
+
+impl ComponentSchemaRegistry {
+    /// Builds the built-in runtime component schema registry.
+    pub fn builtin() -> Self {
+        let mut registry = Self::default();
+        registry.register(ComponentSchema {
+            type_id: "Camera".to_string(),
+            display_name: "Camera".to_string(),
+            version: 1,
+            fields: vec![
+                field("vertical_fov_degrees", ComponentFieldKind::F32, "60"),
+                field("near", ComponentFieldKind::F32, "0.01"),
+                field("far", ComponentFieldKind::F32, "1000"),
+                field("primary", ComponentFieldKind::Bool, "true"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "MeshRenderer".to_string(),
+            display_name: "Mesh Renderer".to_string(),
+            version: 1,
+            fields: vec![
+                field("mesh", ComponentFieldKind::AssetRef, "debug/cube"),
+                field("material", ComponentFieldKind::Object, "debug/default"),
+                field("casts_shadows", ComponentFieldKind::Bool, "true"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "Rigidbody".to_string(),
+            display_name: "Rigidbody".to_string(),
+            version: 1,
+            fields: vec![
+                field("body_type", ComponentFieldKind::String, "dynamic"),
+                field("mass", ComponentFieldKind::F32, "1"),
+                field("use_gravity", ComponentFieldKind::Bool, "true"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "Collider".to_string(),
+            display_name: "Collider".to_string(),
+            version: 1,
+            fields: vec![
+                field("shape", ComponentFieldKind::String, "box"),
+                field("size", ComponentFieldKind::Vec3, "1,1,1"),
+                field("is_trigger", ComponentFieldKind::Bool, "false"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "AudioSource".to_string(),
+            display_name: "Audio Source".to_string(),
+            version: 1,
+            fields: vec![
+                field("clip", ComponentFieldKind::AssetRef, ""),
+                field("volume", ComponentFieldKind::F32, "1"),
+                field("looping", ComponentFieldKind::Bool, "false"),
+                field("play_on_start", ComponentFieldKind::Bool, "false"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry
+    }
+
+    /// Registers or replaces a schema by type ID.
+    pub fn register(&mut self, schema: ComponentSchema) {
+        if let Some(existing) = self
+            .schemas
+            .iter_mut()
+            .find(|candidate| candidate.type_id == schema.type_id)
+        {
+            *existing = schema;
+        } else {
+            self.schemas.push(schema);
+            self.schemas
+                .sort_by(|left, right| left.type_id.cmp(&right.type_id));
+        }
+    }
+
+    /// Returns a schema by type ID.
+    pub fn get(&self, type_id: &str) -> Option<&ComponentSchema> {
+        self.schemas
+            .iter()
+            .find(|candidate| candidate.type_id == type_id)
+    }
+
+    /// Returns every registered schema.
+    pub fn all(&self) -> &[ComponentSchema] {
+        &self.schemas
+    }
+}
+
+fn field(
+    name: impl Into<String>,
+    kind: ComponentFieldKind,
+    default_value: impl Into<String>,
+) -> ComponentFieldSchema {
+    ComponentFieldSchema {
+        name: name.into(),
+        kind,
+        default_value: default_value.into(),
+    }
+}
+
 /// Project manifest format.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ProjectManifest {
@@ -262,6 +415,17 @@ mod tests {
         config.format.version = BUILD_CONFIGURATION_VERSION + 1;
 
         assert_eq!(config.diagnostics().len(), 1);
+    }
+
+    #[test]
+    fn builtin_component_registry_contains_inspector_schemas() {
+        let registry = ComponentSchemaRegistry::builtin();
+
+        assert!(registry.get("Camera").is_some());
+        assert!(registry.get("MeshRenderer").is_some());
+        assert!(registry.get("Rigidbody").is_some());
+        assert!(registry.get("Collider").is_some());
+        assert!(registry.get("AudioSource").is_some());
     }
 
     #[test]

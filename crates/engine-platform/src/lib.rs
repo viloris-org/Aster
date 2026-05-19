@@ -11,6 +11,6 @@ pub mod window;
 
 pub use callbacks::{CallbackThread, ThreadBoundCallback};
 pub use filesystem::{FileSystem, HostFileSystem};
-pub use input::{InputEvent, KeyCode};
+pub use input::{ActionBinding, InputEvent, InputState, KeyCode, MouseButton};
 pub use library::DynamicLibraryProvider;
 pub use window::{WindowDescriptor, WindowProvider};
