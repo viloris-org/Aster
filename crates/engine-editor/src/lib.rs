@@ -819,6 +819,77 @@ fn command(
     }
 }
 
+/// Bundled project state used by the editor shell.
+///
+/// Holds the parsed manifest, active scene, scanned asset database,
+/// and the absolute project root path.
+#[derive(Debug)]
+pub struct ProjectContext {
+    /// Parsed project manifest from `aster.project.toml`.
+    pub manifest: engine_ecs::ProjectManifest,
+    /// Active scene graph loaded from the default scene file.
+    pub scene: engine_ecs::Scene,
+    /// Asset database populated by scanning the project asset root.
+    pub asset_db: engine_assets::AssetDatabase,
+    /// Absolute path to the project root directory.
+    pub project_root: PathBuf,
+}
+
+impl ProjectContext {
+    /// Opens a project from its root directory.
+    ///
+    /// Loads `aster.project.toml`, parses the default scene JSON,
+    /// and scans the configured asset root.
+    pub fn open(project_root: impl Into<PathBuf>) -> EngineResult<Self> {
+        let project_root: PathBuf = project_root.into();
+
+        let manifest_path = project_root.join("aster.project.toml");
+        let manifest_toml =
+            fs::read_to_string(&manifest_path).map_err(|source| EngineError::Filesystem {
+                path: manifest_path.clone(),
+                source,
+            })?;
+        let manifest: engine_ecs::ProjectManifest =
+            toml::from_str(&manifest_toml).map_err(|error| {
+                EngineError::other(format!(
+                    "failed to parse {}: {error}",
+                    manifest_path.display()
+                ))
+            })?;
+
+        let diagnostics = manifest.diagnostics();
+        if !diagnostics.is_empty() {
+            return Err(EngineError::config(
+                diagnostics
+                    .iter()
+                    .map(|d| d.message.clone())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ));
+        }
+
+        let scene_path = project_root.join(&manifest.default_scene);
+        let scene_json =
+            fs::read_to_string(&scene_path).map_err(|source| EngineError::Filesystem {
+                path: scene_path.clone(),
+                source,
+            })?;
+        let scene = engine_ecs::Scene::from_json(&scene_json)?;
+
+        let asset_root = project_root.join(&manifest.asset_root);
+        let builtin_root = project_root.join("builtin");
+        let mut asset_db = engine_assets::AssetDatabase::new(&asset_root, &builtin_root);
+        engine_assets::scan_project_assets(&asset_root, &mut asset_db)?;
+
+        Ok(Self {
+            manifest,
+            scene,
+            asset_db,
+            project_root,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -956,5 +1027,17 @@ mod tests {
         assert_eq!(stack.undo().unwrap().before, "Player");
         assert!(stack.can_redo());
         assert_eq!(stack.redo().unwrap().after, "Hero");
+    }
+
+    #[test]
+    fn opens_example_project_and_loads_manifest_scene_and_assets() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let project_root = manifest_dir.join("../../examples/project");
+
+        let ctx = ProjectContext::open(&project_root).unwrap();
+
+        assert_eq!(ctx.manifest.name, "Aster Example");
+        assert!(ctx.scene.object_count() > 0);
+        assert_eq!(ctx.project_root, project_root);
     }
 }

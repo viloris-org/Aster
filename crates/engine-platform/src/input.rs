@@ -268,6 +268,59 @@ impl InputState {
     }
 }
 
+/// Maps physical keys to logical action names so game code queries actions
+/// instead of raw key codes.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ActionMap {
+    bindings: HashMap<String, Vec<KeyCode>>,
+}
+
+impl ActionMap {
+    /// Creates an ActionMap with default movement and jump bindings.
+    pub fn new() -> Self {
+        let mut map = Self::default();
+        map.bind_defaults();
+        map
+    }
+
+    /// Populates the default bindings (WASD, arrows, space).
+    pub fn bind_defaults(&mut self) {
+        self.bind("MoveForward", KeyCode::Character('w'));
+        self.bind("MoveForward", KeyCode::ArrowUp);
+        self.bind("MoveBack", KeyCode::Character('s'));
+        self.bind("MoveBack", KeyCode::ArrowDown);
+        self.bind("MoveLeft", KeyCode::Character('a'));
+        self.bind("MoveLeft", KeyCode::ArrowLeft);
+        self.bind("MoveRight", KeyCode::Character('d'));
+        self.bind("MoveRight", KeyCode::ArrowRight);
+        self.bind("Jump", KeyCode::Space);
+    }
+
+    /// Binds a key to an action name.
+    pub fn bind(&mut self, action_name: impl Into<String>, key: KeyCode) {
+        self.bindings
+            .entry(action_name.into())
+            .or_default()
+            .push(key.normalized());
+    }
+
+    /// Returns true if any key bound to `action_name` was pressed this frame.
+    pub fn action_pressed(&self, input: &InputState, action_name: &str) -> bool {
+        self.bindings
+            .get(action_name)
+            .map(|keys| keys.iter().any(|k| input.key_pressed(*k)))
+            .unwrap_or(false)
+    }
+
+    /// Returns true if any key bound to `action_name` is held (including the first frame).
+    pub fn action_held(&self, input: &InputState, action_name: &str) -> bool {
+        self.bindings
+            .get(action_name)
+            .map(|keys| keys.iter().any(|k| input.key_down(*k)))
+            .unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +351,54 @@ mod tests {
 
         assert!(input.action_down("MoveRight"));
         assert_eq!(input.action_value("MoveX"), 1.0);
+    }
+
+    // ActionMap tests
+    #[test]
+    fn action_map_default_bindings_exist() {
+        let map = ActionMap::new();
+        let mut input = InputState::default();
+        input.bind_default_player_actions();
+        input.apply_event(InputEvent::KeyDown(KeyCode::Character('w')));
+        assert!(map.action_pressed(&input, "MoveForward"));
+        assert!(map.action_held(&input, "MoveForward"));
+        input.end_frame();
+        assert!(!map.action_pressed(&input, "MoveForward"));
+        assert!(map.action_held(&input, "MoveForward"));
+    }
+
+    #[test]
+    fn action_map_jump_with_space() {
+        let map = ActionMap::new();
+        let mut input = InputState::default();
+        input.bind_default_player_actions();
+        input.apply_event(InputEvent::KeyDown(KeyCode::Space));
+        assert!(map.action_pressed(&input, "Jump"));
+        assert!(map.action_held(&input, "Jump"));
+        input.end_frame();
+        assert!(!map.action_pressed(&input, "Jump"));
+        assert!(map.action_held(&input, "Jump"));
+    }
+
+    #[test]
+    fn action_map_multi_key_single_action() {
+        let mut map = ActionMap::default();
+        map.bind("Fire", KeyCode::Character('f'));
+        map.bind("Fire", KeyCode::Character('e'));
+        let mut input = InputState::default();
+        input.apply_event(InputEvent::KeyDown(KeyCode::Character('e')));
+        assert!(map.action_pressed(&input, "Fire"));
+        input.apply_event(InputEvent::KeyUp(KeyCode::Character('e')));
+        input.end_frame();
+        input.apply_event(InputEvent::KeyDown(KeyCode::Character('f')));
+        assert!(map.action_pressed(&input, "Fire"));
+    }
+
+    #[test]
+    fn action_map_unknown_action_returns_false() {
+        let map = ActionMap::new();
+        let input = InputState::default();
+        assert!(!map.action_pressed(&input, "DoesNotExist"));
+        assert!(!map.action_held(&input, "DoesNotExist"));
     }
 }

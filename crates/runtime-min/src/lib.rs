@@ -1483,7 +1483,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
                     if let Some(services) = self.services.as_mut() {
                         services
                             .renderer
-                            .resize_surface(size.width.max(1), size.height.max(1));
+                            .resize_surface(size.width, size.height);
                     }
                     let title = format!(
                         "Aster Runtime - {}x{}",

@@ -24,6 +24,8 @@ const CUBE_INDEX_COUNT: u32 = 36;
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
     position: [f32; 3],
+    normal: [f32; 3],
+    uv: [f32; 2],
 }
 
 #[repr(C)]
@@ -76,8 +78,32 @@ impl Default for WgpuOffscreenConfig {
     }
 }
 
+/// Procedural debug mesh shapes for quick visualisation without external assets.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DebugMesh {
+    /// Unit cube centred at origin, edge length 1, hard normals.
+    Cube,
+    /// UV sphere with the given longitudinal/latitudinal segment count.
+    Sphere(u32),
+    /// Quad on the XY plane from (-0.5, -0.5, 0) to (0.5, 0.5, 0).
+    Plane,
+}
+
+/// GPU buffers for a single indexed mesh, ready for drawing.
+#[derive(Debug)]
+pub struct MeshBuffers {
+    /// Vertex buffer uploaded to the GPU.
+    pub vertex_buffer: wgpu::Buffer,
+    /// Index buffer uploaded to the GPU.
+    pub index_buffer: wgpu::Buffer,
+    /// Number of indices to draw.
+    pub index_count: u32,
+}
+
 /// Real wgpu render device with an offscreen default target.
 pub struct WgpuRenderDevice {
+    _instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     image_allocator: HandleAllocator,
@@ -98,6 +124,7 @@ pub struct WgpuRenderDevice {
     surface_config: Option<wgpu::SurfaceConfiguration>,
     surface_depth: Option<wgpu::Texture>,
     surface_depth_view: Option<wgpu::TextureView>,
+    surface_suspended: bool,
     next_gui_texture: u64,
     submitted_worlds: u64,
 }
@@ -105,6 +132,7 @@ pub struct WgpuRenderDevice {
 impl std::fmt::Debug for WgpuRenderDevice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WgpuRenderDevice")
+            .field("adapter", &self.adapter.get_info().name)
             .field("default_target", &self.default_target)
             .field("image_count", &self.images.len())
             .field("buffer_count", &self.buffers.len())
@@ -129,14 +157,26 @@ impl WgpuRenderDevice {
                 compatible_surface: None,
                 force_fallback_adapter: false,
             })
-            .await
-            .map_err(|error| EngineError::other(format!("request wgpu adapter failed: {error}")))?;
+            .await;
+        let adapter = match adapter {
+            Ok(a) => a,
+            Err(_) => instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::None,
+                    compatible_surface: None,
+                    force_fallback_adapter: true,
+                })
+                .await
+                .map_err(|error| EngineError::other(format!("no suitable wgpu adapter found: {error}")))?,
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
             .await
             .map_err(|error| EngineError::other(format!("request wgpu device failed: {error}")))?;
 
         Self::from_device(
+            instance,
+            adapter,
             device,
             queue,
             config.width,
@@ -155,21 +195,39 @@ impl WgpuRenderDevice {
         pollster::block_on(Self::new_surface_async(surface, width, height))
     }
 
-    /// Creates a wgpu device configured to present into a surface asynchronously.
-    pub async fn new_surface_async(
-        surface: wgpu::Surface<'static>,
-        width: u32,
-        height: u32,
-    ) -> EngineResult<Self> {
+    /// Creates a wgpu device from a winit window, creating a surface automatically.
+    pub fn new(window: &winit::window::Window) -> EngineResult<Self> {
+        pollster::block_on(Self::new_async(window))
+    }
+
+    /// Creates a wgpu device from a winit window asynchronously.
+    pub async fn new_async(window: &winit::window::Window) -> EngineResult<Self> {
         let instance = wgpu::Instance::default();
+        let surface = instance
+            .create_surface(window)
+            .map_err(|error| EngineError::other(format!("create wgpu surface failed: {error}")))?;
+        // SAFETY: instance is moved into the returned struct and outlives the surface.
+        let surface: wgpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
+        let width = window.inner_size().width;
+        let height = window.inner_size().height;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
-            .await
-            .map_err(|error| EngineError::other(format!("request wgpu adapter failed: {error}")))?;
+            .await;
+        let adapter = match adapter {
+            Ok(a) => a,
+            Err(_) => instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::None,
+                    compatible_surface: Some(&surface),
+                    force_fallback_adapter: true,
+                })
+                .await
+                .map_err(|error| EngineError::other(format!("no suitable wgpu adapter found: {error}")))?,
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
             .await
@@ -179,7 +237,8 @@ impl WgpuRenderDevice {
             .formats
             .iter()
             .copied()
-            .find(wgpu::TextureFormat::is_srgb)
+            .find(|f| *f == wgpu::TextureFormat::Bgra8UnormSrgb)
+            .or_else(|| caps.formats.iter().copied().find(wgpu::TextureFormat::is_srgb))
             .unwrap_or(caps.formats[0]);
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -195,6 +254,70 @@ impl WgpuRenderDevice {
         let image_format = from_wgpu_format(format).unwrap_or(ImageFormat::Rgba8Srgb);
 
         Self::from_device(
+            instance,
+            adapter,
+            device,
+            queue,
+            width,
+            height,
+            image_format,
+            Some((surface, surface_config)),
+        )
+    }
+
+    /// Creates a wgpu device configured to present into a surface asynchronously.
+    pub async fn new_surface_async(
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+    ) -> EngineResult<Self> {
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await;
+        let adapter = match adapter {
+            Ok(a) => a,
+            Err(_) => instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::None,
+                    compatible_surface: Some(&surface),
+                    force_fallback_adapter: true,
+                })
+                .await
+                .map_err(|error| EngineError::other(format!("no suitable wgpu adapter found: {error}")))?,
+        };
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default())
+            .await
+            .map_err(|error| EngineError::other(format!("request wgpu device failed: {error}")))?;
+        let caps = surface.get_capabilities(&adapter);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| *f == wgpu::TextureFormat::Bgra8UnormSrgb)
+            .or_else(|| caps.formats.iter().copied().find(wgpu::TextureFormat::is_srgb))
+            .unwrap_or(caps.formats[0]);
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: width.max(1),
+            height: height.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
+        let image_format = from_wgpu_format(format).unwrap_or(ImageFormat::Rgba8Srgb);
+
+        Self::from_device(
+            instance,
+            adapter,
             device,
             queue,
             width,
@@ -205,6 +328,8 @@ impl WgpuRenderDevice {
     }
 
     fn from_device(
+        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
         device: wgpu::Device,
         queue: wgpu::Queue,
         width: u32,
@@ -350,6 +475,8 @@ impl WgpuRenderDevice {
             .unwrap_or((None, None));
 
         Ok(Self {
+            _instance: instance,
+            adapter,
             device,
             queue,
             image_allocator: HandleAllocator::default(),
@@ -370,6 +497,7 @@ impl WgpuRenderDevice {
             surface_config,
             surface_depth: None,
             surface_depth_view: None,
+            surface_suspended: false,
             next_gui_texture: 1,
             submitted_worlds: 0,
         })
@@ -381,16 +509,44 @@ impl WgpuRenderDevice {
     }
 
     /// Resizes the configured presentation surface.
+    ///
+    /// When either dimension is zero, rendering is suspended until valid dimensions
+    /// are provided. Old depth resources are dropped before reconfiguration.
     pub fn resize_surface(&mut self, width: u32, height: u32) {
         let (Some(surface), Some(config)) = (self.surface.as_ref(), self.surface_config.as_mut())
         else {
             return;
         };
-        config.width = width.max(1);
-        config.height = height.max(1);
-        surface.configure(&self.device, config);
+        if width == 0 || height == 0 {
+            self.surface_suspended = true;
+            return;
+        }
         self.surface_depth = None;
         self.surface_depth_view = None;
+        config.width = width;
+        config.height = height;
+        surface.configure(&self.device, config);
+        self.surface_suspended = false;
+    }
+
+    /// Creates GPU vertex and index buffers from a procedural debug mesh.
+    pub fn create_mesh_buffers(&self, mesh: &DebugMesh) -> MeshBuffers {
+        let (vertices, indices) = generate_mesh(mesh);
+        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aster debug mesh vertices"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aster debug mesh indices"),
+            contents: bytemuck::cast_slice(&indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        MeshBuffers {
+            vertex_buffer,
+            index_buffer,
+            index_count: indices.len() as u32,
+        }
     }
 
     fn ensure_surface_depth(&mut self) {
@@ -448,6 +604,9 @@ impl RenderDevice for WgpuRenderDevice {
             .write_buffer(&self.scene_uniform, 0, bytemuck::bytes_of(&uniform));
 
         if self.surface.is_some() {
+            if self.surface_suspended {
+                return Ok(());
+            }
             self.ensure_surface_depth();
             let surface = self
                 .surface
@@ -787,7 +946,7 @@ fn encode_forward_pass(
         pass.set_bind_group(0, scene_bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_vertex_buffer(1, instance_buffer.slice(..));
-        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..CUBE_INDEX_COUNT, 0, 0..instance_count);
     }
 }
@@ -899,37 +1058,117 @@ fn color_for_material(material: &str) -> [f32; 4] {
     }
 }
 
+// Cube vertices with hard normals (24 vertices, 4 per face × 6 faces).
 const CUBE_VERTICES: &[Vertex] = &[
-    Vertex {
-        position: [-1.0, -1.0, -1.0],
-    },
-    Vertex {
-        position: [1.0, -1.0, -1.0],
-    },
-    Vertex {
-        position: [1.0, 1.0, -1.0],
-    },
-    Vertex {
-        position: [-1.0, 1.0, -1.0],
-    },
-    Vertex {
-        position: [-1.0, -1.0, 1.0],
-    },
-    Vertex {
-        position: [1.0, -1.0, 1.0],
-    },
-    Vertex {
-        position: [1.0, 1.0, 1.0],
-    },
-    Vertex {
-        position: [-1.0, 1.0, 1.0],
-    },
+    // Front face (+Z)
+    Vertex { position: [-0.5, -0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [0.0, 0.0] },
+    Vertex { position: [ 0.5, -0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [1.0, 0.0] },
+    Vertex { position: [ 0.5,  0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [1.0, 1.0] },
+    Vertex { position: [-0.5,  0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [0.0, 1.0] },
+    // Back face (-Z)
+    Vertex { position: [ 0.5, -0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [0.0, 0.0] },
+    Vertex { position: [-0.5, -0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [1.0, 0.0] },
+    Vertex { position: [-0.5,  0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [1.0, 1.0] },
+    Vertex { position: [ 0.5,  0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [0.0, 1.0] },
+    // Right face (+X)
+    Vertex { position: [ 0.5, -0.5,  0.5], normal: [ 1.0,  0.0,  0.0], uv: [0.0, 0.0] },
+    Vertex { position: [ 0.5, -0.5, -0.5], normal: [ 1.0,  0.0,  0.0], uv: [1.0, 0.0] },
+    Vertex { position: [ 0.5,  0.5, -0.5], normal: [ 1.0,  0.0,  0.0], uv: [1.0, 1.0] },
+    Vertex { position: [ 0.5,  0.5,  0.5], normal: [ 1.0,  0.0,  0.0], uv: [0.0, 1.0] },
+    // Left face (-X)
+    Vertex { position: [-0.5, -0.5, -0.5], normal: [-1.0,  0.0,  0.0], uv: [0.0, 0.0] },
+    Vertex { position: [-0.5, -0.5,  0.5], normal: [-1.0,  0.0,  0.0], uv: [1.0, 0.0] },
+    Vertex { position: [-0.5,  0.5,  0.5], normal: [-1.0,  0.0,  0.0], uv: [1.0, 1.0] },
+    Vertex { position: [-0.5,  0.5, -0.5], normal: [-1.0,  0.0,  0.0], uv: [0.0, 1.0] },
+    // Top face (+Y)
+    Vertex { position: [-0.5,  0.5,  0.5], normal: [ 0.0,  1.0,  0.0], uv: [0.0, 0.0] },
+    Vertex { position: [ 0.5,  0.5,  0.5], normal: [ 0.0,  1.0,  0.0], uv: [1.0, 0.0] },
+    Vertex { position: [ 0.5,  0.5, -0.5], normal: [ 0.0,  1.0,  0.0], uv: [1.0, 1.0] },
+    Vertex { position: [-0.5,  0.5, -0.5], normal: [ 0.0,  1.0,  0.0], uv: [0.0, 1.0] },
+    // Bottom face (-Y)
+    Vertex { position: [-0.5, -0.5, -0.5], normal: [ 0.0, -1.0,  0.0], uv: [0.0, 0.0] },
+    Vertex { position: [ 0.5, -0.5, -0.5], normal: [ 0.0, -1.0,  0.0], uv: [1.0, 0.0] },
+    Vertex { position: [ 0.5, -0.5,  0.5], normal: [ 0.0, -1.0,  0.0], uv: [1.0, 1.0] },
+    Vertex { position: [-0.5, -0.5,  0.5], normal: [ 0.0, -1.0,  0.0], uv: [0.0, 1.0] },
 ];
 
-const CUBE_INDICES: &[u16] = &[
-    0, 1, 2, 2, 3, 0, 4, 6, 5, 6, 4, 7, 0, 4, 5, 5, 1, 0, 3, 2, 6, 6, 7, 3, 1, 5, 6, 6, 2, 1, 0, 3,
-    7, 7, 4, 0,
+const CUBE_INDICES: &[u32] = &[
+     0,  1,  2,  2,  3,  0, // front
+     4,  5,  6,  6,  7,  4, // back
+     8,  9, 10, 10, 11,  8, // right
+    12, 13, 14, 14, 15, 12, // left
+    16, 17, 18, 18, 19, 16, // top
+    20, 21, 22, 22, 23, 20, // bottom
 ];
+
+fn generate_mesh(mesh: &DebugMesh) -> (Vec<Vertex>, Vec<u32>) {
+    match mesh {
+        DebugMesh::Cube => generate_cube(),
+        DebugMesh::Sphere(segments) => generate_sphere(*segments),
+        DebugMesh::Plane => generate_plane(),
+    }
+}
+
+fn generate_cube() -> (Vec<Vertex>, Vec<u32>) {
+    (CUBE_VERTICES.to_vec(), CUBE_INDICES.to_vec())
+}
+
+fn generate_sphere(segments: u32) -> (Vec<Vertex>, Vec<u32>) {
+    let segs = segments.max(3);
+    let lat = segs;
+    let lon = segs * 2;
+
+    let mut vertices = Vec::with_capacity(((lat + 1) * (lon + 1)) as usize);
+    let mut indices = Vec::with_capacity((lat * lon * 6) as usize);
+
+    for i in 0..=lat {
+        let v = i as f32 / lat as f32;
+        let theta = v * std::f32::consts::PI;
+        let y = theta.cos();
+        let r = theta.sin();
+
+        for j in 0..=lon {
+            let u = j as f32 / lon as f32;
+            let phi = u * 2.0 * std::f32::consts::PI;
+            let x = r * phi.cos();
+            let z = r * phi.sin();
+
+            vertices.push(Vertex {
+                position: [x * 0.5, y * 0.5, z * 0.5],
+                normal: [x, y, z],
+                uv: [u, v],
+            });
+        }
+    }
+
+    for i in 0..lat {
+        for j in 0..lon {
+            let a = i * (lon + 1) + j;
+            let b = a + lon + 1;
+            let c = a + 1;
+            let d = b + 1;
+            indices.push(a);
+            indices.push(b);
+            indices.push(c);
+            indices.push(c);
+            indices.push(b);
+            indices.push(d);
+        }
+    }
+
+    (vertices, indices)
+}
+
+fn generate_plane() -> (Vec<Vertex>, Vec<u32>) {
+    let vertices = vec![
+        Vertex { position: [-0.5, -0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [0.0, 0.0] },
+        Vertex { position: [ 0.5, -0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [1.0, 0.0] },
+        Vertex { position: [ 0.5,  0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [1.0, 1.0] },
+        Vertex { position: [-0.5,  0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [0.0, 1.0] },
+    ];
+    let indices = vec![0, 1, 2, 2, 3, 0];
+    (vertices, indices)
+}
 
 const FORWARD_SHADER: &str = r#"
 struct SceneUniform {
@@ -967,3 +1206,66 @@ fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(input.color.rgb * scene.light_tint.rgb, input.color.a);
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cube_has_24_vertices_and_36_indices() {
+        let (verts, indices) = generate_cube();
+        assert_eq!(verts.len(), 24, "cube must have 24 vertices with hard normals");
+        assert_eq!(indices.len(), 36, "cube must have 36 indices (6 faces × 2 triangles × 3)");
+    }
+
+    #[test]
+    fn cube_vertices_have_correct_data() {
+        let (verts, _indices) = generate_cube();
+        // Front face vertices should have normal +Z
+        for v in &verts[0..4] {
+            assert!((v.normal[2] - 1.0).abs() < 0.001, "front face normal should be +Z");
+        }
+        // Back face vertices should have normal -Z
+        for v in &verts[4..8] {
+            assert!((v.normal[2] + 1.0).abs() < 0.001, "back face normal should be -Z");
+        }
+    }
+
+    #[test]
+    fn sphere_generates_expected_counts() {
+        let (verts, indices) = generate_sphere(8);
+        let expected_verts = (8 + 1) * (16 + 1); // lat+1 × lon+1
+        let expected_indices = 8 * 16 * 6; // lat × lon × 6
+        assert_eq!(verts.len(), expected_verts as usize);
+        assert_eq!(indices.len(), expected_indices as usize);
+    }
+
+    #[test]
+    fn sphere_min_segments_clamped() {
+        let (verts, _) = generate_sphere(1);
+        // Min segments is 3, so (3+1)*(6+1) = 28
+        assert_eq!(verts.len(), 28);
+    }
+
+    #[test]
+    fn plane_has_4_vertices_and_6_indices() {
+        let (verts, indices) = generate_plane();
+        assert_eq!(verts.len(), 4);
+        assert_eq!(indices.len(), 6);
+        // All normals point up
+        for v in &verts {
+            assert!((v.normal[2] - 1.0).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn debug_mesh_enum_variants() {
+        // Verify the enum can be constructed and matched
+        let cube = DebugMesh::Cube;
+        let sphere = DebugMesh::Sphere(8);
+        let plane = DebugMesh::Plane;
+        assert_eq!(cube, DebugMesh::Cube);
+        assert_eq!(sphere, DebugMesh::Sphere(8));
+        assert_eq!(plane, DebugMesh::Plane);
+    }
+}

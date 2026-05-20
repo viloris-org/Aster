@@ -2,8 +2,14 @@
 # Branch: ralph/aster-p0-fullstack
 # Started: 2026-05-21
 # Total stories: 58
-# Completed: 2
+# Completed: 8
 # Last updated: 2026-05-21
 
 US-001: DONE — Added TimeState struct to engine-core with delta_seconds, fixed_delta_seconds, total_time, frame_index, time_scale fields; update(dt) method; and 4 unit tests
 US-002: DONE — InputState already existed in engine-platform with HashSet-based key tracking, pressed/held/released semantics, mouse/cursor/scroll tracking, end_frame() reset, and query methods; 2 tests pass
+US-003: DONE — Added ActionMap struct with HashMap<String, Vec<KeyCode>> bindings, bind() method, action_pressed()/action_held() queries, default WASD/arrows/Space bindings, and 4 unit tests
+US-004: DONE — Added ProjectContext struct with manifest, scene, asset_db, project_root fields; open() loads aster.project.toml, parses default scene JSON, and scans asset root; test validates example project opens successfully
+US-005: DONE — Added instance and adapter fields to WgpuRenderDevice; added new(window) constructor; HighPerformance adapter with fallback; Bgra8UnormSrgb swapchain format preference
+US-006: DONE — Surface and swapchain already existed on WgpuRenderDevice (surface, surface_config fields, create_surface from winit Window, Fifo present mode, Bgra8UnormSrgb format, resize_surface/ensure_surface_depth methods). Added integration test verifying surface creation from real winit window.
+US-007: DONE — Added surface_suspended flag to WgpuRenderDevice; resize_surface now suspends rendering on zero-area (w=0 or h=0) and resumes when valid dimensions arrive; surface rendering path checks suspended flag; depth resources dropped before surface reconfiguration.
+US-008: DONE — Extended Vertex with normal and uv; added DebugMesh enum (Cube, Sphere(u32), Plane); added MeshBuffers struct; added generate_mesh/generate_sphere/generate_plane helpers; added create_mesh_buffers() to WgpuRenderDevice; updated cube to 24 hard-normal vertices + 36 u32 indices; 6 unit tests pass

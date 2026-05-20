@@ -527,44 +527,9 @@ impl EditorShell {
     /// Opens a project folder, loads its default scene, and scans its asset root.
     pub fn open_project(&mut self, project_root: impl Into<PathBuf>) -> EngineResult<()> {
         let project_root = project_root.into();
-        let manifest_path = project_root.join("aster.project.toml");
-        let manifest_text =
-            fs::read_to_string(&manifest_path).map_err(|source| EngineError::Filesystem {
-                path: manifest_path.clone(),
-                source,
-            })?;
-        let manifest = toml::from_str::<ProjectManifest>(&manifest_text).map_err(|error| {
-            EngineError::config(format!("project manifest parse failed: {error}"))
+        let project_ctx = ProjectContext::open(&project_root).map_err(|error| {
+            EngineError::config(format!("failed to open project {}: {error}", project_root.display()))
         })?;
-        if let Some(diagnostic) = manifest.diagnostics().into_iter().next() {
-            return Err(EngineError::config(format!(
-                "{}: {}",
-                diagnostic.path, diagnostic.message
-            )));
-        }
-        let scene_path = project_root.join(&manifest.default_scene);
-        let scene_text =
-            fs::read_to_string(&scene_path).map_err(|source| EngineError::Filesystem {
-                path: scene_path.clone(),
-                source,
-            })?;
-        let scene = Scene::from_json(&scene_text)?;
-        let mut database = AssetDatabase::new(
-            project_root.join(&manifest.asset_root),
-            project_root.join("builtin"),
-        );
-        let scan = scan_project_assets(project_root.join(&manifest.asset_root), &mut database)?;
-        self.project = Some(ProjectContext {
-            root: project_root.clone(),
-            manifest,
-            scene,
-            database,
-            registry: AssetRegistry::default(),
-            assets: scan.metas,
-            asset_imports: Vec::new(),
-            scene_dirty: false,
-            scene_path,
-        });
         self.selection.clear();
         self.console.push(ConsoleEntry {
             timestamp: "now".to_string(),
@@ -576,6 +541,7 @@ impl EditorShell {
             },
             message: format!("opened project {}", project_root.display()),
         });
+        self.project = Some(project_ctx);
         Ok(())
     }
 
@@ -731,6 +697,49 @@ pub struct ProjectContext {
 }
 
 impl ProjectContext {
+    /// Opens a project from `project_root` by loading its manifest, default scene, and asset root.
+    pub fn open(project_root: impl Into<PathBuf>) -> EngineResult<Self> {
+        let project_root = project_root.into();
+        let manifest_path = project_root.join("aster.project.toml");
+        let manifest_text =
+            fs::read_to_string(&manifest_path).map_err(|source| EngineError::Filesystem {
+                path: manifest_path.clone(),
+                source,
+            })?;
+        let manifest = toml::from_str::<ProjectManifest>(&manifest_text).map_err(|error| {
+            EngineError::config(format!("project manifest parse failed: {error}"))
+        })?;
+        if let Some(diagnostic) = manifest.diagnostics().into_iter().next() {
+            return Err(EngineError::config(format!(
+                "{}: {}",
+                diagnostic.path, diagnostic.message
+            )));
+        }
+        let scene_path = project_root.join(&manifest.default_scene);
+        let scene_text =
+            fs::read_to_string(&scene_path).map_err(|source| EngineError::Filesystem {
+                path: scene_path.clone(),
+                source,
+            })?;
+        let scene = Scene::from_json(&scene_text)?;
+        let mut database = AssetDatabase::new(
+            project_root.join(&manifest.asset_root),
+            project_root.join("builtin"),
+        );
+        let scan = scan_project_assets(project_root.join(&manifest.asset_root), &mut database)?;
+        Ok(Self {
+            root: project_root,
+            manifest,
+            scene,
+            database,
+            registry: AssetRegistry::default(),
+            assets: scan.metas,
+            asset_imports: Vec::new(),
+            scene_dirty: false,
+            scene_path,
+        })
+    }
+
     /// Returns a display name for the project.
     pub fn name(&self) -> &str {
         &self.manifest.name
