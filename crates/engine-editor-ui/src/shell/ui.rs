@@ -9,7 +9,8 @@ use egui::{Frame, Margin};
 use super::operations::command::{apply_visuals, handle_command_shortcuts};
 use super::panels::{
     draw_bottom_dock, draw_center_dock, draw_close_project_dialog, draw_command_palette,
-    draw_hierarchy, draw_inspector, draw_menu_bar, draw_status_bar, draw_toolbar,
+    draw_hierarchy, draw_inspector, draw_menu_bar, draw_script_editor, draw_status_bar,
+    draw_toolbar,
 };
 use super::types::{InfernuxPalette, ShellUiState};
 use super::widgets::layout::panel_frame;
@@ -104,6 +105,10 @@ pub fn draw_shell(
 
     if ui_state.show_close_dialog {
         draw_close_project_dialog(ctx, shell, ui_state, &pal, &tr);
+    }
+
+    if ui_state.script_editor.is_some() {
+        draw_script_editor(ctx, shell, ui_state, &pal, &tr);
     }
 
     close

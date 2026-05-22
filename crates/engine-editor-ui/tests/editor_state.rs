@@ -1,5 +1,13 @@
+use engine_assets::ResourceKind;
 use engine_editor::EditorPreferences;
-use engine_editor_ui::EditorShell;
+use engine_editor_ui::{
+    shell::{
+        operations::{asset_ops::create_script_asset, command::execute_shell_command},
+        ScriptTemplateBackend,
+    },
+    EditorShell, ShellUiState,
+};
+use engine_i18n::Translations;
 use std::fs;
 
 fn workspace_root() -> std::path::PathBuf {
@@ -171,4 +179,122 @@ fn play_mode_does_not_modify_edit_scene() {
         original_json, after_play_json,
         "edit scene should be unchanged after play mode"
     );
+}
+
+#[test]
+fn gameobject_command_creates_dirty_undoable_scene_object() {
+    let project_path = workspace_root().join("examples/project");
+    let mut shell = EditorShell::with_core_services(EditorPreferences::default());
+    let mut ui_state = ShellUiState::all_open();
+    let tr = Translations::load(Default::default());
+
+    shell.open_project(&project_path).unwrap();
+    let before_count = shell.project().unwrap().scene.objects().len();
+
+    execute_shell_command(&mut shell, &mut ui_state, "gameobject.create_empty", &tr);
+
+    let project = shell.project().unwrap();
+    assert_eq!(project.scene.objects().len(), before_count + 1);
+    assert!(project.scene_dirty);
+    assert!(shell.selected_entity_id().is_some());
+    assert!(shell.undo_stack().can_undo());
+}
+
+#[test]
+fn component_command_updates_selected_object() {
+    let project_path = workspace_root().join("examples/project");
+    let mut shell = EditorShell::with_core_services(EditorPreferences::default());
+    let mut ui_state = ShellUiState::all_open();
+    let tr = Translations::load(Default::default());
+
+    shell.open_project(&project_path).unwrap();
+    let player_id = shell
+        .project()
+        .unwrap()
+        .scene
+        .find_by_name("Player")
+        .and_then(|entity| {
+            shell
+                .project()
+                .unwrap()
+                .scene
+                .object(entity)
+                .map(|object| object.id)
+        })
+        .unwrap();
+    shell.select_entity_id(player_id);
+
+    execute_shell_command(&mut shell, &mut ui_state, "component.add_rigidbody", &tr);
+
+    let project = shell.project().unwrap();
+    let entity = project.scene.find_by_id(player_id).unwrap();
+    let has_rigidbody = project
+        .scene
+        .components(entity)
+        .unwrap()
+        .iter()
+        .any(|component| matches!(component, engine_ecs::ComponentData::Rigidbody(_)));
+    assert!(has_rigidbody);
+    assert!(project.scene_dirty);
+    assert!(shell.undo_stack().can_undo());
+}
+
+#[test]
+fn project_panel_creates_python_script_asset_and_opens_editor() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let temp_root = std::env::temp_dir().join(format!("aster-script-create-test-{unique}"));
+
+    fs::create_dir_all(temp_root.join("assets")).unwrap();
+    fs::create_dir_all(temp_root.join("scenes")).unwrap();
+    fs::write(
+        temp_root.join("aster.project.toml"),
+        r#"name = "Script Project"
+asset_root = "assets"
+default_scene = "scenes/test.aster_scene.json"
+
+[format]
+version = 1
+
+[evolution]
+policy = "minor versions may add optional fields; major schema bumps require migration"
+forward_compatible_read = true
+migration_framework = "versioned Rust migrators keyed by explicit version"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp_root.join("scenes/test.aster_scene.json"),
+        r#"{"version":1,"name":"Test","objects":[]}"#,
+    )
+    .unwrap();
+
+    let mut shell = EditorShell::with_core_services(EditorPreferences::default());
+    let mut ui_state = ShellUiState::all_open();
+    let tr = Translations::load(Default::default());
+    shell.open_project(&temp_root).unwrap();
+
+    ui_state.project_new_script_name = "move_player".to_owned();
+    ui_state.project_new_script_backend = ScriptTemplateBackend::Python;
+    create_script_asset(&mut shell, &mut ui_state, &tr);
+
+    let script_path = temp_root.join("assets/scripts/move_player.py");
+    assert!(script_path.exists());
+    let source = fs::read_to_string(&script_path).unwrap();
+    assert!(source.contains("def update(ctx):"));
+
+    let project = shell.project().unwrap();
+    let meta = project
+        .database
+        .entry_for_path(std::path::Path::new("scripts/move_player.py"))
+        .unwrap();
+    assert_eq!(meta.kind, ResourceKind::Script);
+    assert_eq!(
+        ui_state.script_editor.as_ref().unwrap().relative_path,
+        std::path::PathBuf::from("scripts/move_player.py")
+    );
+
+    let _ = fs::remove_dir_all(temp_root);
 }

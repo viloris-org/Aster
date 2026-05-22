@@ -6,5 +6,8 @@ pub mod types;
 pub mod ui;
 pub mod widgets;
 
-pub use types::{EditorAction, PlayModeRequest, ShellUiState, ViewportTexture};
+pub use types::{
+    EditorAction, PlayModeRequest, ScriptEditorState, ScriptTemplateBackend, ShellUiState,
+    ViewportTexture,
+};
 pub use ui::{build_editor_render_world, draw_shell};

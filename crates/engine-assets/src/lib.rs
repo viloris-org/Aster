@@ -1969,6 +1969,7 @@ pub fn infer_importer(path: &Path) -> Option<(ResourceKind, &'static str)> {
         "gltf" | "glb" => Some((ResourceKind::Model, "gltf")),
         "wgsl" | "glsl" => Some((ResourceKind::Shader, "shader-source")),
         "wav" | "ogg" => Some((ResourceKind::Audio, "audio")),
+        "py" => Some((ResourceKind::Script, "script-python")),
         "rhai" => Some((ResourceKind::Script, "script-rhai")),
         "json" => {
             if path.to_string_lossy().contains("material") {
@@ -3063,6 +3064,11 @@ mod tests {
         std::fs::write(root.join("shaders/pbr.wgsl"), "fn main() {}").unwrap();
         // Script: .rhai file
         std::fs::write(root.join("scripts/player.rhai"), "fn on_update(dt) {}").unwrap();
+        std::fs::write(
+            root.join("scripts/player.py"),
+            "def update(ctx):\n    pass\n",
+        )
+        .unwrap();
         // Scene: JSON file with version + objects
         let scene_json = r#"{"version":1,"name":"test","objects":[]}"#;
         std::fs::write(root.join("scenes/level.scene.json"), scene_json).unwrap();
@@ -3104,6 +3110,14 @@ mod tests {
                 .kind,
             ResourceKind::Script,
             "Rhai files should map to Script"
+        );
+        assert_eq!(
+            database
+                .entry_for_path(Path::new("scripts/player.py"))
+                .unwrap()
+                .kind,
+            ResourceKind::Script,
+            "Python files should map to Script"
         );
         assert_eq!(
             database

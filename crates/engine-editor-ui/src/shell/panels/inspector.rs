@@ -59,8 +59,7 @@ pub fn draw_inspector(
                     dirty |= ui
                         .add_sized(
                             Vec2::new(ui.available_width(), 22.0),
-                            egui::TextEdit::singleline(&mut object.name)
-                                .text_color(pal.text),
+                            egui::TextEdit::singleline(&mut object.name).text_color(pal.text),
                         )
                         .changed();
                 });

@@ -145,6 +145,26 @@ pub fn rename_object(
     }
 }
 
+/// Create an empty root object.
+pub fn create_empty_object(shell: &mut EditorShell) {
+    let before = scene_snapshot(shell);
+    let result = shell.project_mut().and_then(|project| {
+        let name = format!("GameObject {}", project.scene.objects().len() + 1);
+        let entity = project.scene.create_object(name).ok()?;
+        project.scene_dirty = true;
+        project.scene.object(entity).map(|object| object.id)
+    });
+    if let Some(id) = result {
+        shell.select_entity_id(id);
+        push_scene_undo(
+            shell,
+            "Create Empty Object",
+            format!("{:032x}", id.as_u128()),
+            before,
+        );
+    }
+}
+
 /// Create an empty child object under a parent.
 pub fn create_empty_child(
     shell: &mut EditorShell,
@@ -171,6 +191,30 @@ pub fn create_empty_child(
             );
         }
         None => {}
+    }
+}
+
+/// Create a root object with a specific component.
+pub fn create_root_object_with_component(
+    shell: &mut EditorShell,
+    label: &str,
+    component: ComponentData,
+) {
+    let before = scene_snapshot(shell);
+    let result = shell.project_mut().and_then(|project| {
+        let entity = project.scene.create_object(label).ok()?;
+        project.scene.upsert_component(entity, component).ok()?;
+        project.scene_dirty = true;
+        project.scene.object(entity).map(|object| object.id)
+    });
+    if let Some(id) = result {
+        shell.select_entity_id(id);
+        push_scene_undo(
+            shell,
+            &format!("Create {label}"),
+            format!("{:032x}", id.as_u128()),
+            before,
+        );
     }
 }
 
@@ -201,6 +245,38 @@ pub fn create_object_with_component(
             );
         }
         None => {}
+    }
+}
+
+/// Add or replace a component on the selected object.
+pub fn add_component_to_selected(shell: &mut EditorShell, label: &str, component: ComponentData) {
+    let Some(id) = shell.selected_entity_id() else {
+        push_error(
+            shell,
+            "Select a GameObject before adding a component".to_owned(),
+        );
+        return;
+    };
+    let before = scene_snapshot(shell);
+    let result = shell.project_mut().and_then(|project| {
+        let entity = project.scene.find_by_id(id)?;
+        match project.scene.upsert_component(entity, component) {
+            Ok(()) => {
+                project.scene_dirty = true;
+                Some(Ok(()))
+            }
+            Err(error) => Some(Err(error)),
+        }
+    });
+    match result {
+        Some(Ok(())) => push_scene_undo(
+            shell,
+            &format!("Add {label}"),
+            format!("{:032x}", id.as_u128()),
+            before,
+        ),
+        Some(Err(error)) => push_error(shell, error.to_string()),
+        None => push_error(shell, "Selected GameObject no longer exists".to_owned()),
     }
 }
 

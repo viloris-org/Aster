@@ -129,6 +129,7 @@ property_spatial_blend = "Spatial Blend"
 
 # Project panel
 project_create = "Create"
+project_create_script = "New Script"
 project_import = "Import"
 project_rescan = "Rescan"
 project_search = "Search Assets"
@@ -136,7 +137,9 @@ project_no_project = "No project open"
 project_empty = "No assets in project"
 project_no_match = "No assets match the current filter"
 project_file_path_hint = "file path"
+project_script_name_hint = "script name"
 project_import_hint = "enter a file path to import"
+project_script_created = "created {}"
 project_status_unloaded = "Pending"
 project_status_loading = "Importing"
 project_status_ready = "Ready"
@@ -159,6 +162,15 @@ project_asset_renamed = "Asset renamed"
 project_rename_hint = "Enter to confirm, Esc to cancel"
 project_asset_reimported = "Asset reimported"
 project_drag_to_scene = "Drag asset to scene"
+
+# Script editor
+script_editor_title = "Script Editor"
+script_editor_save = "Save"
+script_editor_reload = "Reload"
+script_editor_dirty = "Unsaved"
+script_editor_saved = "Script saved"
+script_editor_reloaded = "Script reloaded"
+script_editor_created = "Script created"
 
 # Console
 console_clear = "Clear"

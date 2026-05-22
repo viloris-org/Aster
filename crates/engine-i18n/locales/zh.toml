@@ -129,6 +129,7 @@ property_spatial_blend = "空间混合"
 
 # Project panel
 project_create = "创建"
+project_create_script = "新建脚本"
 project_import = "导入"
 project_rescan = "重新扫描"
 project_search = "搜索资源"
@@ -136,7 +137,9 @@ project_no_project = "未打开项目"
 project_empty = "项目中没有资源"
 project_no_match = "没有匹配当前筛选条件的资源"
 project_file_path_hint = "文件路径"
+project_script_name_hint = "脚本名"
 project_import_hint = "输入文件路径以导入"
+project_script_created = "已创建 {}"
 project_status_unloaded = "待处理"
 project_status_loading = "导入中"
 project_status_ready = "就绪"
@@ -159,6 +162,15 @@ project_asset_renamed = "资源已重命名"
 project_rename_hint = "回车确认，Esc 取消"
 project_asset_reimported = "资源已重新导入"
 project_drag_to_scene = "拖拽资源到场景"
+
+# Script editor
+script_editor_title = "脚本编辑器"
+script_editor_save = "保存"
+script_editor_reload = "重新加载"
+script_editor_dirty = "未保存"
+script_editor_saved = "脚本已保存"
+script_editor_reloaded = "脚本已重新加载"
+script_editor_created = "脚本已创建"
 
 # Console
 console_clear = "清除"

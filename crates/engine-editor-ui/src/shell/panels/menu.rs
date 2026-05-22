@@ -48,8 +48,26 @@ pub fn draw_menu_bar(
             pal,
             tr,
         );
-        ghost_button(ui, tr.tr("menu_gameobject"), 86.0, pal);
-        ghost_button(ui, tr.tr("menu_component"), 86.0, pal);
+        command_menu(
+            ui,
+            shell,
+            ui_state,
+            "GameObject",
+            tr.tr("menu_gameobject"),
+            86.0,
+            pal,
+            tr,
+        );
+        command_menu(
+            ui,
+            shell,
+            ui_state,
+            "Component",
+            tr.tr("menu_component"),
+            86.0,
+            pal,
+            tr,
+        );
         command_menu(
             ui,
             shell,
@@ -60,7 +78,16 @@ pub fn draw_menu_bar(
             pal,
             tr,
         );
-        ghost_button(ui, tr.tr("menu_help"), 54.0, pal);
+        command_menu(
+            ui,
+            shell,
+            ui_state,
+            "Help",
+            tr.tr("menu_help"),
+            54.0,
+            pal,
+            tr,
+        );
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let title = shell

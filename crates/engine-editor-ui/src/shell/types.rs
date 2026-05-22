@@ -100,7 +100,7 @@ impl InfernuxPalette {
             border: Color32::from_rgb(60, 60, 60),
             border_highlight: Color32::from_rgb(80, 120, 160),
             separator: Color32::from_rgb(55, 55, 55),
-            row_alt: Color32::from_rgba_premultiplied(255, 255, 255, 8),
+            row_alt: Color32::from_rgba_premultiplied(8, 8, 8, 8),
             selection: Color32::from_rgb(50, 100, 150),
             selection_hover: Color32::from_rgb(60, 110, 160),
             accent: Color32::from_rgb(220, 80, 80),
@@ -157,6 +157,10 @@ pub struct ShellUiState {
     pub console_collapse: bool,
     /// Path typed by the user for Project panel import.
     pub project_import_path: String,
+    /// Script file name typed by the user for Project panel script creation.
+    pub project_new_script_name: String,
+    /// Script backend selected for newly-created script assets.
+    pub project_new_script_backend: ScriptTemplateBackend,
     /// Last Project panel import or rescan status.
     pub project_import_status: Option<String>,
     /// Scene object IDs selected in Hierarchy.
@@ -221,6 +225,8 @@ pub struct ShellUiState {
     pub asset_rename: Option<(PathBuf, String)>,
     /// Asset path awaiting delete confirmation (two-click delete).
     pub asset_delete_confirm: Option<PathBuf>,
+    /// Current in-editor script editing session.
+    pub script_editor: Option<ScriptEditorState>,
 }
 
 impl ShellUiState {
@@ -240,6 +246,8 @@ impl ShellUiState {
             console_filter: String::new(),
             console_collapse: false,
             project_import_path: String::new(),
+            project_new_script_name: "player_controller".to_owned(),
+            project_new_script_backend: ScriptTemplateBackend::Python,
             project_import_status: None,
             hierarchy_selection: Vec::new(),
             hierarchy_dragging: None,
@@ -272,8 +280,50 @@ impl ShellUiState {
             expanded_folders: std::collections::BTreeSet::new(),
             asset_rename: None,
             asset_delete_confirm: None,
+            script_editor: None,
         }
     }
+}
+
+/// Script template backend used when creating new script assets.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ScriptTemplateBackend {
+    /// Python script using the runtime-min subprocess context API.
+    #[default]
+    Python,
+    /// Rhai script using the engine-script-rhai lifecycle API.
+    Rhai,
+}
+
+impl ScriptTemplateBackend {
+    /// Returns the file extension for this backend.
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Python => "py",
+            Self::Rhai => "rhai",
+        }
+    }
+
+    /// Returns the Script component backend identifier.
+    pub const fn component_backend(self) -> &'static str {
+        match self {
+            Self::Python => "python",
+            Self::Rhai => "rhai",
+        }
+    }
+}
+
+/// Transient state for the in-editor script source editor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScriptEditorState {
+    /// Project-relative asset path under the asset root.
+    pub relative_path: PathBuf,
+    /// Editable script source text.
+    pub source: String,
+    /// Whether the script source differs from the last loaded or saved version.
+    pub dirty: bool,
+    /// Last save/load status for the editor window.
+    pub status: Option<String>,
 }
 
 /// Play Mode command requested by editor UI and executed by the native host.

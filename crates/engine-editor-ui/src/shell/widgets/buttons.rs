@@ -14,7 +14,10 @@ pub fn tool_button(
     active: bool,
     pal: &InfernuxPalette,
 ) -> egui::Response {
-    let icon_text = RichText::new(icon).size(16.0).color(if active { pal.text } else { pal.text_dim });
+    let icon_text =
+        RichText::new(icon)
+            .size(16.0)
+            .color(if active { pal.text } else { pal.text_dim });
 
     let response = ui.add(
         egui::Button::new(icon_text)
@@ -31,7 +34,12 @@ pub fn tool_button(
 }
 
 /// Renders a dropdown pill button.
-pub fn dropdown_pill(ui: &mut egui::Ui, label: &str, width: f32, pal: &InfernuxPalette) -> egui::Response {
+pub fn dropdown_pill(
+    ui: &mut egui::Ui,
+    label: &str,
+    width: f32,
+    pal: &InfernuxPalette,
+) -> egui::Response {
     let text = format!("{} {}", label, ui::DROPDOWN);
     ui.add(
         egui::Button::new(RichText::new(text).size(12.0).color(pal.text))
@@ -41,7 +49,12 @@ pub fn dropdown_pill(ui: &mut egui::Ui, label: &str, width: f32, pal: &InfernuxP
 }
 
 /// Renders a ghost button with transparent background.
-pub fn ghost_button(ui: &mut egui::Ui, label: &str, width: f32, pal: &InfernuxPalette) -> egui::Response {
+pub fn ghost_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    width: f32,
+    pal: &InfernuxPalette,
+) -> egui::Response {
     ui.add(
         egui::Button::new(RichText::new(label).size(12.0).color(pal.text))
             .fill(Color32::TRANSPARENT)

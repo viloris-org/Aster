@@ -6,6 +6,13 @@ use engine_editor::{ConsoleEntry, ConsoleLevel, ConsoleSource};
 use engine_i18n::Translations;
 
 use super::super::types::{EditorAction, InfernuxPalette, PlayModeRequest, ShellUiState};
+use super::scene_ops::{
+    add_component_to_selected, create_empty_object, create_root_object_with_component,
+};
+use engine_ecs::{
+    AudioSourceComponentData, CameraComponentData, ColliderComponentData, ComponentData,
+    LightComponentData, MeshRendererComponentData, RigidbodyComponentData, ScriptComponentProxy,
+};
 
 /// Check if a command is currently enabled based on availability rules.
 pub fn command_enabled(
@@ -112,11 +119,68 @@ pub fn execute_shell_command(
             Some(Err(error)) => push_error(shell, error.to_string()),
             None => {}
         },
+        "gameobject.create_empty" => create_empty_object(shell),
+        "gameobject.create_camera" => create_root_object_with_component(
+            shell,
+            "Camera",
+            ComponentData::Camera(CameraComponentData::default()),
+        ),
+        "gameobject.create_light" => create_root_object_with_component(
+            shell,
+            "Light",
+            ComponentData::Light(LightComponentData::default()),
+        ),
+        "component.add_camera" => add_component_to_selected(
+            shell,
+            "Camera",
+            ComponentData::Camera(CameraComponentData::default()),
+        ),
+        "component.add_mesh_renderer" => add_component_to_selected(
+            shell,
+            "Mesh Renderer",
+            ComponentData::MeshRenderer(MeshRendererComponentData::default()),
+        ),
+        "component.add_light" => add_component_to_selected(
+            shell,
+            "Light",
+            ComponentData::Light(LightComponentData::default()),
+        ),
+        "component.add_rigidbody" => add_component_to_selected(
+            shell,
+            "Rigidbody",
+            ComponentData::Rigidbody(RigidbodyComponentData::default()),
+        ),
+        "component.add_collider" => add_component_to_selected(
+            shell,
+            "Collider",
+            ComponentData::Collider(ColliderComponentData::default()),
+        ),
+        "component.add_audio_source" => add_component_to_selected(
+            shell,
+            "Audio Source",
+            ComponentData::AudioSource(AudioSourceComponentData::default()),
+        ),
+        "component.add_script" => add_component_to_selected(
+            shell,
+            "Script",
+            ComponentData::Script(ScriptComponentProxy {
+                backend: "rhai".to_owned(),
+                script: String::new(),
+                state_json: None,
+                pending_recovery: false,
+            }),
+        ),
         "layout.reset" => {
             *ui_state = ShellUiState::all_open();
         }
         "command.palette" => {
             ui_state.command_palette_open = true;
+        }
+        "help.about" => {
+            push_info(
+                shell,
+                "Aster editor shell: scene, asset, and play-mode tools are connected.",
+            );
         }
         _ => {}
     }
@@ -186,6 +250,11 @@ pub fn handle_command_shortcuts(
             Some("scene.open")
         } else if input.key_pressed(egui::Key::B) && input.modifiers.command {
             Some("project.build")
+        } else if input.key_pressed(egui::Key::N)
+            && input.modifiers.command
+            && input.modifiers.shift
+        {
+            Some("gameobject.create_empty")
         } else if input.key_pressed(egui::Key::Z) && input.modifiers.command {
             Some("edit.undo")
         } else if input.key_pressed(egui::Key::Y) && input.modifiers.command {

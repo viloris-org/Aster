@@ -2,10 +2,9 @@
 
 use egui::{Align2, CornerRadius, FontId, Sense, Vec2};
 
-use super::super::operations::command::push_error;
 use super::super::operations::scene_ops::{
-    create_empty_child, create_object_with_component, delete_object, duplicate_object,
-    rename_object, reparent_object,
+    create_empty_child, create_empty_object, create_object_with_component, delete_object,
+    duplicate_object, rename_object, reparent_object,
 };
 use super::super::types::{InfernuxPalette, ShellUiState};
 use super::super::widgets::buttons::small_chip;
@@ -25,24 +24,12 @@ pub fn draw_hierarchy(
     pal: &InfernuxPalette,
     tr: &Translations,
 ) {
-    let mut create_error = None;
     toolbar_row(ui, pal, |ui| {
         if small_chip(ui, "+", 24.0, pal)
             .on_hover_text(tr.tr("hierarchy_create_hint"))
             .clicked()
         {
-            if let Some(project) = shell.project_mut() {
-                let name = format!("GameObject {}", project.scene.objects().len() + 1);
-                match project.scene.create_object(name) {
-                    Ok(entity) => {
-                        project.scene_dirty = true;
-                        if let Some(id) = project.scene.object(entity).map(|object| object.id) {
-                            shell.select_entity_id(id);
-                        }
-                    }
-                    Err(error) => create_error = Some(error.to_string()),
-                }
-            }
+            create_empty_object(shell);
         }
         ui.add_space(4.0);
         search_field(
@@ -52,9 +39,6 @@ pub fn draw_hierarchy(
             pal,
         );
     });
-    if let Some(error) = create_error {
-        push_error(shell, error);
-    }
 
     let Some(project) = shell.project() else {
         empty_view(ui, tr.tr("hierarchy_no_scene"), pal);

@@ -5,11 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::super::operations::asset_ops::{
-    create_default_material, delete_asset, open_asset, reimport_asset, show_in_file_manager,
-    thumbnail_color,
+    create_default_material, create_script_asset, delete_asset, open_asset, reimport_asset,
+    show_in_file_manager, thumbnail_color,
 };
 use super::super::operations::command::push_error;
-use super::super::types::{InfernuxPalette, ShellUiState};
+use super::super::types::{InfernuxPalette, ScriptTemplateBackend, ShellUiState};
 use super::super::widgets::buttons::small_chip;
 use super::super::widgets::icons::ui as icon;
 use super::super::widgets::layout::{empty_view, search_field, toolbar_row};
@@ -30,6 +30,31 @@ pub fn draw_project_panel(
         if small_chip(ui, tr.tr("project_create"), 64.0, pal).clicked() {
             create_default_material(shell);
         }
+        if small_chip(ui, tr.tr("project_create_script"), 76.0, pal).clicked() {
+            create_script_asset(shell, ui_state, tr);
+        }
+        egui::ComboBox::from_id_salt("project_new_script_backend")
+            .selected_text(ui_state.project_new_script_backend.component_backend())
+            .width(72.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut ui_state.project_new_script_backend,
+                    ScriptTemplateBackend::Python,
+                    "python",
+                );
+                ui.selectable_value(
+                    &mut ui_state.project_new_script_backend,
+                    ScriptTemplateBackend::Rhai,
+                    "rhai",
+                );
+            });
+        ui.add_sized(
+            Vec2::new(120.0, 20.0),
+            egui::TextEdit::singleline(&mut ui_state.project_new_script_name)
+                .hint_text(tr.tr("project_script_name_hint"))
+                .font(FontId::proportional(11.0))
+                .text_color(pal.text),
+        );
         if small_chip(ui, tr.tr("project_rescan"), 56.0, pal).clicked() {
             match shell.project_mut().map(|project| {
                 project.rescan_assets()?;
@@ -319,6 +344,11 @@ fn draw_folder_tree(
         } else {
             icon::CHEVRON_RIGHT
         };
+        let folder_icon = if expanded {
+            icon::FOLDER_OPEN
+        } else {
+            icon::FOLDER
+        };
         let response = ui.allocate_response(Vec2::new(ui.available_width(), 18.0), Sense::click());
         let rect = response.rect;
         ui.painter().rect_filled(
@@ -342,7 +372,7 @@ fn draw_folder_tree(
         ui.painter().text(
             Pos2::new(x + 14.0, y),
             Align2::LEFT_TOP,
-            "📁",
+            folder_icon,
             FontId::proportional(11.0),
             pal.text,
         );

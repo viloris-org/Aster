@@ -5,7 +5,7 @@ use egui::{Color32, RichText, Vec2};
 use super::super::operations::command::{command_enabled, execute_shell_command};
 use super::super::types::{InfernuxPalette, ShellUiState};
 use super::super::widgets::buttons::{dropdown_pill, panel_toggle, small_text_button_widget};
-use super::super::widgets::icons::transport;
+use super::super::widgets::icons::{actions, transport};
 use crate::EditorShell;
 use engine_i18n::Translations;
 /// Renders the toolbar with transport controls.
@@ -69,6 +69,7 @@ pub fn draw_toolbar(
                 ui_state,
                 "scene.save",
                 tr.tr("tool_save"),
+                Some(actions::SAVE),
                 pal,
                 tr,
             );
@@ -78,6 +79,7 @@ pub fn draw_toolbar(
                 ui_state,
                 "edit.redo",
                 tr.tr("command_redo"),
+                Some(actions::REDO),
                 pal,
                 tr,
             );
@@ -87,6 +89,7 @@ pub fn draw_toolbar(
                 ui_state,
                 "edit.undo",
                 tr.tr("command_undo"),
+                Some(actions::UNDO),
                 pal,
                 tr,
             );
@@ -158,6 +161,7 @@ pub fn command_text_button(
     ui_state: &mut ShellUiState,
     command_id: &str,
     fallback_label: &str,
+    icon: Option<&str>,
     pal: &InfernuxPalette,
     tr: &Translations,
 ) {
@@ -170,8 +174,10 @@ pub fn command_text_button(
         .as_ref()
         .map(|command| command.label.as_str())
         .unwrap_or(fallback_label);
+    let button_label = icon.unwrap_or(label);
     if ui
-        .add_enabled(enabled, small_text_button_widget(label, pal))
+        .add_enabled(enabled, small_text_button_widget(button_label, pal))
+        .on_hover_text(label)
         .clicked()
     {
         execute_shell_command(shell, ui_state, command_id, tr);

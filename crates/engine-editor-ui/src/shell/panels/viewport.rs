@@ -18,8 +18,10 @@ use engine_render::{
 
 const EDITOR_CAMERA_MIN_DISTANCE: f32 = 0.5;
 const EDITOR_CAMERA_MAX_DISTANCE: f32 = 100.0;
+const EDITOR_CAMERA_ORBIT_SENSITIVITY: f32 = 0.005;
 const EDITOR_CAMERA_ZOOM_SENSITIVITY: f32 = 0.0035;
 const EDITOR_CAMERA_ZOOM_DAMPING: f32 = 22.0;
+const EDITOR_CAMERA_TOP_PITCH: f32 = 1.5;
 /// Renders the center dock area with viewport tabs.
 
 pub fn draw_center_dock(
@@ -143,14 +145,13 @@ fn viewport_panel(
     let content_rect = rect.shrink2(Vec2::new(0.0, 26.0));
     draw_render_viewport(ui, shell, ui_state, content_rect, scene_tools, pal, tr);
 
+    let mut orientation_clicked = false;
     if scene_tools {
         update_editor_camera_zoom(ui, ui_state, response.hovered());
 
         if response.dragged_by(egui::PointerButton::Secondary) {
-            let delta = response.drag_delta();
-            ui_state.editor_camera_yaw -= delta.x * 0.005;
-            ui_state.editor_camera_pitch =
-                (ui_state.editor_camera_pitch + delta.y * 0.005).clamp(-1.5, 1.5);
+            let delta = ui.ctx().input(|input| input.pointer.delta());
+            orbit_editor_camera(ui_state, delta);
         }
         if response.dragged_by(egui::PointerButton::Middle) {
             let delta = response.drag_delta();
@@ -175,7 +176,7 @@ fn viewport_panel(
         }
 
         draw_scene_overlay(ui, rect, pal);
-        draw_orientation_gizmo(ui, rect, pal);
+        orientation_clicked = draw_orientation_gizmo(ui, rect, ui_state, pal);
     }
 
     if ui_state.playing || ui_state.paused {
@@ -188,7 +189,7 @@ fn viewport_panel(
         );
     }
 
-    if response.clicked() {
+    if response.clicked() && !orientation_clicked {
         select_first_scene_object(shell);
     }
 }
@@ -313,7 +314,7 @@ fn paint_render_target_placeholder(
             Pos2::new(rect.left(), horizon),
             Pos2::new(rect.right(), horizon),
         ],
-        Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 32)),
+        Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 32)),
     );
     for (idx, object) in state.world.objects.iter().enumerate() {
         let x = rect.left() + rect.width() * (0.2 + (idx as f32 * 0.19) % 0.62);
@@ -368,32 +369,190 @@ fn draw_scene_overlay(ui: &mut egui::Ui, rect: Rect, pal: &InfernuxPalette) {
     );
 }
 
-fn draw_orientation_gizmo(ui: &mut egui::Ui, rect: Rect, pal: &InfernuxPalette) {
+fn draw_orientation_gizmo(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    ui_state: &mut ShellUiState,
+    pal: &InfernuxPalette,
+) -> bool {
     let center = rect.right_top() + Vec2::new(-54.0, 62.0);
     ui.painter().circle_filled(
         center,
         40.0,
         Color32::from_rgba_premultiplied(20, 20, 20, 150),
     );
-    for (offset, color, label) in [
-        (Vec2::new(26.0, 8.0), rgb(220, 70, 70), "X"),
-        (Vec2::new(-8.0, -26.0), rgb(95, 190, 95), "Y"),
-        (Vec2::new(-20.0, 18.0), rgb(80, 130, 220), "Z"),
-    ] {
-        ui.painter()
-            .line_segment([center, center + offset], Stroke::new(2.0, color));
-        ui.painter().circle_filled(center + offset, 7.0, color);
+    let gizmo_response = ui
+        .interact(
+            Rect::from_center_size(center, Vec2::splat(88.0)),
+            ui.make_persistent_id("orientation_gizmo_orbit"),
+            Sense::click_and_drag(),
+        )
+        .on_hover_text("Drag to orbit view");
+    let mut clicked = false;
+    let mut dragged = false;
+
+    if gizmo_response.dragged_by(egui::PointerButton::Primary) {
+        let delta = ui.ctx().input(|input| input.pointer.delta());
+        orbit_editor_camera(ui_state, delta);
+        ui.ctx().request_repaint();
+        dragged = true;
+    }
+
+    let mut axes = projected_orientation_axes(ui_state);
+    axes.sort_by(|a, b| a.depth.total_cmp(&b.depth));
+
+    for axis in axes {
+        let axis_center = center + axis.offset;
+        let hit_rect = Rect::from_center_size(axis_center, Vec2::splat(axis.hit_size));
+        let response = ui
+            .interact(
+                hit_rect,
+                ui.make_persistent_id(("orientation_gizmo_axis", axis.id)),
+                Sense::click(),
+            )
+            .on_hover_text(format!("View along {} axis", axis.id));
+        if response.clicked() {
+            set_editor_camera_axis_view(ui_state, axis.id);
+            ui.ctx().request_repaint();
+            clicked = true;
+        }
+
+        if axis.positive {
+            ui.painter()
+                .line_segment([center, axis_center], Stroke::new(2.0, axis.color));
+        }
+        let radius = if response.hovered() {
+            axis.radius + 1.5
+        } else {
+            axis.radius
+        };
+        ui.painter().circle_filled(axis_center, radius, axis.color);
+        if response.hovered() {
+            ui.painter()
+                .circle_stroke(axis_center, radius + 2.0, Stroke::new(1.0, Color32::WHITE));
+        }
         paint_text_in_rect(
             ui,
-            Rect::from_center_size(center + offset, Vec2::splat(14.0)),
-            label,
-            FontId::proportional(10.0),
+            Rect::from_center_size(axis_center, Vec2::splat(axis.hit_size)),
+            axis.label,
+            FontId::proportional(if axis.positive { 10.0 } else { 9.0 }),
             Color32::WHITE,
             Align2::CENTER_CENTER,
         );
     }
     ui.painter()
         .circle_stroke(center, 40.0, Stroke::new(1.0, pal.border));
+    clicked || dragged
+}
+
+fn orbit_editor_camera(ui_state: &mut ShellUiState, delta: Vec2) {
+    ui_state.editor_camera_yaw -= delta.x * EDITOR_CAMERA_ORBIT_SENSITIVITY;
+    ui_state.editor_camera_pitch = (ui_state.editor_camera_pitch
+        + delta.y * EDITOR_CAMERA_ORBIT_SENSITIVITY)
+        .clamp(-EDITOR_CAMERA_TOP_PITCH, EDITOR_CAMERA_TOP_PITCH);
+}
+
+fn set_editor_camera_axis_view(ui_state: &mut ShellUiState, axis: &str) {
+    match axis {
+        "+X" => {
+            ui_state.editor_camera_yaw = std::f32::consts::FRAC_PI_2;
+            ui_state.editor_camera_pitch = 0.0;
+        }
+        "-X" => {
+            ui_state.editor_camera_yaw = -std::f32::consts::FRAC_PI_2;
+            ui_state.editor_camera_pitch = 0.0;
+        }
+        "+Y" => {
+            ui_state.editor_camera_yaw = 0.0;
+            ui_state.editor_camera_pitch = EDITOR_CAMERA_TOP_PITCH;
+        }
+        "-Y" => {
+            ui_state.editor_camera_yaw = 0.0;
+            ui_state.editor_camera_pitch = -EDITOR_CAMERA_TOP_PITCH;
+        }
+        "+Z" => {
+            ui_state.editor_camera_yaw = 0.0;
+            ui_state.editor_camera_pitch = 0.0;
+        }
+        "-Z" => {
+            ui_state.editor_camera_yaw = std::f32::consts::PI;
+            ui_state.editor_camera_pitch = 0.0;
+        }
+        _ => {}
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProjectedAxis {
+    id: &'static str,
+    label: &'static str,
+    offset: Vec2,
+    depth: f32,
+    color: Color32,
+    radius: f32,
+    hit_size: f32,
+    positive: bool,
+}
+
+fn projected_orientation_axes(ui_state: &ShellUiState) -> Vec<ProjectedAxis> {
+    let yaw = ui_state.editor_camera_yaw;
+    let pitch = ui_state.editor_camera_pitch;
+    let cos_pitch = pitch.cos();
+    let eye_dir = [cos_pitch * yaw.sin(), pitch.sin(), cos_pitch * yaw.cos()];
+    let forward = [-eye_dir[0], -eye_dir[1], -eye_dir[2]];
+    let mut right = cross(forward, [0.0, 1.0, 0.0]);
+    if length_squared(right) <= f32::EPSILON {
+        right = [yaw.cos(), 0.0, -yaw.sin()];
+    }
+    let right = normalized(right);
+    let up = normalized(cross(right, forward));
+
+    let axis_radius = 29.0;
+    [
+        ("+X", "X", [1.0, 0.0, 0.0], rgb(220, 70, 70), true),
+        ("-X", "-X", [-1.0, 0.0, 0.0], rgb(150, 58, 58), false),
+        ("+Y", "Y", [0.0, 1.0, 0.0], rgb(95, 190, 95), true),
+        ("-Y", "-Y", [0.0, -1.0, 0.0], rgb(64, 130, 64), false),
+        ("+Z", "Z", [0.0, 0.0, 1.0], rgb(80, 130, 220), true),
+        ("-Z", "-Z", [0.0, 0.0, -1.0], rgb(58, 86, 150), false),
+    ]
+    .into_iter()
+    .map(|(id, label, dir, color, positive)| ProjectedAxis {
+        id,
+        label,
+        offset: Vec2::new(dot(dir, right), -dot(dir, up)) * axis_radius,
+        depth: dot(dir, eye_dir),
+        color,
+        radius: if positive { 7.0 } else { 5.5 },
+        hit_size: if positive { 20.0 } else { 22.0 },
+        positive,
+    })
+    .collect()
+}
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn length_squared(v: [f32; 3]) -> f32 {
+    dot(v, v)
+}
+
+fn normalized(v: [f32; 3]) -> [f32; 3] {
+    let len = length_squared(v).sqrt();
+    if len <= f32::EPSILON {
+        [0.0, 0.0, 0.0]
+    } else {
+        [v[0] / len, v[1] / len, v[2] / len]
+    }
 }
 
 fn extract_render_world(shell: &EditorShell, scene_view: bool) -> RenderWorld {
@@ -580,5 +739,76 @@ fn quat_look_at(forward: EngineVec3, up: EngineVec3) -> Quat {
             z: 0.25 * s,
             w: (m10 - m01) / s,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn orientation_gizmo_axis_updates_editor_camera_angles() {
+        let mut ui_state = ShellUiState::all_open();
+
+        set_editor_camera_axis_view(&mut ui_state, "+X");
+        assert_eq!(ui_state.editor_camera_yaw, std::f32::consts::FRAC_PI_2);
+        assert_eq!(ui_state.editor_camera_pitch, 0.0);
+
+        set_editor_camera_axis_view(&mut ui_state, "-X");
+        assert_eq!(ui_state.editor_camera_yaw, -std::f32::consts::FRAC_PI_2);
+        assert_eq!(ui_state.editor_camera_pitch, 0.0);
+
+        set_editor_camera_axis_view(&mut ui_state, "+Y");
+        assert_eq!(ui_state.editor_camera_yaw, 0.0);
+        assert_eq!(ui_state.editor_camera_pitch, EDITOR_CAMERA_TOP_PITCH);
+
+        set_editor_camera_axis_view(&mut ui_state, "-Y");
+        assert_eq!(ui_state.editor_camera_yaw, 0.0);
+        assert_eq!(ui_state.editor_camera_pitch, -EDITOR_CAMERA_TOP_PITCH);
+
+        set_editor_camera_axis_view(&mut ui_state, "+Z");
+        assert_eq!(ui_state.editor_camera_yaw, 0.0);
+        assert_eq!(ui_state.editor_camera_pitch, 0.0);
+
+        set_editor_camera_axis_view(&mut ui_state, "-Z");
+        assert_eq!(ui_state.editor_camera_yaw, std::f32::consts::PI);
+        assert_eq!(ui_state.editor_camera_pitch, 0.0);
+    }
+
+    #[test]
+    fn orientation_gizmo_projection_tracks_camera_angles() {
+        let mut ui_state = ShellUiState::all_open();
+        ui_state.editor_camera_yaw = 0.0;
+        ui_state.editor_camera_pitch = 0.0;
+        let axes = projected_orientation_axes(&ui_state);
+        let x = axes.iter().find(|axis| axis.id == "+X").unwrap();
+        let y = axes.iter().find(|axis| axis.id == "+Y").unwrap();
+        let z = axes.iter().find(|axis| axis.id == "+Z").unwrap();
+
+        assert!(x.offset.x > 0.0);
+        assert!(y.offset.y < 0.0);
+        assert!(z.depth > 0.0);
+    }
+
+    #[test]
+    fn orientation_gizmo_drag_orbits_editor_camera() {
+        let mut ui_state = ShellUiState::all_open();
+        ui_state.editor_camera_yaw = 0.0;
+        ui_state.editor_camera_pitch = 0.0;
+
+        orbit_editor_camera(&mut ui_state, Vec2::new(10.0, 20.0));
+
+        assert_eq!(
+            ui_state.editor_camera_yaw,
+            -10.0 * EDITOR_CAMERA_ORBIT_SENSITIVITY
+        );
+        assert_eq!(
+            ui_state.editor_camera_pitch,
+            20.0 * EDITOR_CAMERA_ORBIT_SENSITIVITY
+        );
+
+        orbit_editor_camera(&mut ui_state, Vec2::new(0.0, 10_000.0));
+
+        assert_eq!(ui_state.editor_camera_pitch, EDITOR_CAMERA_TOP_PITCH);
     }
 }
