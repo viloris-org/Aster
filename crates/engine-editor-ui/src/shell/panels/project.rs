@@ -177,6 +177,9 @@ pub fn draw_project_panel(
         tree.get_mut(&parent).unwrap().push(entry.path.clone());
         file_entries.insert(entry.path.clone(), entry);
     }
+    for child_files in tree.values_mut() {
+        child_files.sort();
+    }
 
     if ui_state.expanded_folders.is_empty() && !folders.is_empty() {
         for folder in &folders {
@@ -296,13 +299,13 @@ fn draw_folder_tree(
         .collect();
     child_folders.sort();
 
-    let child_files = tree.get(&folder).cloned().unwrap_or_default();
+    let child_files = tree.get(&folder).map(Vec::as_slice).unwrap_or(&[]);
 
     let has_matching_files = |q: &str| -> bool {
         if q.is_empty() {
             return true;
         }
-        for file_path in &child_files {
+        for file_path in child_files {
             if file_path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -314,8 +317,8 @@ fn draw_folder_tree(
             }
         }
         for sub in &child_folders {
-            let sub_files = tree.get(*sub).cloned().unwrap_or_default();
-            for file_path in &sub_files {
+            let sub_files = tree.get(*sub).map(Vec::as_slice).unwrap_or(&[]);
+            for file_path in sub_files {
                 if file_path
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -408,9 +411,7 @@ fn draw_folder_tree(
             );
         }
 
-        let mut sorted_files = child_files.clone();
-        sorted_files.sort();
-        for file_path in &sorted_files {
+        for file_path in child_files {
             if let Some(meta) = file_entries.get(file_path) {
                 let file_name = file_path
                     .file_name()

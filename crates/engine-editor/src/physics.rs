@@ -1,5 +1,7 @@
 //! Physics synchronization between ECS and the physics backend.
 
+use std::collections::{HashMap, HashSet};
+
 use engine_core::EntityId;
 use engine_ecs::{ColliderComponentData, ComponentData, Scene};
 use engine_physics::{
@@ -12,9 +14,9 @@ use engine_physics::{
 /// creates corresponding physics bodies and colliders, and syncs transforms each fixed update.
 pub struct PhysicsSync {
     /// Mapping from entity ID to (physics body handle, body kind).
-    body_map: Vec<(EntityId, BodyHandle, BodyKind)>,
+    body_map: HashMap<EntityId, (BodyHandle, BodyKind)>,
     /// Mapping from (entity ID, collider index) to collider handle.
-    collider_map: Vec<(EntityId, usize, ColliderHandle)>,
+    collider_map: HashMap<(EntityId, usize), ColliderHandle>,
 }
 
 impl Default for PhysicsSync {
@@ -27,8 +29,8 @@ impl PhysicsSync {
     /// Creates a new PhysicsSync.
     pub fn new() -> Self {
         Self {
-            body_map: Vec::new(),
-            collider_map: Vec::new(),
+            body_map: HashMap::new(),
+            collider_map: HashMap::new(),
         }
     }
 
@@ -53,17 +55,9 @@ impl PhysicsSync {
                 continue;
             };
 
-            // Check if we already have a body for this entity
-            let body_handle = self
-                .body_map
-                .iter()
-                .find(|(eid, _, _)| *eid == object.id)
-                .map(|(_, handle, _)| *handle);
-
-            let body = match body_handle {
-                Some(handle) => handle,
+            let body = match self.body_map.get(&object.id).copied() {
+                Some((handle, _)) => handle,
                 None => {
-                    // Create new body
                     let local_transform = scene.transforms().local(entity).unwrap_or_default();
                     let body_kind = match rb_data.body_type.as_str() {
                         "static" => BodyKind::Static,
@@ -78,31 +72,21 @@ impl PhysicsSync {
                         gravity_scale: if rb_data.use_gravity { 1.0 } else { 0.0 },
                     };
                     let new_body = physics.backend_mut().create_body(&desc)?;
-                    self.body_map.push((object.id, new_body, body_kind));
+                    self.body_map.insert(object.id, (new_body, body_kind));
                     new_body
                 }
             };
 
-            // Find collider components and create colliders
-            let collider_components: Vec<_> = object
-                .components
-                .iter()
-                .filter_map(|c| {
-                    if let ComponentData::Collider(col) = c {
-                        Some(col)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+            let collider_components = object.components.iter().filter_map(|c| {
+                if let ComponentData::Collider(col) = c {
+                    Some(col)
+                } else {
+                    None
+                }
+            });
 
-            for (idx, collider_data) in collider_components.iter().enumerate() {
-                let collider_exists = self
-                    .collider_map
-                    .iter()
-                    .any(|(eid, i, _)| *eid == object.id && *i == idx);
-
-                if !collider_exists {
+            for (idx, collider_data) in collider_components.enumerate() {
+                if !self.collider_map.contains_key(&(object.id, idx)) {
                     let (friction, restitution) =
                         physics_material_friction_restitution(&collider_data.physics_material);
                     let desc = ColliderDesc {
@@ -114,7 +98,7 @@ impl PhysicsSync {
                         mask: collider_data.mask,
                     };
                     let collider_handle = physics.backend_mut().add_collider(body, &desc)?;
-                    self.collider_map.push((object.id, idx, collider_handle));
+                    self.collider_map.insert((object.id, idx), collider_handle);
                 }
             }
         }
@@ -130,8 +114,7 @@ impl PhysicsSync {
         physics: &mut PhysicsWorld,
     ) -> engine_core::EngineResult<Vec<EntityId>> {
         // Collect entity IDs that exist in the scene
-        let active_entities: std::collections::HashSet<_> =
-            scene.iter_objects().map(|(_, obj)| obj.id).collect();
+        let active_entities: HashSet<_> = scene.iter_objects().map(|(_, obj)| obj.id).collect();
 
         let mut destroyed = Vec::new();
 
@@ -139,27 +122,26 @@ impl PhysicsSync {
         let bodies_to_remove: Vec<_> = self
             .body_map
             .iter()
-            .filter(|(eid, _, _)| !active_entities.contains(eid))
-            .map(|(eid, handle, _)| (*eid, *handle))
+            .filter(|(eid, _)| !active_entities.contains(eid))
+            .map(|(eid, (handle, _))| (*eid, *handle))
             .collect();
 
         for (eid, handle) in bodies_to_remove {
-            // Remove all colliders for this entity first
             let colliders_to_remove: Vec<_> = self
                 .collider_map
                 .iter()
-                .filter(|(e, _, _)| *e == eid)
-                .map(|(_, _, ch)| *ch)
+                .filter(|((entity_id, _), _)| *entity_id == eid)
+                .map(|(_, collider)| *collider)
                 .collect();
 
             for collider_handle in colliders_to_remove {
                 let _ = physics.backend_mut().remove_collider(collider_handle);
             }
-            self.collider_map.retain(|(e, _, _)| *e != eid);
+            self.collider_map
+                .retain(|(entity_id, _), _| *entity_id != eid);
 
-            // Remove the body
             let _ = physics.backend_mut().destroy_body(handle);
-            self.body_map.retain(|(e, _, _)| *e != eid);
+            self.body_map.remove(&eid);
             destroyed.push(eid);
         }
 
@@ -172,7 +154,7 @@ impl PhysicsSync {
         scene: &Scene,
         physics: &mut PhysicsWorld,
     ) -> engine_core::EngineResult<()> {
-        for (eid, body_handle, _) in &self.body_map {
+        for (eid, (body_handle, _)) in &self.body_map {
             if let Some(entity) = scene.find_by_id(*eid) {
                 if let Some(local_transform) = scene.transforms().local(entity) {
                     physics
@@ -191,8 +173,7 @@ impl PhysicsSync {
         scene: &mut Scene,
         physics: &mut PhysicsWorld,
     ) -> engine_core::EngineResult<()> {
-        for (eid, body_handle, body_kind) in &self.body_map {
-            // Skip static bodies - they don't move
+        for (eid, (body_handle, body_kind)) in &self.body_map {
             if *body_kind == BodyKind::Static {
                 continue;
             }

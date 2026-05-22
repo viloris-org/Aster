@@ -644,27 +644,22 @@ impl SimplePhysicsBackend {
                 });
             }
         }
+        let colliding_pairs = current_pairs.iter().copied().collect::<Vec<_>>();
         self.active_pairs = current_pairs;
-    }
-
-    fn resolve_contacts(&mut self) {
-        let handles = self.colliders.keys().copied().collect::<Vec<_>>();
-        for (index, left) in handles.iter().enumerate() {
-            for right in handles.iter().skip(index + 1) {
-                let Some((normal, penetration)) = self.collision_penetration(*left, *right) else {
-                    continue;
-                };
-                let Some(left_collider) = self.colliders.get(left) else {
-                    continue;
-                };
-                let Some(right_collider) = self.colliders.get(right) else {
-                    continue;
-                };
-                if left_collider.desc.is_trigger || right_collider.desc.is_trigger {
-                    continue;
-                }
-                self.apply_separation(left_collider.body, right_collider.body, normal, penetration);
+        for (left, right) in colliding_pairs {
+            let Some((normal, penetration)) = self.collision_penetration(left, right) else {
+                continue;
+            };
+            let Some(left_collider) = self.colliders.get(&left) else {
+                continue;
+            };
+            let Some(right_collider) = self.colliders.get(&right) else {
+                continue;
+            };
+            if left_collider.desc.is_trigger || right_collider.desc.is_trigger {
+                continue;
             }
+            self.apply_separation(left_collider.body, right_collider.body, normal, penetration);
         }
     }
 
@@ -745,7 +740,6 @@ impl PhysicsBackend for SimplePhysicsBackend {
             }
         }
         self.update_contacts();
-        self.resolve_contacts();
     }
 
     fn create_body(&mut self, desc: &RigidbodyDesc) -> EngineResult<BodyHandle> {

@@ -96,11 +96,7 @@ fn draw_hierarchy_entity(
     let id = object.id;
     let name = object.name.clone();
     let active = object.active;
-    let mut children = project.scene.transforms().children(entity);
-    {
-        let transforms = project.scene.transforms();
-        children.sort_by_key(|child| transforms.sibling_index(*child).unwrap_or(0));
-    }
+    let children = project.scene.transforms().children(entity);
     let has_children = !children.is_empty();
     let matches_query = query.is_empty() || name.to_lowercase().contains(query);
 
