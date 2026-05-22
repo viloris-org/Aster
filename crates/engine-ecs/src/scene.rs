@@ -328,6 +328,8 @@ impl Default for AudioSourceComponentData {
     }
 }
 
+pub use crate::particle::ParticleEmitterComponentData;
+
 /// Versioned component payload used by scenes and prefabs.
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "type", content = "data")]
@@ -344,6 +346,8 @@ pub enum ComponentData {
     Collider(ColliderComponentData),
     /// Audio source component.
     AudioSource(AudioSourceComponentData),
+    /// Particle emitter component.
+    ParticleEmitter(ParticleEmitterComponentData),
     /// Script proxy component.
     Script(ScriptComponentProxy),
 }
@@ -358,6 +362,7 @@ impl ComponentData {
             Self::Rigidbody(_) => "Rigidbody",
             Self::Collider(_) => "Collider",
             Self::AudioSource(_) => "AudioSource",
+            Self::ParticleEmitter(_) => "ParticleEmitter",
             Self::Script(_) => "Script",
         }
     }
@@ -709,7 +714,21 @@ impl Scene {
     pub fn tick_runtime_frame(&mut self) {
         self.run_lifecycle(LifecycleStage::Start);
         self.run_lifecycle(LifecycleStage::Update);
+        self.tick_particles(1.0 / 60.0);
         self.run_lifecycle(LifecycleStage::LateUpdate);
+    }
+
+    /// Advances all particle emitters in the active scene by `delta_seconds`.
+    pub fn tick_particles(&mut self, delta_seconds: f32) {
+        let state = self.active_mut();
+        for object in state.objects.values_mut() {
+            for component in &mut object.components {
+                if let ComponentData::ParticleEmitter(emitter) = component {
+                    emitter.tick(delta_seconds);
+                }
+            }
+        }
+        state.bump_version();
     }
 
     /// Runs a fixed timestep lifecycle pass.

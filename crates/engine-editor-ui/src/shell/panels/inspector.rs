@@ -419,6 +419,30 @@ fn draw_component_editor(
                 pal,
             );
         }
+        ComponentData::ParticleEmitter(emitter) => {
+            dirty |= u32_property_row(
+                ui,
+                tr.tr("property_max_particles"),
+                &mut emitter.max_particles,
+                pal,
+            );
+            dirty |= f32_property_row(
+                ui,
+                tr.tr("property_emission_rate"),
+                &mut emitter.emission_rate,
+                pal,
+            );
+            dirty |= f32_property_row(ui, tr.tr("property_lifetime"), &mut emitter.lifetime, pal);
+            dirty |= color_vec3_editor(
+                ui,
+                tr.tr("property_start_color"),
+                &mut emitter.start_color,
+                pal,
+            );
+            dirty |=
+                color_vec3_editor(ui, tr.tr("property_end_color"), &mut emitter.end_color, pal);
+            dirty |= bool_property_row(ui, tr.tr("property_looping"), &mut emitter.looping, pal);
+        }
         ComponentData::Script(script) => {
             dirty |= string_property_row(ui, tr.tr("property_backend"), &mut script.backend, pal);
             dirty |=
@@ -591,6 +615,57 @@ fn draw_component_schema_field(
             ),
             _ => false,
         },
+        ComponentData::ParticleEmitter(emitter) => match field.name.as_str() {
+            "max_particles" => u32_property_row(ui, &label, &mut emitter.max_particles, pal),
+            "emission_rate" => f32_property_row_clamped(
+                ui,
+                &label,
+                &mut emitter.emission_rate,
+                0.0..=10000.0,
+                1.0,
+                pal,
+            ),
+            "lifetime" => {
+                f32_property_row_clamped(ui, &label, &mut emitter.lifetime, 0.01..=300.0, 0.1, pal)
+            }
+            "start_speed" => f32_property_row_clamped(
+                ui,
+                &label,
+                &mut emitter.start_speed,
+                0.0..=1000.0,
+                0.1,
+                pal,
+            ),
+            "start_size" => f32_property_row_clamped(
+                ui,
+                &label,
+                &mut emitter.start_size,
+                0.001..=100.0,
+                0.01,
+                pal,
+            ),
+            "end_size" => f32_property_row_clamped(
+                ui,
+                &label,
+                &mut emitter.end_size,
+                0.001..=100.0,
+                0.01,
+                pal,
+            ),
+            "start_color" => color_vec3_editor(ui, &label, &mut emitter.start_color, pal),
+            "end_color" => color_vec3_editor(ui, &label, &mut emitter.end_color, pal),
+            "gravity" => vec3_editor(ui, &label, &mut emitter.gravity, pal),
+            "spread_degrees" => f32_property_row_clamped(
+                ui,
+                &label,
+                &mut emitter.spread_degrees,
+                0.0..=180.0,
+                1.0,
+                pal,
+            ),
+            "looping" => bool_property_row(ui, &label, &mut emitter.looping, pal),
+            _ => false,
+        },
         ComponentData::Script(script) => match field.name.as_str() {
             "backend" => string_property_row(ui, &label, &mut script.backend, pal),
             "script" => string_property_row(ui, &label, &mut script.script, pal),
@@ -633,6 +708,16 @@ fn component_field_label(field: &ComponentFieldSchema, tr: &Translations) -> Str
         "angular_damping" => tr.tr("property_angular_damping").to_owned(),
         "physics_material" => tr.tr("property_physics_material").to_owned(),
         "spatial_blend" => tr.tr("property_spatial_blend").to_owned(),
+        "max_particles" => tr.tr("property_max_particles").to_owned(),
+        "emission_rate" => tr.tr("property_emission_rate").to_owned(),
+        "lifetime" => tr.tr("property_lifetime").to_owned(),
+        "start_speed" => tr.tr("property_start_speed").to_owned(),
+        "start_size" => tr.tr("property_start_size").to_owned(),
+        "end_size" => tr.tr("property_end_size").to_owned(),
+        "start_color" => tr.tr("property_start_color").to_owned(),
+        "end_color" => tr.tr("property_end_color").to_owned(),
+        "gravity" => tr.tr("property_gravity").to_owned(),
+        "spread_degrees" => tr.tr("property_spread_degrees").to_owned(),
         "pending_recovery" => tr.tr("property_pending_recovery").to_owned(),
         other => title_case_field(other),
     }

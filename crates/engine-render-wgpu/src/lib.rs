@@ -1568,7 +1568,7 @@ fn mul_mat4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
 }
 
 fn instances_from_world(world: &RenderWorld) -> Vec<Instance> {
-    world
+    let mut instances = world
         .objects
         .iter()
         .enumerate()
@@ -1589,7 +1589,25 @@ fn instances_from_world(world: &RenderWorld) -> Vec<Instance> {
                 color,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    instances.extend(world.particles.iter().map(|particle| {
+        let transform = particle.transform;
+        Instance {
+            offset: [
+                transform.translation.x,
+                transform.translation.y,
+                transform.translation.z,
+            ],
+            scale: [
+                transform.scale.x.max(0.01),
+                transform.scale.y.max(0.01),
+                transform.scale.z.max(0.01),
+            ],
+            color: particle.color,
+        }
+    }));
+    instances
 }
 
 fn color_for_material(material: &str) -> [f32; 4] {

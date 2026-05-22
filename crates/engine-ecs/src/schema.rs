@@ -193,6 +193,25 @@ impl ComponentSchemaRegistry {
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
+            type_id: "ParticleEmitter".to_string(),
+            display_name: "Particle Emitter".to_string(),
+            version: 1,
+            fields: vec![
+                field("max_particles", ComponentFieldKind::String, "128"),
+                field("emission_rate", ComponentFieldKind::F32, "32"),
+                field("lifetime", ComponentFieldKind::F32, "2"),
+                field("start_speed", ComponentFieldKind::F32, "2.5"),
+                field("start_size", ComponentFieldKind::F32, "0.12"),
+                field("end_size", ComponentFieldKind::F32, "0.02"),
+                field("start_color", ComponentFieldKind::Vec3, "1,0.85,0.25"),
+                field("end_color", ComponentFieldKind::Vec3, "1,0.35,0.08"),
+                field("gravity", ComponentFieldKind::Vec3, "0,-9.8,0"),
+                field("spread_degrees", ComponentFieldKind::F32, "35"),
+                field("looping", ComponentFieldKind::Bool, "true"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
             type_id: "Script".to_string(),
             display_name: "Script".to_string(),
             version: 1,

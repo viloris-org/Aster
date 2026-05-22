@@ -1,7 +1,8 @@
 use engine_core::math::{Transform, Vec3};
 use engine_ecs::{
     AudioSourceComponentData, CameraComponentData, ColliderComponentData, ComponentData,
-    MaterialRef, MeshRendererComponentData, RigidbodyComponentData, Scene,
+    MaterialRef, MeshRendererComponentData, ParticleEmitterComponentData, RigidbodyComponentData,
+    Scene,
 };
 
 /// Test that a scene with all component types can be serialized to JSON and
@@ -91,6 +92,21 @@ fn scene_with_all_components_round_trip() {
                 looping: true,
                 play_on_start: true,
                 spatial_blend: 0.5,
+            }),
+        )
+        .unwrap();
+
+    // Create a particle emitter object
+    let particles = scene.create_object("ParticleEmitter").unwrap();
+    scene
+        .upsert_component(
+            particles,
+            ComponentData::ParticleEmitter(ParticleEmitterComponentData {
+                max_particles: 64,
+                emission_rate: 16.0,
+                lifetime: 1.5,
+                elapsed: 0.25,
+                ..ParticleEmitterComponentData::default()
             }),
         )
         .unwrap();

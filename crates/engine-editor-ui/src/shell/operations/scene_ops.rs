@@ -5,7 +5,8 @@ use engine_assets::AssetGuid;
 use engine_core::EntityId;
 use engine_ecs::{
     AudioSourceComponentData, CameraComponentData, ColliderComponentData, ComponentData,
-    LightComponentData, MeshRendererComponentData, RigidbodyComponentData, ScriptComponentProxy,
+    LightComponentData, MeshRendererComponentData, ParticleEmitterComponentData,
+    RigidbodyComponentData, ScriptComponentProxy,
 };
 use engine_editor::UndoCommand;
 
@@ -469,6 +470,10 @@ pub fn default_components() -> Vec<(&'static str, ComponentData)> {
         (
             "Audio Source",
             ComponentData::AudioSource(AudioSourceComponentData::default()),
+        ),
+        (
+            "Particle Emitter",
+            ComponentData::ParticleEmitter(ParticleEmitterComponentData::default()),
         ),
         (
             "Script",

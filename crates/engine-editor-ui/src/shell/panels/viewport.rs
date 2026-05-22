@@ -13,7 +13,8 @@ use engine_core::math::{Quat, Transform, Vec3 as EngineVec3};
 use engine_ecs::ComponentData;
 use engine_i18n::Translations;
 use engine_render::{
-    RenderCamera, RenderLight, RenderObject, RenderTargetDesc, RenderWorld, ViewKind,
+    RenderCamera, RenderLight, RenderObject, RenderParticle, RenderTargetDesc, RenderWorld,
+    ViewKind,
 };
 
 const EDITOR_CAMERA_MIN_DISTANCE: f32 = 0.5;
@@ -606,6 +607,7 @@ fn extract_render_world(shell: &EditorShell, scene_view: bool) -> RenderWorld {
         camera,
         objects: Vec::new(),
         lights: Vec::new(),
+        particles: Vec::new(),
     };
     for (entity, object) in project.scene.objects() {
         if !object.active {
@@ -647,6 +649,22 @@ fn extract_render_world(shell: &EditorShell, scene_view: bool) -> RenderWorld {
                     range: light.range,
                     spot_angle: light.spot_angle,
                 }),
+                ComponentData::ParticleEmitter(emitter) => world.particles.extend(
+                    engine_ecs::ParticleSystem::sample(emitter, transform)
+                        .into_iter()
+                        .map(|particle| {
+                            let mut particle_transform = Transform::IDENTITY;
+                            particle_transform.translation = particle.position;
+                            particle_transform.scale =
+                                EngineVec3::new(particle.size, particle.size, particle.size);
+                            RenderParticle {
+                                object: object.id,
+                                transform: particle_transform,
+                                color: particle.color,
+                                age_fraction: particle.age_fraction,
+                            }
+                        }),
+                ),
                 _ => {}
             }
         }

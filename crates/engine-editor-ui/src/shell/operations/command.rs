@@ -11,7 +11,8 @@ use super::scene_ops::{
 };
 use engine_ecs::{
     AudioSourceComponentData, CameraComponentData, ColliderComponentData, ComponentData,
-    LightComponentData, MeshRendererComponentData, RigidbodyComponentData, ScriptComponentProxy,
+    LightComponentData, MeshRendererComponentData, ParticleEmitterComponentData,
+    RigidbodyComponentData, ScriptComponentProxy,
 };
 
 /// Check if a command is currently enabled based on availability rules.
@@ -159,6 +160,11 @@ pub fn execute_shell_command(
             shell,
             "Audio Source",
             ComponentData::AudioSource(AudioSourceComponentData::default()),
+        ),
+        "component.add_particle_emitter" => add_component_to_selected(
+            shell,
+            "Particle Emitter",
+            ComponentData::ParticleEmitter(ParticleEmitterComponentData::default()),
         ),
         "component.add_script" => add_component_to_selected(
             shell,

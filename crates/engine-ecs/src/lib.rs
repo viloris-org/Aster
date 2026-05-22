@@ -3,6 +3,7 @@
 
 //! Atomic ECS and base scene storage.
 
+pub mod particle;
 pub mod scene;
 pub mod schema;
 pub mod transform;
@@ -14,11 +15,12 @@ pub mod physics;
 #[cfg(feature = "audio")]
 pub mod audio;
 
+pub use particle::{ParticleInstance, ParticleSystem};
 pub use scene::{
     AudioSourceComponentData, CameraComponentData, CameraRole, ColliderComponentData,
     ComponentData, GameObject, LifecycleStage, LightComponentData, MaterialRef,
-    MeshRendererComponentData, ObjectIdAllocator, RigidbodyComponentData, Scene, SceneFile,
-    SceneMode, ScriptComponentProxy,
+    MeshRendererComponentData, ObjectIdAllocator, ParticleEmitterComponentData,
+    RigidbodyComponentData, Scene, SceneFile, SceneMode, ScriptComponentProxy,
 };
 pub use schema::{
     BuildConfiguration, ComponentFieldKind, ComponentFieldSchema, ComponentSchema,

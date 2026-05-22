@@ -92,6 +92,19 @@ pub struct RenderLight {
     pub spot_angle: f32,
 }
 
+/// Particle draw data extracted from a scene for rendering.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderParticle {
+    /// Source emitter scene object.
+    pub object: EntityId,
+    /// Particle world-space transform.
+    pub transform: Transform,
+    /// Particle RGBA color.
+    pub color: [f32; 4],
+    /// Particle normalized age from birth to death.
+    pub age_fraction: f32,
+}
+
 /// Minimal render queue shared by runtime, editor Scene View, and Game View.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenderWorld {
@@ -101,12 +114,14 @@ pub struct RenderWorld {
     pub objects: Vec<RenderObject>,
     /// Queued lights.
     pub lights: Vec<RenderLight>,
+    /// Queued particle instances.
+    pub particles: Vec<RenderParticle>,
 }
 
 impl RenderWorld {
     /// Returns true when there is visible geometry and a camera.
     pub fn is_visible(&self) -> bool {
-        self.camera.is_some() && !self.objects.is_empty()
+        self.camera.is_some() && (!self.objects.is_empty() || !self.particles.is_empty())
     }
 
     /// Extracts renderable data from a [`Scene`](engine_ecs::Scene).
@@ -171,6 +186,27 @@ impl RenderWorld {
                             range: light.range,
                             spot_angle: light.spot_angle,
                         });
+                    }
+                    engine_ecs::ComponentData::ParticleEmitter(emitter) => {
+                        world.particles.extend(
+                            engine_ecs::ParticleSystem::sample(emitter, transform)
+                                .into_iter()
+                                .map(|particle| {
+                                    let mut particle_transform = Transform::IDENTITY;
+                                    particle_transform.translation = particle.position;
+                                    particle_transform.scale = engine_core::math::Vec3::new(
+                                        particle.size,
+                                        particle.size,
+                                        particle.size,
+                                    );
+                                    RenderParticle {
+                                        object: obj.id,
+                                        transform: particle_transform,
+                                        color: particle.color,
+                                        age_fraction: particle.age_fraction,
+                                    }
+                                }),
+                        );
                     }
                     _ => {}
                 }
@@ -461,5 +497,32 @@ mod tests {
         assert_eq!(cube.material, "debug/default");
         assert_eq!(sphere.material, "debug/default");
         assert_ne!(sphere.object.as_u128(), 0);
+    }
+
+    #[test]
+    fn extracts_particle_emitters() {
+        let mut scene = Scene::new();
+        let camera = scene.create_object("Camera").unwrap();
+        scene
+            .upsert_component(
+                camera,
+                ComponentData::Camera(engine_ecs::CameraComponentData::default()),
+            )
+            .unwrap();
+        let emitter = scene.create_object("Emitter").unwrap();
+        scene
+            .upsert_component(
+                emitter,
+                ComponentData::ParticleEmitter(engine_ecs::ParticleEmitterComponentData {
+                    elapsed: 0.5,
+                    ..engine_ecs::ParticleEmitterComponentData::default()
+                }),
+            )
+            .unwrap();
+
+        let world = RenderWorld::extract(&scene);
+
+        assert!(world.is_visible());
+        assert!(!world.particles.is_empty());
     }
 }

@@ -1406,6 +1406,27 @@ pub fn extract_render_world(scene: &Scene) -> RenderWorld {
                         spot_angle: light.spot_angle,
                     });
                 }
+                ComponentData::ParticleEmitter(emitter) => {
+                    world.particles.extend(
+                        engine_ecs::ParticleSystem::sample(emitter, transform)
+                            .into_iter()
+                            .map(|particle| {
+                                let mut particle_transform = engine_core::math::Transform::IDENTITY;
+                                particle_transform.translation = particle.position;
+                                particle_transform.scale = engine_core::math::Vec3::new(
+                                    particle.size,
+                                    particle.size,
+                                    particle.size,
+                                );
+                                engine_render::RenderParticle {
+                                    object: object.id,
+                                    transform: particle_transform,
+                                    color: particle.color,
+                                    age_fraction: particle.age_fraction,
+                                }
+                            }),
+                    );
+                }
                 ComponentData::Rigidbody(_)
                 | ComponentData::Collider(_)
                 | ComponentData::AudioSource(_)
