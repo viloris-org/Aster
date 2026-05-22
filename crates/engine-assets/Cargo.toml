@@ -30,6 +30,7 @@ dev-full = [
 engine-core.workspace = true
 gltf.workspace = true
 image.workspace = true
+notify.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

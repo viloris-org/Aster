@@ -18,7 +18,10 @@ pub use fonts::setup_egui_fonts;
 #[cfg(feature = "editor")]
 pub use hub::draw_hub;
 #[cfg(feature = "editor")]
-pub use shell::{build_editor_render_world, draw_shell, PlayModeRequest, ShellUiState, ViewportTexture};
+pub use shell::{
+    build_editor_render_world, draw_shell, EditorAction, PlayModeRequest, ShellUiState,
+    ViewportTexture,
+};
 
 use std::{
     fs,
@@ -528,7 +531,10 @@ impl EditorShell {
     pub fn open_project(&mut self, project_root: impl Into<PathBuf>) -> EngineResult<()> {
         let project_root = project_root.into();
         let project_ctx = ProjectContext::open(&project_root).map_err(|error| {
-            EngineError::config(format!("failed to open project {}: {error}", project_root.display()))
+            EngineError::config(format!(
+                "failed to open project {}: {error}",
+                project_root.display()
+            ))
         })?;
         self.selection.clear();
         self.console.push(ConsoleEntry {
@@ -546,7 +552,10 @@ impl EditorShell {
     }
 
     /// Saves the active scene to the project's default scene path.
-    pub fn save_scene(&mut self) -> EngineResult<()> {
+    ///
+    /// Creates a `.bak` backup of the previous file, then writes atomically
+    /// via a `.tmp` file and `fs::rename`.
+    pub fn save_scene(&mut self) -> EngineResult<String> {
         let Some(project) = self.project.as_mut() else {
             return Err(EngineError::config("no project is open"));
         };
@@ -556,12 +565,79 @@ impl EditorShell {
             .and_then(|value| value.to_str())
             .unwrap_or("Scene");
         let json = project.scene.to_json(scene_name)?;
-        fs::write(&project.scene_path, json).map_err(|source| EngineError::Filesystem {
-            path: project.scene_path.clone(),
+        Self::write_scene_atomic(&project.scene_path.clone(), &json)?;
+        project.scene_dirty = false;
+        Ok(project.scene_path.display().to_string())
+    }
+
+    /// Saves the active scene to a new path.
+    ///
+    /// After Save As, `ProjectManifest.default_scene` is NOT automatically updated.
+    /// The user must explicitly set the default scene via the project settings.
+    pub fn save_scene_as(&mut self, path: &Path) -> EngineResult<String> {
+        let Some(project) = self.project.as_mut() else {
+            return Err(EngineError::config("no project is open"));
+        };
+        let scene_name = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Scene");
+        let json = project.scene.to_json(scene_name)?;
+        Self::write_scene_atomic(path, &json)?;
+        project.scene_path = path.to_path_buf();
+        project.scene_dirty = false;
+        Ok(path.display().to_string())
+    }
+
+    /// Writes scene JSON atomically: `.tmp` file write → rename, with `.bak` backup.
+    fn write_scene_atomic(target: &Path, json: &str) -> EngineResult<()> {
+        if target.exists() {
+            let bak_path = target.with_extension("json.bak");
+            let _ = fs::remove_file(&bak_path);
+            let _ = fs::copy(target, &bak_path);
+        }
+        let tmp_path = target.with_extension("json.tmp");
+        fs::write(&tmp_path, json).map_err(|source| EngineError::Filesystem {
+            path: tmp_path.clone(),
             source,
         })?;
+        fs::rename(&tmp_path, target).map_err(|source| EngineError::Filesystem {
+            path: target.to_path_buf(),
+            source,
+        })
+    }
+
+    /// Closes the current project and clears editor state.
+    pub fn close_project(&mut self) {
+        self.project = None;
+        self.selection.clear();
+    }
+
+    /// Loads a scene from the given path, replacing the current scene.
+    ///
+    /// The Hierarchy and Inspector will refresh on the next frame because they
+    /// read from `project.scene` directly. Selection is cleared.
+    pub fn load_scene(&mut self, path: &Path) -> EngineResult<String> {
+        let Some(project) = self.project.as_mut() else {
+            return Err(EngineError::config("no project is open"));
+        };
+        let scene_text = fs::read_to_string(path).map_err(|source| EngineError::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        project.scene = Scene::from_json(&scene_text)?;
+        project.scene_path = path.to_path_buf();
         project.scene_dirty = false;
-        Ok(())
+        self.selection.clear();
+        Ok(path.display().to_string())
+    }
+
+    /// Returns whether the current scene has unsaved changes.
+    pub fn is_scene_dirty(&self) -> bool {
+        self.project
+            .as_ref()
+            .map(|p| p.scene_dirty)
+            .unwrap_or(false)
     }
 
     /// Records an undoable editor command.
@@ -727,6 +803,7 @@ impl ProjectContext {
             project_root.join("builtin"),
         );
         let scan = scan_project_assets(project_root.join(&manifest.asset_root), &mut database)?;
+        database.scan(&project_root.join(&manifest.asset_root))?;
         Ok(Self {
             root: project_root,
             manifest,
@@ -758,6 +835,8 @@ impl ProjectContext {
             self.root.join(&self.manifest.asset_root),
             &mut self.database,
         )?;
+        self.database
+            .scan(&self.root.join(&self.manifest.asset_root))?;
         self.asset_imports.push(format!(
             "scan: {} assets, {} ignored",
             report.metas.len(),
@@ -827,6 +906,8 @@ pub fn resource_kind_label(kind: ResourceKind, tr: &Translations) -> &str {
         ResourceKind::Model => tr.tr("resource_model"),
         ResourceKind::SkinnedModel => tr.tr("resource_skinned_model"),
         ResourceKind::Animation => tr.tr("resource_animation"),
+        ResourceKind::Script => tr.tr("resource_script"),
+        ResourceKind::Scene => tr.tr("resource_scene"),
     }
 }
 
@@ -838,6 +919,7 @@ pub fn asset_guid_label(guid: AssetGuid) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine_editor::CommandAvailability;
     use engine_editor::ThemePreference;
 
     #[test]
@@ -990,6 +1072,10 @@ mod tests {
         ] {
             assert!(shell.commands().get(id).is_some(), "missing command {id}");
         }
+        assert_eq!(
+            shell.commands().get("play.toggle").unwrap().availability,
+            CommandAvailability::ProjectOpen
+        );
     }
 
     #[test]

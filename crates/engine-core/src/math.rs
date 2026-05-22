@@ -131,6 +131,57 @@ impl Quat {
         z: 0.0,
         w: 1.0,
     };
+
+    /// Decomposes rotation into Euler angles (yaw, pitch, roll) in degrees.
+    /// Convention: YXZ intrinsic (yaw around Y, pitch around X, roll around Z).
+    pub fn to_euler_deg(self) -> (f32, f32, f32) {
+        let (yaw, pitch, roll) = self.to_euler();
+        (yaw.to_degrees(), pitch.to_degrees(), roll.to_degrees())
+    }
+
+    /// Decomposes rotation into Euler angles (yaw, pitch, roll) in radians.
+    pub fn to_euler(self) -> (f32, f32, f32) {
+        // YXZ intrinsic: yaw (Y), pitch (X), roll (Z)
+        let sinr_cosp = 2.0 * (self.w * self.x + self.y * self.z);
+        let cosr_cosp = 1.0 - 2.0 * (self.x * self.x + self.y * self.y);
+        let roll = sinr_cosp.atan2(cosr_cosp);
+
+        let sinp = 2.0 * (self.w * self.y - self.z * self.x);
+        let pitch = if sinp.abs() >= 1.0 {
+            std::f32::consts::FRAC_PI_2.copysign(sinp)
+        } else {
+            sinp.asin()
+        };
+
+        let siny_cosp = 2.0 * (self.w * self.z + self.x * self.y);
+        let cosy_cosp = 1.0 - 2.0 * (self.y * self.y + self.z * self.z);
+        let yaw = siny_cosp.atan2(cosy_cosp);
+
+        (yaw, pitch, roll)
+    }
+
+    /// Creates rotation from Euler angles (yaw, pitch, roll) in degrees.
+    pub fn from_euler_deg(yaw_deg: f32, pitch_deg: f32, roll_deg: f32) -> Self {
+        Self::from_euler(
+            yaw_deg.to_radians(),
+            pitch_deg.to_radians(),
+            roll_deg.to_radians(),
+        )
+    }
+
+    /// Creates rotation from Euler angles in radians (YXZ intrinsic).
+    pub fn from_euler(yaw: f32, pitch: f32, roll: f32) -> Self {
+        let (sr, cr) = (roll * 0.5).sin_cos();
+        let (sp, cp) = (pitch * 0.5).sin_cos();
+        let (sy, cy) = (yaw * 0.5).sin_cos();
+
+        Self {
+            w: cr * cp * cy + sr * sp * sy,
+            x: sr * cp * cy - cr * sp * sy,
+            y: cr * sp * cy + sr * cp * sy,
+            z: cr * cp * sy - sr * sp * cy,
+        }
+    }
 }
 
 impl Default for Quat {

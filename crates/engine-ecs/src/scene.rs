@@ -112,6 +112,13 @@ pub struct CameraComponentData {
     pub aspect_ratio: Option<f32>,
     /// Whether this camera should render to Game View.
     pub primary: bool,
+    /// RGB clear color when this camera renders.
+    #[serde(default = "default_clear_color")]
+    pub clear_color: Vec3,
+}
+
+fn default_clear_color() -> Vec3 {
+    Vec3::new(0.1, 0.1, 0.1)
 }
 
 impl Default for CameraComponentData {
@@ -122,6 +129,7 @@ impl Default for CameraComponentData {
             far: 1000.0,
             aspect_ratio: None,
             primary: true,
+            clear_color: default_clear_color(),
         }
     }
 }
@@ -156,6 +164,13 @@ pub struct MeshRendererComponentData {
     pub material: MaterialRef,
     /// Whether this renderer casts shadows.
     pub casts_shadows: bool,
+    /// Whether this renderer receives shadows.
+    #[serde(default = "default_true")]
+    pub receive_shadows: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for MeshRendererComponentData {
@@ -165,6 +180,7 @@ impl Default for MeshRendererComponentData {
             builtin_mesh: Some("debug/cube".to_string()),
             material: MaterialRef::debug(),
             casts_shadows: true,
+            receive_shadows: true,
         }
     }
 }
@@ -178,6 +194,20 @@ pub struct LightComponentData {
     pub intensity: f32,
     /// Whether this is directional, point, or spot.
     pub kind: String,
+    /// Light range (point/spot only).
+    #[serde(default = "default_light_range")]
+    pub range: f32,
+    /// Spot inner cone angle in degrees (spot only).
+    #[serde(default = "default_spot_angle")]
+    pub spot_angle: f32,
+}
+
+fn default_light_range() -> f32 {
+    10.0
+}
+
+fn default_spot_angle() -> f32 {
+    30.0
 }
 
 impl Default for LightComponentData {
@@ -186,6 +216,8 @@ impl Default for LightComponentData {
             color: Vec3::ONE,
             intensity: 1.0,
             kind: "directional".to_string(),
+            range: default_light_range(),
+            spot_angle: default_spot_angle(),
         }
     }
 }
@@ -199,6 +231,22 @@ pub struct RigidbodyComponentData {
     pub mass: f32,
     /// Whether gravity affects the body.
     pub use_gravity: bool,
+    /// Linear velocity damping.
+    #[serde(default)]
+    pub linear_damping: f32,
+    /// Angular velocity damping.
+    #[serde(default = "default_angular_damping")]
+    pub angular_damping: f32,
+    /// Lock position axes [x, y, z].
+    #[serde(default)]
+    pub lock_position: [bool; 3],
+    /// Lock rotation axes [x, y, z].
+    #[serde(default)]
+    pub lock_rotation: [bool; 3],
+}
+
+fn default_angular_damping() -> f32 {
+    0.05
 }
 
 impl Default for RigidbodyComponentData {
@@ -207,6 +255,10 @@ impl Default for RigidbodyComponentData {
             body_type: "dynamic".to_string(),
             mass: 1.0,
             use_gravity: true,
+            linear_damping: 0.0,
+            angular_damping: default_angular_damping(),
+            lock_position: [false; 3],
+            lock_rotation: [false; 3],
         }
     }
 }
@@ -223,6 +275,13 @@ pub struct ColliderComponentData {
     /// Bitmask of layers this collider can interact with.
     #[serde(default = "default_collider_mask")]
     pub mask: u32,
+    /// Physics material preset name.
+    #[serde(default = "default_physics_material")]
+    pub physics_material: String,
+}
+
+fn default_physics_material() -> String {
+    "default".to_string()
 }
 
 impl Default for ColliderComponentData {
@@ -232,6 +291,7 @@ impl Default for ColliderComponentData {
             size: Vec3::ONE,
             is_trigger: false,
             mask: default_collider_mask(),
+            physics_material: default_physics_material(),
         }
     }
 }
@@ -251,6 +311,9 @@ pub struct AudioSourceComponentData {
     pub looping: bool,
     /// Whether playback starts on scene start.
     pub play_on_start: bool,
+    /// Blend between 2D (0.0) and 3D (1.0) spatial audio.
+    #[serde(default)]
+    pub spatial_blend: f32,
 }
 
 impl Default for AudioSourceComponentData {
@@ -260,6 +323,7 @@ impl Default for AudioSourceComponentData {
             volume: 1.0,
             looping: false,
             play_on_start: false,
+            spatial_blend: 0.0,
         }
     }
 }
@@ -670,7 +734,7 @@ impl Scene {
         let new_entity = state.world.spawn()?;
         let mut cloned = source_object;
         cloned.id = state.id_allocator.allocate();
-        cloned.name = format!("{} Clone", cloned.name);
+        cloned.name = format!("{} (Copy)", cloned.name);
         state.by_id.insert(cloned.id, new_entity);
         state.objects.insert(new_entity, cloned);
         state.transforms.set_local(

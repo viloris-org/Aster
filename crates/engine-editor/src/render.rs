@@ -149,11 +149,7 @@ impl RenderService {
     }
 
     /// Renders a [`RenderWorld`] to the named offscreen target.
-    pub fn render_to_target(
-        &mut self,
-        name: &str,
-        world: &RenderWorld,
-    ) -> EngineResult<()> {
+    pub fn render_to_target(&mut self, name: &str, world: &RenderWorld) -> EngineResult<()> {
         let desc = self
             .targets
             .get(name)

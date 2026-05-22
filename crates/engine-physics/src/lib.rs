@@ -138,6 +138,10 @@ pub struct ContactEvent {
     pub body_a: BodyHandle,
     /// Second body.
     pub body_b: BodyHandle,
+    /// First collider.
+    pub collider_a: ColliderHandle,
+    /// Second collider.
+    pub collider_b: ColliderHandle,
     /// Contact point in world space.
     pub point: Vec3,
     /// Contact normal pointing from B toward A.
@@ -146,6 +150,8 @@ pub struct ContactEvent {
     pub entered: bool,
     /// Whether at least one collider in the pair is a trigger/sensor.
     pub is_trigger: bool,
+    /// Contact points in world space (multiple points for complex contacts).
+    pub contact_points: Vec<Vec3>,
 }
 
 // ── Query types ──────────────────────────────────────────────────────────────
@@ -235,6 +241,19 @@ pub struct CharacterControllerOutput {
     /// Number of collision callbacks observed during the move.
     pub collisions: usize,
 }
+
+// ── Named layer constants ─────────────────────────────────────────────────────
+
+/// Default physics layer.
+pub const LAYER_DEFAULT: u32 = 0;
+/// Player physics layer.
+pub const LAYER_PLAYER: u32 = 1;
+/// Enemy physics layer.
+pub const LAYER_ENEMY: u32 = 2;
+/// Trigger physics layer (sensors).
+pub const LAYER_TRIGGER: u32 = 3;
+/// Projectile physics layer.
+pub const LAYER_PROJECTILE: u32 = 4;
 
 // ── Layer matrix ─────────────────────────────────────────────────────────────
 
@@ -583,10 +602,13 @@ impl SimplePhysicsBackend {
         Some(ContactEvent {
             body_a: collider_a.body,
             body_b: collider_b.body,
+            collider_a: a,
+            collider_b: b,
             point: center_b + normal * radius_b,
             normal,
             entered: true,
             is_trigger: collider_a.desc.is_trigger || collider_b.desc.is_trigger,
+            contact_points: vec![center_b + normal * radius_b],
         })
     }
 
@@ -612,10 +634,13 @@ impl SimplePhysicsBackend {
                 self.contacts.push(ContactEvent {
                     body_a: left.body,
                     body_b: right.body,
+                    collider_a: pair.0,
+                    collider_b: pair.1,
                     point: Vec3::ZERO,
                     normal: Vec3::ZERO,
                     entered: false,
                     is_trigger: left.desc.is_trigger || right.desc.is_trigger,
+                    contact_points: Vec::new(),
                 });
             }
         }
@@ -1104,13 +1129,26 @@ mod rapier_backend {
                 let Some(body_b) = self.collider_owner(event.collider2()) else {
                     continue;
                 };
+                let collider_a = self
+                    .rapier_colliders
+                    .get(&event.collider1())
+                    .copied()
+                    .unwrap_or(ColliderHandle(0));
+                let collider_b = self
+                    .rapier_colliders
+                    .get(&event.collider2())
+                    .copied()
+                    .unwrap_or(ColliderHandle(0));
                 self.pending_contacts.push(ContactEvent {
                     body_a,
                     body_b,
+                    collider_a,
+                    collider_b,
                     point: Vec3::ZERO,
                     normal: Vec3::ZERO,
                     entered: event.started(),
                     is_trigger: event.sensor(),
+                    contact_points: Vec::new(),
                 });
             }
             while self.contact_force_events.try_recv().is_ok() {}
@@ -1815,5 +1853,498 @@ mod tests {
 
         assert!(movement.translation.z < 2.0);
         assert!(movement.collisions > 0);
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_dynamic_body_falls_due_to_gravity() {
+        let mut backend = RapierPhysicsBackend::new();
+        let body = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, 5.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Dynamic,
+                gravity_scale: 1.0,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                body,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Step simulation for 1 second (60 frames at 1/60s each)
+        for _ in 0..60 {
+            backend.fixed_update(1.0 / 60.0);
+        }
+
+        let transform = backend.body_transform(body).unwrap();
+        // After 1 second of falling with gravity, the body should be below starting position
+        assert!(
+            transform.translation.y < 4.0,
+            "Dynamic body should have fallen below starting position, got y={}",
+            transform.translation.y
+        );
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_static_body_does_not_move() {
+        let mut backend = RapierPhysicsBackend::new();
+        let body = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, 5.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                body,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Step simulation for 1 second (60 frames at 1/60s each)
+        for _ in 0..60 {
+            backend.fixed_update(1.0 / 60.0);
+        }
+
+        let transform = backend.body_transform(body).unwrap();
+        // Static body should remain at original position
+        assert!(
+            (transform.translation.y - 5.0).abs() < 0.001,
+            "Static body should not move, got y={}",
+            transform.translation.y
+        );
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_create_collider_attach_and_step_no_crash() {
+        let mut backend = RapierPhysicsBackend::new();
+
+        // Box collider on static body
+        let static_body = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, -0.5, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let box_collider = backend
+            .add_collider(
+                static_body,
+                &ColliderDesc {
+                    shape: ColliderShape::Box {
+                        half_extents: Vec3::new(5.0, 0.5, 5.0),
+                    },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Sphere collider on dynamic body
+        let dynamic_body = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, 5.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Dynamic,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let sphere_collider = backend
+            .add_collider(
+                dynamic_body,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Capsule collider on kinematic body
+        let kinematic_body = backend
+            .create_body(&RigidbodyDesc {
+                kind: BodyKind::Kinematic,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let capsule_collider = backend
+            .add_collider(
+                kinematic_body,
+                &ColliderDesc {
+                    shape: ColliderShape::Capsule {
+                        half_height: 0.5,
+                        radius: 0.25,
+                    },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Step simulation — no crash
+        for _ in 0..60 {
+            backend.fixed_update(1.0 / 60.0);
+        }
+
+        // Verify dynamic body fell
+        let dynamic_transform = backend.body_transform(dynamic_body).unwrap();
+        assert!(dynamic_transform.translation.y < 5.0);
+
+        // Remove sphere collider, step again — no crash
+        backend.remove_collider(sphere_collider).unwrap();
+        for _ in 0..10 {
+            backend.fixed_update(1.0 / 60.0);
+        }
+
+        // Verify collider count decreased
+        assert_eq!(backend.collider_count(), 2);
+
+        // Ensure all handles are distinct
+        assert_ne!(box_collider, sphere_collider);
+        assert_ne!(sphere_collider, capsule_collider);
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_raycast_returns_closest_of_two_spheres() {
+        let mut backend = RapierPhysicsBackend::new();
+
+        // Near sphere at z=3
+        let near = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, 0.0, 3.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                near,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Far sphere at z=6
+        let far = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, 0.0, 6.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                far,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        backend.fixed_update(1.0 / 60.0);
+
+        // Raycast along +Z from origin
+        let hit = backend
+            .raycast(
+                Vec3::ZERO,
+                Vec3::new(0.0, 0.0, 1.0),
+                100.0,
+                QueryFilter::default(),
+            )
+            .expect("should hit something");
+
+        // Closest hit should be the near sphere
+        assert_eq!(hit.body, near);
+        assert!(hit.distance > 2.0 && hit.distance < 4.0);
+        assert!(hit.point.z > 2.0 && hit.point.z < 4.0);
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_overlap_sphere_returns_intersecting_bodies() {
+        let mut backend = RapierPhysicsBackend::new();
+
+        // Body at origin
+        let center_body = backend
+            .create_body(&RigidbodyDesc {
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                center_body,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Nearby body at (1, 0, 0)
+        let nearby_body = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(1.0, 0.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                nearby_body,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Distant body at (10, 0, 0)
+        let distant_body = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(10.0, 0.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                distant_body,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        backend.fixed_update(1.0 / 60.0);
+
+        // Overlap sphere at origin with radius 3 — should find center and nearby bodies
+        let results = backend.overlap_sphere(Vec3::ZERO, 3.0, QueryFilter::default());
+        let found_bodies: Vec<BodyHandle> = results.iter().map(|r| r.body).collect();
+        assert!(
+            found_bodies.contains(&center_body),
+            "should find center body"
+        );
+        assert!(
+            found_bodies.contains(&nearby_body),
+            "should find nearby body"
+        );
+        assert!(
+            !found_bodies.contains(&distant_body),
+            "should not find distant body"
+        );
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_contact_event_on_cube_landing_on_floor() {
+        let mut backend = RapierPhysicsBackend::new();
+
+        // Ground plane (static)
+        let floor = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, -0.5, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let floor_collider = backend
+            .add_collider(
+                floor,
+                &ColliderDesc {
+                    shape: ColliderShape::Box {
+                        half_extents: Vec3::new(5.0, 0.5, 5.0),
+                    },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Falling cube (dynamic)
+        let cube = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, 2.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Dynamic,
+                gravity_scale: 1.0,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let cube_collider = backend
+            .add_collider(
+                cube,
+                &ColliderDesc {
+                    shape: ColliderShape::Box {
+                        half_extents: Vec3::new(0.5, 0.5, 0.5),
+                    },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Step physics for several frames so cube falls and hits floor
+        let mut found_enter = false;
+        for _ in 0..120 {
+            backend.fixed_update(1.0 / 60.0);
+            let contacts = backend.drain_contacts();
+            for event in contacts {
+                if event.entered {
+                    found_enter = true;
+                    // Verify both bodies/colliders are present
+                    assert!(
+                        (event.body_a == floor && event.body_b == cube)
+                            || (event.body_a == cube && event.body_b == floor),
+                        "contact should involve floor and cube"
+                    );
+                    assert!(
+                        (event.collider_a == floor_collider && event.collider_b == cube_collider)
+                            || (event.collider_a == cube_collider
+                                && event.collider_b == floor_collider),
+                        "contact should involve floor_collider and cube_collider"
+                    );
+                    assert!(!event.is_trigger, "contact event should not be trigger");
+                }
+            }
+            if found_enter {
+                break;
+            }
+        }
+
+        assert!(
+            found_enter,
+            "should have received at least one entered contact event"
+        );
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_trigger_enter_and_exit_events() {
+        let mut backend = RapierPhysicsBackend::new();
+
+        // Trigger zone (static, is_trigger=true) at origin
+        let trigger_body = backend
+            .create_body(&RigidbodyDesc {
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let trigger_collider = backend
+            .add_collider(
+                trigger_body,
+                &ColliderDesc {
+                    shape: ColliderShape::Box {
+                        half_extents: Vec3::new(1.0, 1.0, 1.0),
+                    },
+                    is_trigger: true,
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Dynamic body that will pass through the trigger zone
+        let mover = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(-3.0, 0.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Dynamic,
+                gravity_scale: 0.0,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let mover_collider = backend
+            .add_collider(
+                mover,
+                &ColliderDesc {
+                    shape: ColliderShape::Sphere { radius: 0.5 },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        // Step: mover is far away — no events expected
+        backend.fixed_update(1.0 / 60.0);
+        let far_contacts = backend.drain_contacts();
+        let far_enter = far_contacts.iter().any(|e| e.entered && e.is_trigger);
+        assert!(!far_enter, "no trigger enter event when far away");
+
+        // Move mover into the trigger zone
+        backend
+            .set_body_transform(
+                mover,
+                Transform {
+                    translation: Vec3::new(0.0, 0.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+            )
+            .unwrap();
+        backend.fixed_update(1.0 / 60.0);
+        let enter_contacts = backend.drain_contacts();
+        let enter_event = enter_contacts.iter().find(|e| e.entered && e.is_trigger);
+        assert!(enter_event.is_some(), "should receive trigger enter event");
+        let enter = enter_event.unwrap();
+        assert!(
+            (enter.collider_a == trigger_collider && enter.collider_b == mover_collider)
+                || (enter.collider_a == mover_collider && enter.collider_b == trigger_collider),
+            "enter event should involve trigger and mover colliders"
+        );
+
+        // Move mover out of the trigger zone
+        backend
+            .set_body_transform(
+                mover,
+                Transform {
+                    translation: Vec3::new(3.0, 0.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+            )
+            .unwrap();
+        backend.fixed_update(1.0 / 60.0);
+        let exit_contacts = backend.drain_contacts();
+        let exit_event = exit_contacts.iter().find(|e| !e.entered && e.is_trigger);
+        assert!(exit_event.is_some(), "should receive trigger exit event");
     }
 }

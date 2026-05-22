@@ -39,6 +39,7 @@ fn darken(c: Color32, amount: u8) -> Color32 {
 struct Palette {
     base: Color32,
     surface: Color32,
+    input: Color32,
     surface_hover: Color32,
     surface_selected: Color32,
     border: Color32,
@@ -53,6 +54,7 @@ fn make_palette(t: &DesignTokens, is_dark: bool) -> Palette {
     Palette {
         base: hex(t.base),
         surface: hex(t.surface),
+        input: darken(hex(t.surface), 10),
         surface_hover: hex(t.surface_hover),
         surface_selected: if is_dark {
             Color32::from_rgb(0x33, 0x33, 0x33)
@@ -78,6 +80,7 @@ fn apply_visuals(ctx: &egui::Context, pal: &Palette) {
     v.window_fill = pal.surface;
     v.extreme_bg_color = pal.surface;
     v.faint_bg_color = pal.surface;
+    v.text_edit_bg_color = Some(pal.input);
     v.window_stroke = Stroke::new(1.0, pal.border);
     v.widgets.noninteractive.bg_fill = pal.surface;
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, pal.text_primary);
@@ -381,10 +384,12 @@ fn draw_projects_page(ui: &mut egui::Ui, hub: &mut HubState, pal: &Palette, tr: 
                 for (name, path, touched, version) in &projects {
                     let is_selected = selected_path.as_ref() == Some(path);
                     ui.add_space(6.0);
+                    let card_width = (ui.available_width() - 56.0).max(0.0);
                     ui.horizontal(|ui| {
                         ui.add_space(28.0);
                         let action = project_card(
                             ui,
+                            card_width,
                             &name,
                             path.to_string_lossy().as_ref(),
                             &touched,
@@ -428,6 +433,7 @@ enum CardAction {
 
 fn project_card(
     ui: &mut egui::Ui,
+    width: f32,
     name: &str,
     path: &str,
     touched: &str,
@@ -435,7 +441,6 @@ fn project_card(
     selected: bool,
     pal: &Palette,
 ) -> CardAction {
-    let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 72.0), egui::Sense::click());
 
     let bg = if selected {
@@ -471,8 +476,10 @@ fn project_card(
         pal.accent_text,
     );
 
-    let folder_btn_rect =
-        egui::Rect::from_min_size(rect.max - Vec2::new(40.0, 52.0), Vec2::new(32.0, 32.0));
+    let folder_btn_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.right() - 40.0, rect.center().y - 16.0),
+        Vec2::splat(32.0),
+    );
     let meta_width = 88.0_f32.min((rect.width() * 0.24).max(54.0));
     let text_right = (folder_btn_rect.left() - meta_width - 8.0).max(rect.min.x + 96.0);
     let name_rect = Rect::from_min_max(
@@ -532,20 +539,13 @@ fn project_card(
         Align2::LEFT_CENTER,
     );
 
-    // Open-folder button (⌂)
+    // Open-folder button
     let btn_resp = ui.allocate_rect(folder_btn_rect, egui::Sense::click());
     if btn_resp.hovered() {
         ui.painter()
             .rect_filled(folder_btn_rect, CornerRadius::same(6), pal.surface_hover);
     }
-    paint_text_in_rect(
-        ui,
-        folder_btn_rect,
-        "⌂",
-        FontId::proportional(16.0),
-        pal.text_secondary,
-        Align2::CENTER_CENTER,
-    );
+    paint_folder_icon(ui, folder_btn_rect, pal.text_secondary);
 
     if btn_resp.clicked() {
         return CardAction::OpenFolder;
@@ -557,6 +557,21 @@ fn project_card(
         return CardAction::Select;
     }
     CardAction::None
+}
+
+fn paint_folder_icon(ui: &mut egui::Ui, rect: Rect, color: Color32) {
+    let icon = Rect::from_center_size(rect.center(), Vec2::new(16.0, 12.0));
+    let tab = Rect::from_min_max(
+        icon.min + Vec2::new(1.0, 0.0),
+        egui::pos2(icon.min.x + 7.0, icon.min.y + 4.0),
+    );
+    let body = Rect::from_min_max(egui::pos2(icon.min.x, icon.min.y + 3.0), icon.max);
+    let stroke = Stroke::new(1.25, color);
+
+    ui.painter()
+        .rect_stroke(tab, CornerRadius::same(1), stroke, StrokeKind::Outside);
+    ui.painter()
+        .rect_stroke(body, CornerRadius::same(2), stroke, StrokeKind::Outside);
 }
 
 // ── installs page ─────────────────────────────────────────────────────────────
@@ -869,16 +884,20 @@ fn draw_new_project_dialog(
         is_open = false;
     }
 
+    let mut created_project_meta: Option<ProjectMetadata> = None;
+
     if let Some(req) = submit_req {
         match hub.create_project_plan(&req) {
             Ok(plan) => match hub.create_project_files(&plan) {
                 Ok(()) => {
-                    hub.upsert_project(ProjectMetadata::new(
+                    let meta = ProjectMetadata::new(
                         &plan.name,
                         &plan.path,
                         "just now",
                         &plan.toolchain_version,
-                    ));
+                    );
+                    hub.upsert_project(meta.clone());
+                    created_project_meta = Some(meta);
                     is_open = false;
                 }
                 Err(e) => {
@@ -895,6 +914,12 @@ fn draw_new_project_dialog(
         hub.new_project_dialog = Some(dialog);
     } else {
         hub.new_project_dialog = None;
+    }
+
+    if let Some(meta) = created_project_meta {
+        if let Ok(action) = hub.launch_editor_action(&meta) {
+            hub.pending_action = Some(action);
+        }
     }
 }
 

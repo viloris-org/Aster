@@ -1,24 +1,29 @@
-//! Font configuration for CJK text support.
+//! Font configuration for CJK text support and icon fonts.
 //!
 //! egui's built-in fonts lack CJK coverage. This module provides the
 //! [`setup_egui_fonts`] function that adds a bundled fallback font so
 //! Chinese text renders correctly instead of as tofu (missing-glyph boxes).
+//! It also registers the Phosphor icon font for UI icons.
 
 use std::sync::Arc;
 
-use egui::{FontData, FontDefinitions, FontFamily};
+use egui::FontFamily;
 
-/// Configures [`egui::Context`] font definitions to support CJK characters.
+/// Configures [`egui::Context`] font definitions to support CJK characters and icons.
 ///
 /// Must be called **once** on the egui context **before** any frames are drawn.
 /// Adds the bundled DroidSansFallback font (which covers CJK) as a fallback
-/// for both the `Proportional` and `Monospace` font families.
+/// for both the `Proportional` and `Monospace` font families, and registers
+/// the Phosphor icon font for UI icons.
 pub fn setup_egui_fonts(ctx: &egui::Context) {
-    let mut fonts = FontDefinitions::default();
+    let mut fonts = egui::FontDefinitions::default();
+
+    // Add Phosphor icon font
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
     fonts.font_data.insert(
         "DroidSansFallback".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!(
+        Arc::new(egui::FontData::from_static(include_bytes!(
             "../fonts/DroidSansFallbackFull.ttf"
         ))),
     );

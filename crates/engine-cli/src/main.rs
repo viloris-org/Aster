@@ -17,13 +17,15 @@ use engine_render::ImageFormat;
 #[cfg(feature = "editor")]
 use engine_render_wgpu::WgpuRenderDevice;
 #[cfg(feature = "editor")]
+use std::path::PathBuf;
+#[cfg(feature = "editor")]
 use winit;
 
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("engine-cli error: {error}");
+            eprintln!("aster error: {error}");
             ExitCode::FAILURE
         }
     }
@@ -32,15 +34,18 @@ fn main() -> ExitCode {
 fn run() -> EngineResult<()> {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
-        None | Some("smoke") => smoke(args.next())?,
+        #[cfg(feature = "editor")]
+        None | Some("open") => open_editor()?,
+        #[cfg(not(feature = "editor"))]
+        None => smoke(args.next())?,
+        Some("smoke") => smoke(args.next())?,
         Some("run") => run_project(args.next())?,
+        Some("build") => build_project(args.collect())?,
         Some("profiles") => print_profiles(),
         Some("--help") | Some("-h") | Some("help") => print_help(),
-        #[cfg(feature = "editor")]
-        Some("open") => open_editor()?,
         Some(command) => {
             return Err(EngineError::config(format!(
-                "unknown engine-cli command `{command}`"
+                "unknown aster command `{command}`"
             )));
         }
     }
@@ -77,6 +82,266 @@ fn run_project(project_arg: Option<String>) -> EngineResult<()> {
     runtime_min::run_project(project)
 }
 
+fn build_project(args: Vec<String>) -> EngineResult<()> {
+    use engine_ecs::{BuildConfiguration, ProjectManifest};
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    // Parse arguments
+    let mut project_path: Option<String> = None;
+    let mut config_path: Option<String> = None;
+    let mut output_path: Option<String> = None;
+    let mut args_iter = args.into_iter();
+
+    while let Some(arg) = args_iter.next() {
+        match arg.as_str() {
+            "--config" => {
+                config_path = args_iter.next();
+            }
+            "--output" => {
+                output_path = args_iter.next();
+            }
+            _ if !arg.starts_with("--") && project_path.is_none() => {
+                project_path = Some(arg);
+            }
+            _ => {
+                return Err(EngineError::config(format!(
+                    "unknown build argument: {}",
+                    arg
+                )));
+            }
+        }
+    }
+
+    let project_path = project_path.unwrap_or_else(|| "examples/project".to_string());
+    let project_root = PathBuf::from(&project_path);
+
+    // Load project manifest
+    let manifest = if project_root.is_dir() {
+        ProjectManifest::load(&project_root)?
+    } else {
+        return Err(EngineError::config(format!(
+            "project path does not exist or is not a directory: {}",
+            project_root.display()
+        )));
+    };
+
+    // Load build configuration
+    let config_file = if let Some(config) = config_path {
+        PathBuf::from(config)
+    } else {
+        project_root.join(&manifest.build_config)
+    };
+
+    let config_content = std::fs::read_to_string(&config_file).map_err(|e| {
+        EngineError::config(format!(
+            "failed to read build config {}: {}",
+            config_file.display(),
+            e
+        ))
+    })?;
+
+    let build_config: BuildConfiguration = toml::from_str(&config_content).map_err(|e| {
+        EngineError::config(format!(
+            "failed to parse build config {}: {}",
+            config_file.display(),
+            e
+        ))
+    })?;
+
+    // Validate build configuration
+    let diagnostics = build_config.diagnostics();
+    if !diagnostics.is_empty() {
+        eprintln!("Build configuration validation errors:");
+        for diag in &diagnostics {
+            eprintln!("  {}: {}", diag.path, diag.message);
+        }
+        return Err(EngineError::config(
+            "build configuration validation failed".to_string(),
+        ));
+    }
+
+    // Determine output directory
+    let output_dir = if let Some(output) = output_path {
+        PathBuf::from(output)
+    } else {
+        project_root.join("build")
+    };
+
+    println!("Building project: {}", manifest.name);
+    println!("  Target: {}", build_config.target);
+    println!("  Release: {}", build_config.release);
+    println!("  Features: {}", build_config.features.join(", "));
+    println!("  Output: {}", output_dir.display());
+
+    // Build the runtime binary with cargo
+    let workspace_root = std::env::current_dir()
+        .map_err(|e| EngineError::config(format!("failed to get current directory: {}", e)))?;
+    let mut cargo_cmd = Command::new("cargo");
+    cargo_cmd.arg("build").arg("-p").arg("aster");
+
+    if build_config.release {
+        cargo_cmd.arg("--release");
+    }
+
+    // Map build config features to aster CLI features
+    // The build config may specify runtime features like "runtime-game", "physics", "audio"
+    // which need to be translated to aster's feature set
+    let mut aster_features = Vec::new();
+    for feature in &build_config.features {
+        match feature.as_str() {
+            "runtime-game" => aster_features.push("runtime-game"),
+            "runtime-min" => aster_features.push("runtime-min"),
+            "wgpu" => aster_features.push("wgpu"),
+            // physics and audio are runtime-min features, not aster features
+            // They will be included when runtime-game is enabled
+            "physics" | "audio" => {
+                // Skip - these are runtime-min features
+            }
+            _ => {
+                // Pass through other features
+                aster_features.push(feature.as_str());
+            }
+        }
+    }
+
+    if !aster_features.is_empty() {
+        cargo_cmd.arg("--features").arg(aster_features.join(","));
+    }
+
+    if build_config.target != "native" {
+        cargo_cmd.arg("--target").arg(&build_config.target);
+    }
+
+    println!("\nRunning cargo build...");
+    let cargo_output = cargo_cmd
+        .output()
+        .map_err(|e| EngineError::config(format!("failed to execute cargo build: {}", e)))?;
+
+    if !cargo_output.status.success() {
+        eprintln!("Cargo build failed:");
+        eprintln!("{}", String::from_utf8_lossy(&cargo_output.stderr));
+        return Err(EngineError::config("cargo build failed".to_string()));
+    }
+
+    println!("Cargo build succeeded");
+
+    // Create output directory structure
+    std::fs::create_dir_all(&output_dir).map_err(|e| {
+        EngineError::config(format!(
+            "failed to create output directory {}: {}",
+            output_dir.display(),
+            e
+        ))
+    })?;
+
+    let bin_dir = output_dir.join("bin");
+    let scenes_dir = output_dir.join("scenes");
+    std::fs::create_dir_all(&bin_dir)
+        .map_err(|e| EngineError::config(format!("failed to create bin directory: {}", e)))?;
+    std::fs::create_dir_all(&scenes_dir)
+        .map_err(|e| EngineError::config(format!("failed to create scenes directory: {}", e)))?;
+
+    // Copy runtime binary
+    let profile = if build_config.release {
+        "release"
+    } else {
+        "debug"
+    };
+    let binary_name = if cfg!(target_os = "windows") {
+        "aster.exe"
+    } else {
+        "aster"
+    };
+
+    let source_binary = if build_config.target == "native" {
+        workspace_root
+            .join("target")
+            .join(profile)
+            .join(binary_name)
+    } else {
+        workspace_root
+            .join("target")
+            .join(&build_config.target)
+            .join(profile)
+            .join(binary_name)
+    };
+
+    let dest_binary = bin_dir.join(binary_name);
+    std::fs::copy(&source_binary, &dest_binary).map_err(|e| {
+        EngineError::config(format!(
+            "failed to copy binary from {} to {}: {}",
+            source_binary.display(),
+            dest_binary.display(),
+            e
+        ))
+    })?;
+
+    println!("Copied binary to {}", dest_binary.display());
+
+    // Copy default scene
+    let scene_path = project_root.join(&manifest.default_scene);
+    if scene_path.exists() {
+        let scene_name = scene_path
+            .file_name()
+            .ok_or_else(|| EngineError::config("invalid scene path".to_string()))?;
+        let dest_scene = scenes_dir.join(scene_name);
+        std::fs::copy(&scene_path, &dest_scene).map_err(|e| {
+            EngineError::config(format!(
+                "failed to copy scene from {} to {}: {}",
+                scene_path.display(),
+                dest_scene.display(),
+                e
+            ))
+        })?;
+        println!("Copied scene to {}", dest_scene.display());
+    }
+
+    // Generate assets_manifest.json (placeholder for now)
+    let assets_manifest = output_dir.join("assets_manifest.json");
+    let manifest_content = serde_json::json!({
+        "version": 1,
+        "assets": []
+    });
+    let manifest_json = serde_json::to_string_pretty(&manifest_content)
+        .map_err(|e| EngineError::config(format!("failed to serialize assets manifest: {}", e)))?;
+    std::fs::write(&assets_manifest, manifest_json)
+        .map_err(|e| EngineError::config(format!("failed to write assets_manifest.json: {}", e)))?;
+    println!("Generated {}", assets_manifest.display());
+
+    // Copy import_cache.json if it exists
+    let import_cache = project_root.join("import_cache.json");
+    if import_cache.exists() {
+        let dest_cache = output_dir.join("import_cache.json");
+        std::fs::copy(&import_cache, &dest_cache)
+            .map_err(|e| EngineError::config(format!("failed to copy import_cache.json: {}", e)))?;
+        println!("Copied import_cache.json");
+    }
+
+    // Write build_info.json
+    let build_info = output_dir.join("build_info.json");
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let build_info_content = serde_json::json!({
+        "timestamp": timestamp,
+        "target": build_config.target,
+        "release": build_config.release,
+        "engine_version": env!("CARGO_PKG_VERSION")
+    });
+    let build_info_json = serde_json::to_string_pretty(&build_info_content)
+        .map_err(|e| EngineError::config(format!("failed to serialize build info: {}", e)))?;
+    std::fs::write(&build_info, build_info_json)
+        .map_err(|e| EngineError::config(format!("failed to write build_info.json: {}", e)))?;
+    println!("Generated {}", build_info.display());
+
+    println!("\nBuild completed successfully!");
+    println!("Output directory: {}", output_dir.display());
+
+    Ok(())
+}
+
 fn print_profiles() {
     for profile in [
         RuntimeProfile::RuntimeMin,
@@ -91,14 +356,17 @@ fn print_profiles() {
 }
 
 fn print_help() {
-    println!("Aster native CLI");
+    println!("Aster");
     println!();
     println!("Usage:");
-    println!("  cargo run -p engine-cli -- [smoke] [profile]");
-    println!("  cargo run -p engine-cli -- run <project>");
-    println!("  cargo run -p engine-cli -- profiles");
     #[cfg(feature = "editor")]
-    println!("  cargo run -p engine-cli --features editor -- open");
+    println!("  cargo run -p aster");
+    #[cfg(feature = "editor")]
+    println!("  cargo run -p aster -- open");
+    println!("  cargo run -p aster -- smoke [profile]");
+    println!("  cargo run -p aster -- run <project>");
+    println!("  cargo run -p aster -- build <project> [--config <path>] [--output <path>]");
+    println!("  cargo run -p aster -- profiles");
 }
 
 #[cfg(feature = "editor")]
@@ -106,7 +374,8 @@ fn open_editor() -> EngineResult<()> {
     use egui_wgpu::wgpu;
     use engine_core::EngineConfig;
     use engine_editor::{
-        ConsoleEntry, ConsoleLevel, ConsoleSource, EditorPreferences, ThemePreference,
+        ConsoleEntry, ConsoleLevel, ConsoleSource, DurableEditorState, EditorPreferences,
+        FileEditorStore, ProjectMetadata, ThemePreference,
     };
     use engine_editor_ui::{
         draw_hub, draw_shell, EditorShell, HubState, PlayModeRequest, ShellUiState,
@@ -129,6 +398,7 @@ fn open_editor() -> EngineResult<()> {
     }
 
     /// Which top-level screen is active.
+    #[derive(PartialEq)]
     enum Screen {
         Hub,
         Editor,
@@ -141,6 +411,7 @@ fn open_editor() -> EngineResult<()> {
         render_state: Option<RenderState>,
         wgpu_render_device: Option<WgpuRenderDevice>,
         scene_view_texture_id: Option<egui::TextureId>,
+        game_view_texture_id: Option<egui::TextureId>,
         screen: Screen,
         hub: HubState,
         shell: EditorShell,
@@ -148,6 +419,7 @@ fn open_editor() -> EngineResult<()> {
         play_runtime: Option<RuntimeServices>,
         last_editor_frame: Instant,
         runtime_diagnostic_cursor: usize,
+        store: FileEditorStore,
     }
 
     impl App {
@@ -174,37 +446,94 @@ fn open_editor() -> EngineResult<()> {
             }
 
             let (width, height) = wgpu_dev.default_target_size();
-            let egui_texture_id =
-                if let Some(texture_id) = self.scene_view_texture_id {
-                    render_state
-                        .renderer
-                        .update_egui_texture_from_wgpu_texture(
-                            &render_state.device,
-                            wgpu_dev.default_target_view(),
-                            wgpu::FilterMode::Linear,
-                            texture_id,
-                        );
-                    texture_id
-                } else {
-                    let texture_id = render_state.renderer.register_native_texture(
-                        &render_state.device,
-                        wgpu_dev.default_target_view(),
-                        wgpu::FilterMode::Linear,
-                    );
-                    self.scene_view_texture_id = Some(texture_id);
-                    texture_id
-                };
+            let egui_texture_id = if let Some(texture_id) = self.scene_view_texture_id {
+                render_state.renderer.update_egui_texture_from_wgpu_texture(
+                    &render_state.device,
+                    wgpu_dev.default_target_view(),
+                    wgpu::FilterMode::Linear,
+                    texture_id,
+                );
+                texture_id
+            } else {
+                let texture_id = render_state.renderer.register_native_texture(
+                    &render_state.device,
+                    wgpu_dev.default_target_view(),
+                    wgpu::FilterMode::Linear,
+                );
+                self.scene_view_texture_id = Some(texture_id);
+                texture_id
+            };
 
             let egui::TextureId::User(texture_id) = egui_texture_id else {
                 return;
             };
 
-            self.shell_ui.scene_view_texture =
-                Some(engine_editor_ui::ViewportTexture {
-                    id: texture_id,
-                    width,
-                    height,
-                });
+            self.shell_ui.scene_view_texture = Some(engine_editor_ui::ViewportTexture {
+                id: texture_id,
+                width,
+                height,
+            });
+        }
+
+        /// Renders the game view to an offscreen texture and registers it
+        /// for display in the next egui frame.
+        fn render_game_view(&mut self) {
+            let Some(wgpu_dev) = self.wgpu_render_device.as_mut() else {
+                return;
+            };
+            let Some(render_state) = self.render_state.as_mut() else {
+                return;
+            };
+
+            // Only render when in Play Mode (or paused).
+            if !self.shell_ui.playing && !self.shell_ui.paused {
+                self.shell_ui.game_view_texture = None;
+                return;
+            }
+
+            let Some(world) = self.shell_ui.runtime_game_world.as_ref() else {
+                self.shell_ui.game_view_texture = None;
+                return;
+            };
+            if !world.is_visible() {
+                self.shell_ui.game_view_texture = None;
+                return;
+            }
+
+            if let Err(e) = wgpu_dev.render_world_offscreen_game(world) {
+                self.push_editor_error(format!("game render failed: {e}"));
+                self.shell_ui.game_view_texture = None;
+                return;
+            }
+
+            let (width, height) = wgpu_dev.game_target_size();
+            let egui_texture_id = if let Some(texture_id) = self.game_view_texture_id {
+                render_state.renderer.update_egui_texture_from_wgpu_texture(
+                    &render_state.device,
+                    wgpu_dev.game_target_view(),
+                    wgpu::FilterMode::Linear,
+                    texture_id,
+                );
+                texture_id
+            } else {
+                let texture_id = render_state.renderer.register_native_texture(
+                    &render_state.device,
+                    wgpu_dev.game_target_view(),
+                    wgpu::FilterMode::Linear,
+                );
+                self.game_view_texture_id = Some(texture_id);
+                texture_id
+            };
+
+            let egui::TextureId::User(texture_id) = egui_texture_id else {
+                return;
+            };
+
+            self.shell_ui.game_view_texture = Some(engine_editor_ui::ViewportTexture {
+                id: texture_id,
+                width,
+                height,
+            });
         }
 
         fn handle_play_mode_request(&mut self) {
@@ -269,6 +598,7 @@ fn open_editor() -> EngineResult<()> {
             self.shell_ui.playing = false;
             self.shell_ui.paused = false;
             self.shell_ui.runtime_game_world = None;
+            self.shell_ui.game_view_texture = None;
             if let Some(project) = self.shell.project_mut() {
                 project.scene.exit_play_mode();
             }
@@ -420,6 +750,7 @@ fn open_editor() -> EngineResult<()> {
                 renderer,
             });
             self.scene_view_texture_id = None;
+            self.game_view_texture_id = None;
 
             let wgpu_render_device = WgpuRenderDevice::from_arc_device(
                 instance,
@@ -457,7 +788,14 @@ fn open_editor() -> EngineResult<()> {
             }
 
             match event {
-                WindowEvent::CloseRequested => event_loop.exit(),
+                WindowEvent::CloseRequested => {
+                    if self.screen == Screen::Editor && self.shell.is_scene_dirty() {
+                        self.shell_ui.show_close_dialog = true;
+                        self.shell_ui.close_dialog_exit_app = true;
+                    } else {
+                        event_loop.exit();
+                    }
+                }
                 WindowEvent::Resized(size) => {
                     if let Some(rs) = self.render_state.as_mut() {
                         rs.config.width = size.width.max(1);
@@ -475,9 +813,10 @@ fn open_editor() -> EngineResult<()> {
                     let mut should_close = false;
                     let egui_ctx = self.egui_ctx.clone();
 
-                    // Render 3D scene to offscreen texture before the egui frame.
+                    // Render 3D scene and game views to offscreen textures before the egui frame.
                     if matches!(self.screen, Screen::Editor) {
                         self.render_scene_view();
+                        self.render_game_view();
                     }
 
                     let full_output = egui_ctx.run_ui(raw_input, |ctx| match self.screen {
@@ -487,12 +826,13 @@ fn open_editor() -> EngineResult<()> {
                                 match action {
                                     engine_editor_ui::HubAction::LaunchEditor {
                                         project_path,
-                                        ..
+                                        toolchain_version,
                                     } => {
                                         self.play_runtime = None;
                                         self.shell_ui.playing = false;
                                         self.shell_ui.paused = false;
                                         self.shell_ui.runtime_game_world = None;
+                                        self.shell_ui.game_view_texture = None;
                                         if let Err(error) = self.shell.open_project(&project_path) {
                                             self.shell.console_mut().push(ConsoleEntry {
                                                 timestamp: "now".to_string(),
@@ -507,6 +847,18 @@ fn open_editor() -> EngineResult<()> {
                                         } else {
                                             self.screen = Screen::Editor;
                                             window.set_title("Aster Editor");
+                                            let name = project_path
+                                                .file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("Project");
+                                            self.hub.upsert_project(ProjectMetadata::new(
+                                                name,
+                                                &project_path,
+                                                "now",
+                                                &toolchain_version,
+                                            ));
+                                            let state = self.hub.durable_state();
+                                            let _ = self.store.save(&state);
                                         }
                                     }
                                     engine_editor_ui::HubAction::OpenFolder(path) => {
@@ -544,6 +896,87 @@ fn open_editor() -> EngineResult<()> {
                             self.tick_play_runtime();
                             should_close = draw_shell(ctx, &mut self.shell, &mut self.shell_ui);
                             self.handle_play_mode_request();
+                            if let Some(action) = self.shell_ui.pending_action.take() {
+                                match action {
+                                    engine_editor_ui::EditorAction::OpenScene => {
+                                        if let Some(path) = rfd::FileDialog::new()
+                                            .set_title("Open Scene")
+                                            .add_filter("Scene JSON", &["json", "scene"])
+                                            .set_directory(
+                                                self.shell
+                                                    .project()
+                                                    .map(|p| p.root.clone())
+                                                    .unwrap_or_else(|| {
+                                                        std::path::PathBuf::from(".")
+                                                    }),
+                                            )
+                                            .pick_file()
+                                        {
+                                            match self.shell.load_scene(&path) {
+                                                Ok(display_path) => {
+                                                    self.shell_ui.status_toast = Some(format!(
+                                                        "Scene loaded from {display_path}"
+                                                    ));
+                                                    self.shell_ui.status_toast_frames = 180;
+                                                }
+                                                Err(error) => {
+                                                    self.shell.console_mut().push(ConsoleEntry {
+                                                        timestamp: "now".to_string(),
+                                                        level: ConsoleLevel::Error,
+                                                        source: ConsoleSource {
+                                                            subsystem: "editor".to_string(),
+                                                            file: None,
+                                                            line: None,
+                                                        },
+                                                        message: error.to_string(),
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                    engine_editor_ui::EditorAction::SaveAs => {
+                                        if let Some(path) = rfd::FileDialog::new()
+                                            .set_title("Save Scene As")
+                                            .add_filter("Scene JSON", &["json", "scene"])
+                                            .save_file()
+                                        {
+                                            match self.shell.save_scene_as(&path) {
+                                                Ok(display_path) => {
+                                                    self.shell_ui.status_toast = Some(format!(
+                                                        "Scene saved to {display_path}"
+                                                    ));
+                                                    self.shell_ui.status_toast_frames = 180;
+                                                }
+                                                Err(error) => {
+                                                    self.shell.console_mut().push(ConsoleEntry {
+                                                        timestamp: "now".to_string(),
+                                                        level: ConsoleLevel::Error,
+                                                        source: ConsoleSource {
+                                                            subsystem: "editor".to_string(),
+                                                            file: None,
+                                                            line: None,
+                                                        },
+                                                        message: error.to_string(),
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                    engine_editor_ui::EditorAction::CloseWindow => {
+                                        should_close = true;
+                                    }
+                                    engine_editor_ui::EditorAction::ReturnToHub => {
+                                        self.screen = Screen::Hub;
+                                        self.play_runtime = None;
+                                        self.shell_ui.playing = false;
+                                        self.shell_ui.paused = false;
+                                        self.shell_ui.runtime_game_world = None;
+                                        self.shell_ui.game_view_texture = None;
+                                        self.shell_ui.scene_view_texture = None;
+                                        window.set_title("Aster Hub");
+                                    }
+                                }
+                            }
                         }
                     });
                     if let Some(state) = self.egui_state.as_mut() {
@@ -634,6 +1067,8 @@ fn open_editor() -> EngineResult<()> {
                     }
 
                     if should_close {
+                        let state = self.hub.durable_state();
+                        let _ = self.store.save(&state);
                         event_loop.exit();
                     }
                     window.request_redraw();
@@ -643,23 +1078,38 @@ fn open_editor() -> EngineResult<()> {
         }
     }
 
+    let config_dir = std::env::var("HOME")
+        .map(|home| PathBuf::from(home).join(".config").join("aster"))
+        .unwrap_or_else(|_| PathBuf::from(".aster-config"));
+    let store = FileEditorStore::new(config_dir.join("editor-state.toml"));
+    let durable_state = store
+        .load()
+        .unwrap_or_else(|_| DurableEditorState::default());
+
+    let prefs = durable_state.preferences.clone();
     let prefs = EditorPreferences {
         theme: ThemePreference::Dark,
-        ..EditorPreferences::default()
+        ..prefs
     };
 
     let event_loop = EventLoop::new().map_err(|e| EngineError::other(e.to_string()))?;
-    let mut hub = HubState::new(prefs.clone());
-    let example_project = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("examples/project");
+    let mut hub = HubState::from_durable_state(durable_state);
     hub.add_install(engine_editor::ToolchainInstall::new("0.1.0", "."));
-    hub.upsert_project(engine_editor::ProjectMetadata::new(
-        "Aster Example",
-        example_project,
-        "2026-05-19",
-        "0.1.0",
-    ));
+
+    // Seed the example project if no projects exist.
+    if hub.filtered_projects().is_empty() {
+        let example_project = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("examples/project");
+        if example_project.join("aster.project.toml").is_file() {
+            hub.upsert_project(ProjectMetadata::new(
+                "Aster Example",
+                example_project,
+                "2026-05-19",
+                "0.1.0",
+            ));
+        }
+    }
 
     let egui_ctx = egui::Context::default();
     engine_editor_ui::setup_egui_fonts(&egui_ctx);
@@ -671,6 +1121,7 @@ fn open_editor() -> EngineResult<()> {
         render_state: None,
         wgpu_render_device: None,
         scene_view_texture_id: None,
+        game_view_texture_id: None,
         screen: Screen::Hub,
         hub,
         shell: EditorShell::with_core_services(prefs),
@@ -678,6 +1129,7 @@ fn open_editor() -> EngineResult<()> {
         play_runtime: None,
         last_editor_frame: Instant::now(),
         runtime_diagnostic_cursor: 0,
+        store,
     };
     event_loop
         .run_app(&mut app)

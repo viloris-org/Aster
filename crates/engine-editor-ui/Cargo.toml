@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [features]
 default = []
-editor = ["engine-editor/editor", "engine-core/editor", "dep:egui"]
+editor = ["engine-editor/editor", "engine-core/editor", "dep:egui", "dep:egui-phosphor"]
 dev-full = ["editor", "engine-editor/dev-full", "engine-core/dev-full"]
 
 [dependencies]
@@ -20,5 +20,6 @@ engine-editor.workspace = true
 engine-i18n.workspace = true
 engine-render.workspace = true
 egui = { workspace = true, optional = true }
+egui-phosphor = { version = "0.12", optional = true }
 serde_json.workspace = true
 toml.workspace = true

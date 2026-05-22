@@ -1,5 +1,7 @@
 //! Project, prefab, editor preference, and build configuration schemas.
 
+use std::{fs, path::Path};
+
 use engine_core::{EngineError, EngineResult};
 
 use crate::scene::{SceneFile, SCENE_FILE_VERSION};
@@ -116,69 +118,77 @@ impl ComponentSchemaRegistry {
         registry.register(ComponentSchema {
             type_id: "Camera".to_string(),
             display_name: "Camera".to_string(),
-            version: 1,
+            version: 2,
             fields: vec![
                 field("vertical_fov_degrees", ComponentFieldKind::F32, "60"),
                 field("near", ComponentFieldKind::F32, "0.01"),
                 field("far", ComponentFieldKind::F32, "1000"),
                 field("primary", ComponentFieldKind::Bool, "true"),
+                field("clear_color", ComponentFieldKind::Vec3, "0.1,0.1,0.1"),
             ],
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
             type_id: "MeshRenderer".to_string(),
             display_name: "Mesh Renderer".to_string(),
-            version: 1,
+            version: 2,
             fields: vec![
                 field("mesh", ComponentFieldKind::AssetRef, "debug/cube"),
                 field("material", ComponentFieldKind::Object, "debug/default"),
                 field("casts_shadows", ComponentFieldKind::Bool, "true"),
+                field("receive_shadows", ComponentFieldKind::Bool, "true"),
             ],
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
             type_id: "Light".to_string(),
             display_name: "Light".to_string(),
-            version: 1,
+            version: 2,
             fields: vec![
                 field("kind", ComponentFieldKind::String, "directional"),
                 field("color", ComponentFieldKind::Vec3, "1,1,1"),
                 field("intensity", ComponentFieldKind::F32, "1"),
+                field("range", ComponentFieldKind::F32, "10"),
+                field("spot_angle", ComponentFieldKind::F32, "30"),
             ],
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
             type_id: "Rigidbody".to_string(),
             display_name: "Rigidbody".to_string(),
-            version: 1,
+            version: 2,
             fields: vec![
                 field("body_type", ComponentFieldKind::String, "dynamic"),
                 field("mass", ComponentFieldKind::F32, "1"),
                 field("use_gravity", ComponentFieldKind::Bool, "true"),
+                field("linear_damping", ComponentFieldKind::F32, "0"),
+                field("angular_damping", ComponentFieldKind::F32, "0.05"),
             ],
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
             type_id: "Collider".to_string(),
             display_name: "Collider".to_string(),
-            version: 1,
+            version: 2,
             fields: vec![
                 field("shape", ComponentFieldKind::String, "box"),
                 field("size", ComponentFieldKind::Vec3, "1,1,1"),
                 field("is_trigger", ComponentFieldKind::Bool, "false"),
                 field("mask", ComponentFieldKind::String, "4294967295"),
+                field("physics_material", ComponentFieldKind::String, "default"),
             ],
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
             type_id: "AudioSource".to_string(),
             display_name: "Audio Source".to_string(),
-            version: 1,
+            version: 2,
             fields: vec![
                 field("clip", ComponentFieldKind::AssetRef, ""),
                 field("volume", ComponentFieldKind::F32, "1"),
                 field("looping", ComponentFieldKind::Bool, "false"),
                 field("play_on_start", ComponentFieldKind::Bool, "false"),
+                field("spatial_blend", ComponentFieldKind::F32, "0"),
             ],
             evolution: SchemaEvolution::default(),
         });
@@ -236,6 +246,11 @@ fn field(
     }
 }
 
+/// Returns the default build configuration path.
+fn default_build_config() -> String {
+    "build.runtime-min.toml".to_string()
+}
+
 /// Project manifest format.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ProjectManifest {
@@ -244,11 +259,20 @@ pub struct ProjectManifest {
     /// Project display name.
     pub name: String,
     /// Asset root relative to the project file.
+    #[serde(default = "default_asset_root")]
     pub asset_root: String,
     /// Default scene path.
     pub default_scene: String,
+    /// Build configuration file path relative to project root.
+    #[serde(default = "default_build_config")]
+    pub build_config: String,
     /// Schema evolution metadata.
     pub evolution: SchemaEvolution,
+}
+
+/// Returns the default asset root path.
+fn default_asset_root() -> String {
+    "assets".to_string()
 }
 
 impl ProjectManifest {
@@ -259,8 +283,32 @@ impl ProjectManifest {
             name: "Aster Example".to_string(),
             asset_root: "assets".to_string(),
             default_scene: "scenes/example.aster_scene.json".to_string(),
+            build_config: "build.runtime-min.toml".to_string(),
             evolution: SchemaEvolution::default(),
         }
+    }
+
+    /// Loads a project manifest from `aster.project.toml` in the given project root.
+    ///
+    /// Returns a descriptive error when the file is missing or contains invalid TOML.
+    pub fn load(project_root: &Path) -> EngineResult<Self> {
+        let manifest_path = project_root.join("aster.project.toml");
+        let input =
+            fs::read_to_string(&manifest_path).map_err(|source| EngineError::Filesystem {
+                path: manifest_path.clone(),
+                source,
+            })?;
+        Self::from_toml(&input).map_err(|error| {
+            EngineError::other(format!(
+                "failed to parse {}: {error}",
+                manifest_path.display()
+            ))
+        })
+    }
+
+    /// Parses a [`ProjectManifest`] from a TOML string.
+    pub fn from_toml(input: &str) -> EngineResult<Self> {
+        toml::from_str(input).map_err(|error| EngineError::config(error.to_string()))
     }
 
     /// Validates manifest fields and returns diagnostics.
@@ -466,9 +514,63 @@ mod tests {
         let build = toml::from_str::<BuildConfiguration>(build).unwrap();
 
         assert!(manifest.diagnostics().is_empty());
+        assert_eq!(manifest.build_config, "build.runtime-min.toml");
         assert_eq!(scene.objects.len(), 2);
         assert!(prefab.diagnostics().is_empty());
         assert_eq!(preferences.theme, "system");
         assert!(build.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn loads_project_manifest_from_file() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let project_root = manifest_dir.join("../../examples/project");
+
+        let manifest = ProjectManifest::load(&project_root).unwrap();
+
+        assert_eq!(manifest.name, "Aster Example");
+        assert_eq!(manifest.asset_root, "assets");
+        assert_eq!(manifest.build_config, "build.runtime-min.toml");
+        assert!(manifest.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn load_returns_error_for_missing_file() {
+        let result = ProjectManifest::load(Path::new("/nonexistent/path"));
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("aster.project.toml"));
+    }
+
+    #[test]
+    fn from_toml_applies_defaults_for_missing_optional_fields() {
+        let minimal_toml = r#"
+name = "Minimal"
+default_scene = "scenes/main.json"
+
+[format]
+version = 1
+
+[evolution]
+policy = "none"
+forward_compatible_read = true
+migration_framework = "none"
+"#;
+        let manifest = ProjectManifest::from_toml(minimal_toml).unwrap();
+        assert_eq!(manifest.name, "Minimal");
+        assert_eq!(manifest.asset_root, "assets");
+        assert_eq!(manifest.build_config, "build.runtime-min.toml");
+    }
+
+    #[test]
+    fn from_toml_returns_error_for_invalid_toml() {
+        let result = ProjectManifest::from_toml("name = [invalid toml]]");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("TOML"));
+    }
+
+    #[test]
+    fn from_toml_returns_error_for_missing_required_fields() {
+        let result = ProjectManifest::from_toml("[format]\nversion = 1");
+        assert!(result.is_err());
     }
 }

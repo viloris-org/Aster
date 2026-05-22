@@ -27,3 +27,6 @@ pub use schema::{
 };
 pub use transform::TransformHierarchy;
 pub use world::{Component, ComponentStorage, Entity, World};
+
+#[cfg(feature = "physics")]
+pub use physics::{ColliderComponent, RigidbodyComponent};

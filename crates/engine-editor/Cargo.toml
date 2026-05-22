@@ -12,12 +12,14 @@ default = []
 editor = ["engine-core/editor"]
 agent-tools = ["engine-core/agent-tools"]
 dev-full = ["editor", "agent-tools", "engine-core/dev-full"]
+physics = ["engine-ecs/physics"]
 
 [dependencies]
 engine-assets.workspace = true
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-i18n.workspace = true
+engine-physics.workspace = true
 engine-render.workspace = true
 serde.workspace = true
 toml.workspace = true

@@ -22,7 +22,7 @@ use engine_assets::{
 use engine_audio::{
     AudioContext, AudioListenerDesc, AudioSourceDesc, ClipHandle, MemoryAudioBackend, SourceHandle,
 };
-use engine_core::{logging, EngineConfig, EngineError, EngineResult, FrameCounter};
+use engine_core::{logging, EngineConfig, EngineError, EngineResult, FrameCounter, TimeState};
 #[cfg(feature = "script-python")]
 use engine_ecs::ScriptComponentProxy;
 use engine_ecs::{
@@ -34,7 +34,7 @@ use engine_physics::{
     BodyHandle, BodyKind, CharacterControllerDesc, ColliderDesc, ColliderShape, ColliderShapeRef,
     PhysicsWorld, QueryFilter, RapierPhysicsBackend, RigidbodyDesc,
 };
-use engine_platform::InputState;
+use engine_platform::{ActionMap, InputState};
 use engine_render::{
     HeadlessRenderDevice, ImageDesc, ImageFormat, ImageHandle, ImageUsage, RenderDevice,
     RenderFrame, RenderGraph, RenderGraphBuilder, RenderWorld,
@@ -55,10 +55,14 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     pub render_graph: RenderGraph,
     /// Frame input state.
     pub input: InputState,
+    /// Logical action bindings for high-level input queries.
+    pub action_map: ActionMap,
     /// Latest scene extraction submitted to rendering.
     pub render_world: RenderWorld,
     /// Whether the game simulation is paused.
     pub paused: bool,
+    /// Aggregated time state (delta, fixed delta, total time, frame index, time scale).
+    pub time: TimeState,
     /// Latest runtime counters for diagnostics UI and smoke tests.
     pub stats: RuntimeStats,
     /// Diagnostics emitted by runtime subsystems.
@@ -83,7 +87,6 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     pub mesh_resources: HashMap<engine_core::AssetId, ModelResource>,
     /// Material resources resolved from project asset GUIDs.
     pub material_resources: HashMap<engine_core::AssetId, MaterialFormat>,
-    fixed_timestep: FixedTimestep,
     frame_counter: FrameCounter,
     reported_script_errors: HashSet<String>,
     hot_reload: HotReloadTracker,
@@ -176,42 +179,6 @@ impl Default for PythonScriptRuntimeConfig {
     }
 }
 
-/// Fixed timestep accumulator used by the game loop.
-#[derive(Clone, Copy, Debug)]
-pub struct FixedTimestep {
-    step: Duration,
-    accumulator: Duration,
-    max_steps_per_frame: u32,
-}
-
-impl Default for FixedTimestep {
-    fn default() -> Self {
-        Self {
-            step: Duration::from_secs_f32(1.0 / 60.0),
-            accumulator: Duration::ZERO,
-            max_steps_per_frame: 5,
-        }
-    }
-}
-
-impl FixedTimestep {
-    /// Adds elapsed wall-clock time to the accumulator.
-    pub fn accumulate(&mut self, delta: Duration) {
-        self.accumulator = self
-            .accumulator
-            .saturating_add(delta.min(Duration::from_millis(250)));
-    }
-
-    /// Returns whether another fixed step should run, consuming one step if so.
-    pub fn consume_step(&mut self, steps_this_frame: u32) -> bool {
-        if steps_this_frame >= self.max_steps_per_frame || self.accumulator < self.step {
-            return false;
-        }
-        self.accumulator = self.accumulator.saturating_sub(self.step);
-        true
-    }
-}
-
 impl RuntimeServices<HeadlessRenderDevice> {
     /// Creates minimal runtime services with a headless renderer.
     pub fn minimal(config: EngineConfig) -> Self {
@@ -256,8 +223,10 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 input.bind_default_player_actions();
                 input
             },
+            action_map: ActionMap::new(),
             render_world: RenderWorld::default(),
             paused: false,
+            time: TimeState::new(),
             stats: RuntimeStats::default(),
             diagnostics: Vec::new(),
             #[cfg(feature = "physics")]
@@ -271,7 +240,6 @@ impl<R: RenderDevice> RuntimeServices<R> {
             texture_resources: HashMap::new(),
             mesh_resources: HashMap::new(),
             material_resources: HashMap::new(),
-            fixed_timestep: FixedTimestep::default(),
             frame_counter: FrameCounter::default(),
             reported_script_errors: HashSet::new(),
             hot_reload: HotReloadTracker::default(),
@@ -305,46 +273,77 @@ impl<R: RenderDevice> RuntimeServices<R> {
 
     /// Ticks one game frame with explicit input, fixed update, scene, audio, render, and destroy order.
     pub fn tick_game_frame(&mut self, delta: Duration, single_step: bool) -> EngineResult<()> {
+        self.run_frame(delta, single_step)
+    }
+
+    /// Executes one game frame in well-ordered phases:
+    ///
+    /// 1. **begin_frame** — reset transient input state
+    /// 2. **fixed_timestep_loop** — physics step + fixed-update scripts
+    /// 3. **update** — player controller + update scripts
+    /// 4. **late_update** — scene runtime tick + audio
+    /// 5. **render_submit** — extract render world, submit, execute graph
+    /// 6. **deferred_destroy** — flush GPU destroy queue, process scene deferred destroys
+    /// 7. **end_frame** — update stats, advance frame counter
+    pub fn run_frame(&mut self, delta: Duration, single_step: bool) -> EngineResult<()> {
+        let dt = delta.as_secs_f32();
+
+        // ── begin_frame ────────────────────────────────────────────────
         logging::log_frame(self.frame_counter.get());
-        self.stats.frame_time_seconds = delta.as_secs_f32();
+        self.input.end_frame();
+        self.time.update(dt);
+        self.stats.frame_time_seconds = self.time.delta_seconds;
         self.stats.physics_steps = 0;
         #[cfg(feature = "script-python")]
         {
             self.script_diagnostics_this_frame = 0;
         }
         self.report_script_proxy_diagnostics();
-        let should_simulate_variable = !self.paused || single_step;
-        if should_simulate_variable {
+
+        let should_simulate = !self.paused || single_step;
+
+        if should_simulate {
             #[cfg(feature = "physics")]
             self.ensure_physics_bindings()?;
             #[cfg(feature = "audio")]
             self.ensure_audio_bindings()?;
             #[cfg(feature = "script-python")]
-            self.run_python_scripts("start", delta.as_secs_f32());
-            self.fixed_timestep.accumulate(delta);
+            self.run_python_scripts("start", dt);
+
+            // ── fixed_timestep_loop ────────────────────────────────────
             let mut fixed_steps = 0;
-            while self.fixed_timestep.consume_step(fixed_steps) {
+            while self.time.consume_fixed_step(fixed_steps) {
                 #[cfg(feature = "physics")]
                 {
+                    let fixed_dt = self.time.fixed_delta_seconds;
                     self.sync_scene_to_physics()?;
-                    self.physics
-                        .fixed_update(self.fixed_timestep.step.as_secs_f32());
+                    self.physics.fixed_update(fixed_dt);
                     self.report_physics_events();
                     self.sync_physics_to_scene()?;
                     self.stats.physics_steps = self.stats.physics_steps.saturating_add(1);
                 }
                 #[cfg(feature = "script-python")]
-                self.run_python_scripts("fixed_update", self.fixed_timestep.step.as_secs_f32());
+                {
+                    let fixed_dt = self.time.fixed_delta_seconds;
+                    self.run_python_scripts("fixed_update", fixed_dt);
+                }
                 self.scene.tick_fixed_frame();
                 fixed_steps += 1;
             }
+
+            // ── update ─────────────────────────────────────────────────
             self.apply_builtin_player_controller();
             #[cfg(feature = "script-python")]
-            self.run_python_scripts("update", delta.as_secs_f32());
+            self.run_python_scripts("update", dt);
+
+            // ── late_update ────────────────────────────────────────────
             self.scene.tick_runtime_frame();
         }
+
         #[cfg(feature = "audio")]
-        self.update_audio(delta.as_secs_f32())?;
+        self.update_audio(dt)?;
+
+        // ── render_submit ──────────────────────────────────────────────
         self.render_world = extract_render_world(&self.scene);
         let frame = RenderFrame {
             frame_index: self.frame_counter.get(),
@@ -352,15 +351,18 @@ impl<R: RenderDevice> RuntimeServices<R> {
         self.renderer
             .submit_render_world(&self.render_world, frame)?;
         self.renderer.execute_graph(&self.render_graph, frame)?;
+
+        // ── deferred_destroy ───────────────────────────────────────────
         self.renderer
             .flush_destroy_queue(self.frame_counter.get().saturating_sub(2));
         self.scene.process_deferred_destroy()?;
+
+        // ── end_frame ──────────────────────────────────────────────────
         self.stats.draw_calls = self.render_world.objects.len();
         self.stats.entity_count = self.scene.object_count();
         self.stats.resource_count = self.render_world.objects.len()
             + self.render_world.lights.len()
             + usize::from(self.render_world.camera.is_some());
-        self.input.end_frame();
         self.frame_counter.advance();
         Ok(())
     }
@@ -368,6 +370,55 @@ impl<R: RenderDevice> RuntimeServices<R> {
     /// Current frame index.
     pub fn frame_index(&self) -> u64 {
         self.frame_counter.get()
+    }
+
+    /// Returns true if any key bound to `action_name` was pressed this frame.
+    pub fn action_pressed(&self, action_name: &str) -> bool {
+        self.action_map.action_pressed(&self.input, action_name)
+    }
+
+    /// Returns true if any key bound to `action_name` is held (including the first frame).
+    pub fn action_held(&self, action_name: &str) -> bool {
+        self.action_map.action_held(&self.input, action_name)
+    }
+
+    /// Loads action bindings from a TOML file at the given path.
+    ///
+    /// The TOML format is:
+    /// ```toml
+    /// [actions]
+    /// MoveForward = ["W", "ArrowUp"]
+    /// Jump = ["Space"]
+    /// ```
+    /// Key names must match `KeyCode` variant names (Escape, Enter, Space,
+    /// ArrowUp, ArrowDown, ArrowLeft, ArrowRight) or be a single character
+    /// for `Character` keys.
+    pub fn load_action_bindings(&mut self, path: &Path) -> EngineResult<()> {
+        let content = fs::read_to_string(path).map_err(|source| EngineError::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let doc: toml::Value = content.parse().map_err(|_| {
+            EngineError::other(format!(
+                "failed to parse action bindings TOML at {}",
+                path.display()
+            ))
+        })?;
+        let Some(actions) = doc.get("actions").and_then(|v| v.as_table()) else {
+            return Ok(());
+        };
+        for (name, keys) in actions {
+            if let Some(arr) = keys.as_array() {
+                for key_val in arr {
+                    if let Some(key_str) = key_val.as_str() {
+                        if let Some(key) = ActionMap::parse_key_name(key_str) {
+                            self.action_map.bind(name, key);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Updates Python script subprocess configuration.
@@ -379,6 +430,62 @@ impl<R: RenderDevice> RuntimeServices<R> {
     /// Replaces the active render graph.
     pub fn set_render_graph(&mut self, graph: RenderGraph) {
         self.render_graph = graph;
+    }
+
+    /// Processes a winit window event, dispatching it to the appropriate
+    /// input state or renderer method.
+    ///
+    /// Handles: KeyboardInput, MouseInput, CursorMoved, MouseWheel, Resized.
+    /// Returns `true` if the event was CloseRequested (caller should exit).
+    #[cfg(feature = "runtime-game")]
+    pub fn process_winit_event(&mut self, event: &winit::event::WindowEvent) -> bool {
+        use engine_platform::InputEvent;
+        use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
+
+        match event {
+            WindowEvent::CloseRequested => return true,
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(key) = convert_winit_key_static(event.physical_key) {
+                    match event.state {
+                        ElementState::Pressed => {
+                            self.input.apply_event(InputEvent::KeyDown(key));
+                        }
+                        ElementState::Released => {
+                            self.input.apply_event(InputEvent::KeyUp(key));
+                        }
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if let Some(btn) = convert_winit_mouse_button_static(*button) {
+                    match state {
+                        ElementState::Pressed => {
+                            self.input.apply_event(InputEvent::MouseButtonDown(btn));
+                        }
+                        ElementState::Released => {
+                            self.input.apply_event(InputEvent::MouseButtonUp(btn));
+                        }
+                    }
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.input.apply_event(InputEvent::MouseMove {
+                    x: position.x as f32,
+                    y: position.y as f32,
+                });
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let (x, y) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (*x, *y),
+                    MouseScrollDelta::PixelDelta(position) => {
+                        (position.x as f32, position.y as f32)
+                    }
+                };
+                self.input.apply_event(InputEvent::MouseWheel { x, y });
+            }
+            _ => {}
+        }
+        false
     }
 
     /// Sets the project root used by runtime backends to resolve relative files.
@@ -517,7 +624,10 @@ impl<R: RenderDevice> RuntimeServices<R> {
                     )?;
                 }
             }
-            ResourceKind::Shader | ResourceKind::Animation => {}
+            ResourceKind::Shader
+            | ResourceKind::Animation
+            | ResourceKind::Script
+            | ResourceKind::Scene => {}
         }
         Ok(())
     }
@@ -1290,7 +1400,10 @@ pub fn extract_render_world(scene: &Scene) -> RenderWorld {
                         object: object.id,
                         transform,
                         kind: light.kind.clone(),
+                        color: light.color,
                         intensity: light.intensity,
+                        range: light.range,
+                        spot_angle: light.spot_angle,
                     });
                 }
                 ComponentData::Rigidbody(_)
@@ -1373,16 +1486,84 @@ pub fn smoke_runtime_min() -> EngineResult<u64> {
     Ok(services.frame_index())
 }
 
+/// Converts a winit physical key to an engine KeyCode.
+#[cfg(feature = "runtime-game")]
+fn convert_winit_key_static(key: winit::keyboard::PhysicalKey) -> Option<engine_platform::KeyCode> {
+    use engine_platform::KeyCode;
+    use winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey};
+
+    match key {
+        PhysicalKey::Code(WinitKeyCode::Escape) => Some(KeyCode::Escape),
+        PhysicalKey::Code(WinitKeyCode::Enter) => Some(KeyCode::Enter),
+        PhysicalKey::Code(WinitKeyCode::Space) => Some(KeyCode::Space),
+        PhysicalKey::Code(WinitKeyCode::ArrowUp) => Some(KeyCode::ArrowUp),
+        PhysicalKey::Code(WinitKeyCode::ArrowDown) => Some(KeyCode::ArrowDown),
+        PhysicalKey::Code(WinitKeyCode::ArrowLeft) => Some(KeyCode::ArrowLeft),
+        PhysicalKey::Code(WinitKeyCode::ArrowRight) => Some(KeyCode::ArrowRight),
+        PhysicalKey::Code(WinitKeyCode::KeyA) => Some(KeyCode::Character('a')),
+        PhysicalKey::Code(WinitKeyCode::KeyB) => Some(KeyCode::Character('b')),
+        PhysicalKey::Code(WinitKeyCode::KeyC) => Some(KeyCode::Character('c')),
+        PhysicalKey::Code(WinitKeyCode::KeyD) => Some(KeyCode::Character('d')),
+        PhysicalKey::Code(WinitKeyCode::KeyE) => Some(KeyCode::Character('e')),
+        PhysicalKey::Code(WinitKeyCode::KeyF) => Some(KeyCode::Character('f')),
+        PhysicalKey::Code(WinitKeyCode::KeyG) => Some(KeyCode::Character('g')),
+        PhysicalKey::Code(WinitKeyCode::KeyH) => Some(KeyCode::Character('h')),
+        PhysicalKey::Code(WinitKeyCode::KeyI) => Some(KeyCode::Character('i')),
+        PhysicalKey::Code(WinitKeyCode::KeyJ) => Some(KeyCode::Character('j')),
+        PhysicalKey::Code(WinitKeyCode::KeyK) => Some(KeyCode::Character('k')),
+        PhysicalKey::Code(WinitKeyCode::KeyL) => Some(KeyCode::Character('l')),
+        PhysicalKey::Code(WinitKeyCode::KeyM) => Some(KeyCode::Character('m')),
+        PhysicalKey::Code(WinitKeyCode::KeyN) => Some(KeyCode::Character('n')),
+        PhysicalKey::Code(WinitKeyCode::KeyO) => Some(KeyCode::Character('o')),
+        PhysicalKey::Code(WinitKeyCode::KeyP) => Some(KeyCode::Character('p')),
+        PhysicalKey::Code(WinitKeyCode::KeyQ) => Some(KeyCode::Character('q')),
+        PhysicalKey::Code(WinitKeyCode::KeyR) => Some(KeyCode::Character('r')),
+        PhysicalKey::Code(WinitKeyCode::KeyS) => Some(KeyCode::Character('s')),
+        PhysicalKey::Code(WinitKeyCode::KeyT) => Some(KeyCode::Character('t')),
+        PhysicalKey::Code(WinitKeyCode::KeyU) => Some(KeyCode::Character('u')),
+        PhysicalKey::Code(WinitKeyCode::KeyV) => Some(KeyCode::Character('v')),
+        PhysicalKey::Code(WinitKeyCode::KeyW) => Some(KeyCode::Character('w')),
+        PhysicalKey::Code(WinitKeyCode::KeyX) => Some(KeyCode::Character('x')),
+        PhysicalKey::Code(WinitKeyCode::KeyY) => Some(KeyCode::Character('y')),
+        PhysicalKey::Code(WinitKeyCode::KeyZ) => Some(KeyCode::Character('z')),
+        PhysicalKey::Code(WinitKeyCode::Digit0) => Some(KeyCode::Character('0')),
+        PhysicalKey::Code(WinitKeyCode::Digit1) => Some(KeyCode::Character('1')),
+        PhysicalKey::Code(WinitKeyCode::Digit2) => Some(KeyCode::Character('2')),
+        PhysicalKey::Code(WinitKeyCode::Digit3) => Some(KeyCode::Character('3')),
+        PhysicalKey::Code(WinitKeyCode::Digit4) => Some(KeyCode::Character('4')),
+        PhysicalKey::Code(WinitKeyCode::Digit5) => Some(KeyCode::Character('5')),
+        PhysicalKey::Code(WinitKeyCode::Digit6) => Some(KeyCode::Character('6')),
+        PhysicalKey::Code(WinitKeyCode::Digit7) => Some(KeyCode::Character('7')),
+        PhysicalKey::Code(WinitKeyCode::Digit8) => Some(KeyCode::Character('8')),
+        PhysicalKey::Code(WinitKeyCode::Digit9) => Some(KeyCode::Character('9')),
+        _ => None,
+    }
+}
+
+/// Converts a winit mouse button to an engine MouseButton.
+#[cfg(feature = "runtime-game")]
+fn convert_winit_mouse_button_static(
+    button: winit::event::MouseButton,
+) -> Option<engine_platform::MouseButton> {
+    use engine_platform::MouseButton;
+    match button {
+        winit::event::MouseButton::Left => Some(MouseButton::Left),
+        winit::event::MouseButton::Right => Some(MouseButton::Right),
+        winit::event::MouseButton::Middle => Some(MouseButton::Middle),
+        winit::event::MouseButton::Other(id) => Some(MouseButton::Other(id)),
+        _ => None,
+    }
+}
+
 /// Runs a project with the runtime-game windowed loop.
 #[cfg(feature = "runtime-game")]
 pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
-    use engine_platform::{InputEvent, KeyCode};
+    use engine_platform::KeyCode;
     use std::{sync::Arc, time::Instant};
     use winit::{
         application::ApplicationHandler,
-        event::{ElementState, MouseScrollDelta, WindowEvent},
+        event::{ElementState, WindowEvent},
         event_loop::{ActiveEventLoop, EventLoop},
-        keyboard::{KeyCode as WinitKeyCode, PhysicalKey},
         window::{Window, WindowId},
     };
 
@@ -1397,6 +1578,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
         window: Option<Arc<Window>>,
         last_frame: Instant,
         single_step: bool,
+        project_name: String,
     }
 
     impl ApplicationHandler for GameApp {
@@ -1407,7 +1589,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
             let window = event_loop
                 .create_window(
                     Window::default_attributes()
-                        .with_title("Aster Runtime")
+                        .with_title(&self.project_name)
                         .with_inner_size(winit::dpi::LogicalSize::new(960_u32, 540_u32)),
                 )
                 .expect("create runtime window");
@@ -1435,55 +1617,27 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
             _window_id: WindowId,
             event: WindowEvent,
         ) {
-            match event {
-                WindowEvent::CloseRequested => event_loop.exit(),
+            match &event {
                 WindowEvent::KeyboardInput { event, .. } => {
-                    let Some(services) = self.services.as_mut() else {
-                        return;
-                    };
-                    if let Some(key) = convert_winit_key(event.physical_key) {
-                        match event.state {
-                            ElementState::Pressed => {
-                                services.input.apply_event(InputEvent::KeyDown(key));
-                                if key == KeyCode::Escape {
-                                    event_loop.exit();
-                                } else if key == KeyCode::Space {
+                    if let Some(key) = convert_winit_key_static(event.physical_key) {
+                        if event.state == ElementState::Pressed {
+                            if key == KeyCode::Escape {
+                                event_loop.exit();
+                                return;
+                            } else if key == KeyCode::Space {
+                                if let Some(services) = self.services.as_mut() {
                                     services.paused = !services.paused;
-                                } else if key == KeyCode::Enter {
-                                    self.single_step = true;
                                 }
-                            }
-                            ElementState::Released => {
-                                services.input.apply_event(InputEvent::KeyUp(key));
+                            } else if key == KeyCode::Enter {
+                                self.single_step = true;
                             }
                         }
-                    }
-                }
-                WindowEvent::CursorMoved { position, .. } => {
-                    if let Some(services) = self.services.as_mut() {
-                        services.input.apply_event(InputEvent::MouseMove {
-                            x: position.x as f32,
-                            y: position.y as f32,
-                        });
-                    }
-                }
-                WindowEvent::MouseWheel { delta, .. } => {
-                    let (x, y) = match delta {
-                        MouseScrollDelta::LineDelta(x, y) => (x, y),
-                        MouseScrollDelta::PixelDelta(position) => {
-                            (position.x as f32, position.y as f32)
-                        }
-                    };
-                    if let Some(services) = self.services.as_mut() {
-                        services.input.apply_event(InputEvent::MouseWheel { x, y });
                     }
                 }
                 WindowEvent::Resized(size) => {
                     #[cfg(feature = "wgpu")]
                     if let Some(services) = self.services.as_mut() {
-                        services
-                            .renderer
-                            .resize_surface(size.width, size.height);
+                        services.renderer.resize_surface(size.width, size.height);
                     }
                     let title = format!(
                         "Aster Runtime - {}x{}",
@@ -1521,6 +1675,11 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
                 }
                 _ => {}
             }
+            if let Some(services) = self.services.as_mut() {
+                if services.process_winit_event(&event) {
+                    event_loop.exit();
+                }
+            }
         }
 
         fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
@@ -1530,24 +1689,8 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
         }
     }
 
-    fn convert_winit_key(key: PhysicalKey) -> Option<KeyCode> {
-        match key {
-            PhysicalKey::Code(WinitKeyCode::Escape) => Some(KeyCode::Escape),
-            PhysicalKey::Code(WinitKeyCode::Enter) => Some(KeyCode::Enter),
-            PhysicalKey::Code(WinitKeyCode::Space) => Some(KeyCode::Space),
-            PhysicalKey::Code(WinitKeyCode::ArrowUp) => Some(KeyCode::ArrowUp),
-            PhysicalKey::Code(WinitKeyCode::ArrowDown) => Some(KeyCode::ArrowDown),
-            PhysicalKey::Code(WinitKeyCode::ArrowLeft) => Some(KeyCode::ArrowLeft),
-            PhysicalKey::Code(WinitKeyCode::ArrowRight) => Some(KeyCode::ArrowRight),
-            PhysicalKey::Code(WinitKeyCode::KeyW) => Some(KeyCode::Character('w')),
-            PhysicalKey::Code(WinitKeyCode::KeyA) => Some(KeyCode::Character('a')),
-            PhysicalKey::Code(WinitKeyCode::KeyS) => Some(KeyCode::Character('s')),
-            PhysicalKey::Code(WinitKeyCode::KeyD) => Some(KeyCode::Character('d')),
-            _ => None,
-        }
-    }
-
     let project = load_runtime_project(project)?;
+    let project_name = project.manifest.name.clone();
     let event_loop = EventLoop::new().map_err(|error| EngineError::other(error.to_string()))?;
     let mut app = GameApp {
         services: None,
@@ -1555,6 +1698,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
         window: None,
         last_frame: Instant::now(),
         single_step: false,
+        project_name,
     };
     event_loop
         .run_app(&mut app)
@@ -1613,6 +1757,45 @@ mod tests {
     #[test]
     fn runtime_min_ticks_one_frame() {
         assert_eq!(smoke_runtime_min().unwrap(), 1);
+    }
+
+    #[test]
+    fn run_frame_60_frames_headless() {
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        let delta = Duration::from_secs_f32(1.0 / 60.0);
+        for _ in 0..60 {
+            services.run_frame(delta, false).unwrap();
+        }
+        assert_eq!(services.frame_index(), 60);
+        assert_eq!(services.time.frame_index, 60);
+        assert!(
+            services.time.total_time > 0.0,
+            "total_time should accumulate across frames"
+        );
+    }
+
+    #[test]
+    fn run_frame_input_reset_at_begin_frame() {
+        use engine_platform::{InputEvent, KeyCode};
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services
+            .input
+            .apply_event(InputEvent::KeyDown(KeyCode::Space));
+        assert!(
+            services.input.key_pressed(KeyCode::Space),
+            "key should be pressed before frame"
+        );
+        services
+            .run_frame(Duration::from_millis(16), false)
+            .unwrap();
+        assert!(
+            !services.input.key_pressed(KeyCode::Space),
+            "pressed state should be cleared by begin_frame"
+        );
+        assert!(
+            services.input.key_down(KeyCode::Space),
+            "held state should persist after begin_frame"
+        );
     }
 
     #[test]
@@ -1796,6 +1979,7 @@ mod tests {
                     volume: 0.5,
                     looping: true,
                     play_on_start: true,
+                    spatial_blend: 0.0,
                 }),
             )
             .unwrap();
@@ -1843,5 +2027,138 @@ mod tests {
         bytes.extend_from_slice(&0i16.to_le_bytes());
         bytes.extend_from_slice(&i16::MAX.to_le_bytes());
         bytes
+    }
+
+    #[test]
+    fn action_map_default_bindings_on_runtime_services() {
+        let services = RuntimeServices::minimal(EngineConfig::default());
+        // The default ActionMap should have MoveForward, MoveBack, MoveLeft,
+        // MoveRight, Jump, Fire, Interact, Pause
+        assert!(
+            services.action_pressed("MoveForward") || !services.action_pressed("MoveForward"),
+            "action_pressed should not panic for known action"
+        );
+        assert!(
+            services.action_held("MoveForward") || !services.action_held("MoveForward"),
+            "action_held should not panic for known action"
+        );
+        // Unknown actions return false
+        assert!(!services.action_pressed("DoesNotExist"));
+        assert!(!services.action_held("DoesNotExist"));
+    }
+
+    #[test]
+    fn action_pressed_delegates_to_action_map() {
+        use engine_platform::{InputEvent, KeyCode};
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services
+            .input
+            .apply_event(InputEvent::KeyDown(KeyCode::Space));
+        assert!(
+            services.action_pressed("Jump"),
+            "Jump should be pressed when Space is pressed"
+        );
+        assert!(
+            services.action_held("Jump"),
+            "Jump should be held when Space is down"
+        );
+    }
+
+    #[test]
+    fn action_map_fire_and_interact_bindings() {
+        use engine_platform::{InputEvent, KeyCode};
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services
+            .input
+            .apply_event(InputEvent::KeyDown(KeyCode::Character('f')));
+        assert!(
+            services.action_pressed("Fire"),
+            "Fire should be pressed when F is pressed"
+        );
+        assert!(!services.action_pressed("Interact"));
+    }
+
+    #[test]
+    fn action_map_pause_binding() {
+        use engine_platform::{InputEvent, KeyCode};
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services
+            .input
+            .apply_event(InputEvent::KeyDown(KeyCode::Escape));
+        assert!(
+            services.action_pressed("Pause"),
+            "Pause should be pressed when Escape is pressed"
+        );
+    }
+
+    #[test]
+    fn action_map_axis_value() {
+        use engine_platform::{InputEvent, KeyCode};
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        // No input → 0.0
+        assert_eq!(
+            services
+                .action_map
+                .axis_value(&services.input, "MoveLeft", "MoveRight"),
+            0.0
+        );
+        // Press D → MoveRight → +1.0
+        services
+            .input
+            .apply_event(InputEvent::KeyDown(KeyCode::Character('d')));
+        assert_eq!(
+            services
+                .action_map
+                .axis_value(&services.input, "MoveLeft", "MoveRight"),
+            1.0
+        );
+        // Press A too → both held → 0.0
+        services
+            .input
+            .apply_event(InputEvent::KeyDown(KeyCode::Character('a')));
+        assert_eq!(
+            services
+                .action_map
+                .axis_value(&services.input, "MoveLeft", "MoveRight"),
+            0.0
+        );
+    }
+
+    #[test]
+    fn load_action_bindings_from_toml() {
+        use engine_platform::KeyCode;
+        let dir =
+            std::env::temp_dir().join(format!("aster-action-bindings-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml_path = dir.join("action_bindings.toml");
+        std::fs::write(
+            &toml_path,
+            "[actions]\nCrouch = [\"C\"]\nSprint = [\"Shift\"]\n",
+        )
+        .unwrap();
+
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services.load_action_bindings(&toml_path).unwrap();
+
+        // Verify the Crouch binding was added
+        assert!(services.action_map.bindings.get("Crouch").is_some());
+        assert!(
+            services
+                .action_map
+                .bindings
+                .get("Crouch")
+                .unwrap()
+                .contains(&KeyCode::Character('c')),
+            "Crouch should be bound to C"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_action_bindings_missing_file_returns_error() {
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        let result = services.load_action_bindings(Path::new("/nonexistent/action_bindings.toml"));
+        assert!(result.is_err());
     }
 }

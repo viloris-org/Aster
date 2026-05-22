@@ -272,7 +272,8 @@ impl InputState {
 /// instead of raw key codes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActionMap {
-    bindings: HashMap<String, Vec<KeyCode>>,
+    /// Map from action name to bound key codes.
+    pub bindings: HashMap<String, Vec<KeyCode>>,
 }
 
 impl ActionMap {
@@ -283,8 +284,9 @@ impl ActionMap {
         map
     }
 
-    /// Populates the default bindings (WASD, arrows, space).
+    /// Populates the default bindings (WASD, arrows, space, F, E, Escape).
     pub fn bind_defaults(&mut self) {
+        // Movement actions (digital)
         self.bind("MoveForward", KeyCode::Character('w'));
         self.bind("MoveForward", KeyCode::ArrowUp);
         self.bind("MoveBack", KeyCode::Character('s'));
@@ -294,6 +296,11 @@ impl ActionMap {
         self.bind("MoveRight", KeyCode::Character('d'));
         self.bind("MoveRight", KeyCode::ArrowRight);
         self.bind("Jump", KeyCode::Space);
+        // Additional game actions
+        self.bind("Fire", KeyCode::Character('f'));
+        self.bind("Fire", KeyCode::Character('e'));
+        self.bind("Interact", KeyCode::Character('e'));
+        self.bind("Pause", KeyCode::Escape);
     }
 
     /// Binds a key to an action name.
@@ -318,6 +325,46 @@ impl ActionMap {
             .get(action_name)
             .map(|keys| keys.iter().any(|k| input.key_down(*k)))
             .unwrap_or(false)
+    }
+
+    /// Returns an axis value in `-1..=1` for a pair of negative/positive actions.
+    ///
+    /// This is a convenience for two-action axis patterns like
+    /// `MoveHorizontal = MoveLeft(-1) | MoveRight(+1)`.
+    pub fn axis_value(
+        &self,
+        input: &InputState,
+        negative_action: &str,
+        positive_action: &str,
+    ) -> f32 {
+        let neg = self.action_held(input, negative_action);
+        let pos = self.action_held(input, positive_action);
+        match (neg, pos) {
+            (true, false) => -1.0,
+            (false, true) => 1.0,
+            _ => 0.0,
+        }
+    }
+
+    /// Parses a key name string into a `KeyCode`.
+    ///
+    /// Recognized names: Escape, Enter, Space, ArrowUp, ArrowDown, ArrowLeft,
+    /// ArrowRight. Single characters map to `KeyCode::Character`.
+    pub fn parse_key_name(name: &str) -> Option<KeyCode> {
+        match name {
+            "Escape" => Some(KeyCode::Escape),
+            "Enter" => Some(KeyCode::Enter),
+            "Space" => Some(KeyCode::Space),
+            "ArrowUp" => Some(KeyCode::ArrowUp),
+            "ArrowDown" => Some(KeyCode::ArrowDown),
+            "ArrowLeft" => Some(KeyCode::ArrowLeft),
+            "ArrowRight" => Some(KeyCode::ArrowRight),
+            c if c.chars().count() == 1 => c
+                .chars()
+                .next()
+                .map(|ch| KeyCode::Character(ch.to_ascii_lowercase())),
+            _ => None,
+        }
     }
 }
 

@@ -8,8 +8,8 @@ use bytemuck::{Pod, Zeroable};
 use engine_core::{EngineError, EngineResult, Handle, HandleAllocator};
 use engine_render::{
     BufferDesc, BufferHandle, BufferUsage, GuiDrawList, GuiTextureId, ImageDesc, ImageFormat,
-    ImageHandle, ImageUsage, RenderApi, RenderDevice, RenderFrame, RenderGraph, RenderTarget,
-    RenderTargetDesc, RenderWorld, ViewKind,
+    ImageHandle, ImageUsage, RenderApi, RenderDevice, RenderFrame, RenderGraph, RenderLight,
+    RenderTarget, RenderTargetDesc, RenderWorld, ViewKind,
 };
 use wgpu::util::DeviceExt;
 
@@ -19,6 +19,8 @@ pub use wgpu;
 const DEFAULT_WIDTH: u32 = 960;
 const DEFAULT_HEIGHT: u32 = 540;
 const CUBE_INDEX_COUNT: u32 = 36;
+const MAX_FORWARD_LIGHTS: usize = 8;
+const DEFAULT_AMBIENT_LIGHT: [f32; 4] = [0.16, 0.16, 0.16, 1.0];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -56,6 +58,33 @@ struct MaterialUniform {
     metallic: f32,
     roughness: f32,
     _pad: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ForwardLightUniform {
+    position_type: [f32; 4],
+    direction_range: [f32; 4],
+    color_intensity: [f32; 4],
+    spot_angles: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct LightingUniform {
+    ambient: [f32; 4],
+    params: [u32; 4],
+    lights: [ForwardLightUniform; MAX_FORWARD_LIGHTS],
+}
+
+impl Default for LightingUniform {
+    fn default() -> Self {
+        Self {
+            ambient: DEFAULT_AMBIENT_LIGHT,
+            params: [0, 0, 0, 0],
+            lights: [ForwardLightUniform::zeroed(); MAX_FORWARD_LIGHTS],
+        }
+    }
 }
 
 struct GpuImage {
@@ -128,11 +157,11 @@ pub struct WgpuRenderDevice {
     buffers: HashMap<Handle, wgpu::Buffer>,
     targets: HashMap<Handle, GpuTarget>,
     default_target: RenderTarget,
+    game_target: RenderTarget,
     pipeline: wgpu::RenderPipeline,
     camera_bind_group: wgpu::BindGroup,
     camera_uniform: wgpu::Buffer,
-    model_uniform: wgpu::Buffer,
-    material_uniform: wgpu::Buffer,
+    lighting_uniform: wgpu::Buffer,
     _default_texture: wgpu::Texture,
     _default_texture_view: wgpu::TextureView,
     _default_sampler: wgpu::Sampler,
@@ -154,6 +183,7 @@ impl std::fmt::Debug for WgpuRenderDevice {
         f.debug_struct("WgpuRenderDevice")
             .field("adapter", &self.adapter.get_info().name)
             .field("default_target", &self.default_target)
+            .field("game_target", &self.game_target)
             .field("image_count", &self.images.len())
             .field("buffer_count", &self.buffers.len())
             .field("target_count", &self.targets.len())
@@ -187,7 +217,9 @@ impl WgpuRenderDevice {
                     force_fallback_adapter: true,
                 })
                 .await
-                .map_err(|error| EngineError::other(format!("no suitable wgpu adapter found: {error}")))?,
+                .map_err(|error| {
+                    EngineError::other(format!("no suitable wgpu adapter found: {error}"))
+                })?,
         };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
@@ -246,7 +278,9 @@ impl WgpuRenderDevice {
                     force_fallback_adapter: true,
                 })
                 .await
-                .map_err(|error| EngineError::other(format!("no suitable wgpu adapter found: {error}")))?,
+                .map_err(|error| {
+                    EngineError::other(format!("no suitable wgpu adapter found: {error}"))
+                })?,
         };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
@@ -258,7 +292,12 @@ impl WgpuRenderDevice {
             .iter()
             .copied()
             .find(|f| *f == wgpu::TextureFormat::Bgra8UnormSrgb)
-            .or_else(|| caps.formats.iter().copied().find(wgpu::TextureFormat::is_srgb))
+            .or_else(|| {
+                caps.formats
+                    .iter()
+                    .copied()
+                    .find(wgpu::TextureFormat::is_srgb)
+            })
             .unwrap_or(caps.formats[0]);
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -308,7 +347,9 @@ impl WgpuRenderDevice {
                     force_fallback_adapter: true,
                 })
                 .await
-                .map_err(|error| EngineError::other(format!("no suitable wgpu adapter found: {error}")))?,
+                .map_err(|error| {
+                    EngineError::other(format!("no suitable wgpu adapter found: {error}"))
+                })?,
         };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
@@ -320,7 +361,12 @@ impl WgpuRenderDevice {
             .iter()
             .copied()
             .find(|f| *f == wgpu::TextureFormat::Bgra8UnormSrgb)
-            .or_else(|| caps.formats.iter().copied().find(wgpu::TextureFormat::is_srgb))
+            .or_else(|| {
+                caps.formats
+                    .iter()
+                    .copied()
+                    .find(wgpu::TextureFormat::is_srgb)
+            })
             .unwrap_or(caps.formats[0]);
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -362,7 +408,14 @@ impl WgpuRenderDevice {
         surface_state: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration)>,
     ) -> EngineResult<Self> {
         Self::from_device(
-            instance, adapter, device, queue, width, height, format, surface_state,
+            instance,
+            adapter,
+            device,
+            queue,
+            width,
+            height,
+            format,
+            surface_state,
         )
     }
 
@@ -389,6 +442,19 @@ impl WgpuRenderDevice {
         self.default_target.size()
     }
 
+    /// Returns a reference to the game offscreen render target's color texture view.
+    pub fn game_target_view(&self) -> &wgpu::TextureView {
+        self.targets
+            .get(&self.game_target.handle)
+            .map(|t| &t.color_view)
+            .expect("game target exists")
+    }
+
+    /// Returns the pixel dimensions of the game offscreen render target.
+    pub fn game_target_size(&self) -> (u32, u32) {
+        self.game_target.size()
+    }
+
     /// Renders a render world to the default offscreen target, bypassing any surface.
     ///
     /// Use this when the host composites the result into its own UI (e.g., egui).
@@ -405,6 +471,9 @@ impl WgpuRenderDevice {
         let uniform = camera_uniform_from_world(world);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
+        let lighting = lighting_uniform_from_world(world);
+        self.queue
+            .write_buffer(&self.lighting_uniform, 0, bytemuck::bytes_of(&lighting));
 
         let target = self
             .targets
@@ -414,6 +483,51 @@ impl WgpuRenderDevice {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("aster offscreen render world encoder"),
+            });
+        encode_forward_pass(
+            &mut encoder,
+            &target.color_view,
+            target.depth_view.as_ref(),
+            &self.pipeline,
+            &self.camera_bind_group,
+            &self.vertex_buffer,
+            &self.instance_buffer,
+            &self.index_buffer,
+            instances.len() as u32,
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+        self.submitted_worlds = self.submitted_worlds.saturating_add(1);
+        Ok(())
+    }
+
+    /// Renders a render world to the game offscreen target, bypassing any surface.
+    ///
+    /// Use this when the host composites the game view result into its own UI (e.g., egui).
+    pub fn render_world_offscreen_game(&mut self, world: &RenderWorld) -> EngineResult<()> {
+        let instances = instances_from_world(world);
+        if instances.len() > self.instance_capacity {
+            self.instance_capacity = instances.len().next_power_of_two();
+            self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
+        }
+        if !instances.is_empty() {
+            self.queue
+                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
+        }
+        let uniform = camera_uniform_from_world(world);
+        self.queue
+            .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
+        let lighting = lighting_uniform_from_world(world);
+        self.queue
+            .write_buffer(&self.lighting_uniform, 0, bytemuck::bytes_of(&lighting));
+
+        let target = self
+            .targets
+            .get(&self.game_target.handle)
+            .ok_or_else(|| EngineError::invalid_handle("game wgpu target is missing"))?;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("aster game offscreen render world encoder"),
             });
         encode_forward_pass(
             &mut encoder,
@@ -451,8 +565,21 @@ impl WgpuRenderDevice {
                 color_format: format,
                 with_depth: true,
                 samples: 1,
-                kind: ViewKind::GameView,
+                kind: ViewKind::SceneView,
                 label: Some("aster default offscreen target"),
+            },
+        )?;
+        let game_target = create_target(
+            &device,
+            &mut target_allocator,
+            RenderTargetDesc {
+                width: width.max(1),
+                height: height.max(1),
+                color_format: format,
+                with_depth: true,
+                samples: 1,
+                kind: ViewKind::GameView,
+                label: Some("aster game offscreen target"),
             },
         )?;
 
@@ -485,6 +612,11 @@ impl WgpuRenderDevice {
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let lighting_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aster lighting uniform"),
+            contents: bytemuck::bytes_of(&LightingUniform::default()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let default_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("aster default white texture"),
             size: wgpu::Extent3d {
@@ -499,7 +631,8 @@ impl WgpuRenderDevice {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let default_texture_view = default_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let default_texture_view =
+            default_texture.create_view(&wgpu::TextureViewDescriptor::default());
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &default_texture,
@@ -578,6 +711,16 @@ impl WgpuRenderDevice {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -603,6 +746,10 @@ impl WgpuRenderDevice {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::Sampler(&default_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: lighting_uniform.as_entire_binding(),
                 },
             ],
         });
@@ -683,6 +830,8 @@ impl WgpuRenderDevice {
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
 
         let CreatedTarget(color, color_view, depth, depth_view, default_target) = default_target;
+        let CreatedTarget(game_color, game_color_view, game_depth, game_depth_view, game_target) =
+            game_target;
         let mut targets = HashMap::new();
         targets.insert(
             default_target.handle,
@@ -692,6 +841,16 @@ impl WgpuRenderDevice {
                 _depth: depth,
                 depth_view,
                 _desc: default_target.desc.clone(),
+            },
+        );
+        targets.insert(
+            game_target.handle,
+            GpuTarget {
+                _color: game_color,
+                color_view: game_color_view,
+                _depth: game_depth,
+                depth_view: game_depth_view,
+                _desc: game_target.desc.clone(),
             },
         );
 
@@ -711,11 +870,11 @@ impl WgpuRenderDevice {
             buffers: HashMap::new(),
             targets,
             default_target,
+            game_target,
             pipeline,
             camera_bind_group,
             camera_uniform,
-            model_uniform,
-            material_uniform,
+            lighting_uniform,
             _default_texture: default_texture,
             _default_texture_view: default_texture_view,
             _default_sampler: default_sampler,
@@ -762,16 +921,20 @@ impl WgpuRenderDevice {
     /// Creates GPU vertex and index buffers from a procedural debug mesh.
     pub fn create_mesh_buffers(&self, mesh: &DebugMesh) -> MeshBuffers {
         let (vertices, indices) = generate_mesh(mesh);
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster debug mesh vertices"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster debug mesh indices"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("aster debug mesh vertices"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        let index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("aster debug mesh indices"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
         MeshBuffers {
             vertex_buffer,
             index_buffer,
@@ -832,6 +995,9 @@ impl RenderDevice for WgpuRenderDevice {
         let uniform = camera_uniform_from_world(world);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
+        let lighting = lighting_uniform_from_world(world);
+        self.queue
+            .write_buffer(&self.lighting_uniform, 0, bytemuck::bytes_of(&lighting));
 
         if self.surface.is_some() {
             if self.surface_suspended {
@@ -1242,7 +1408,11 @@ fn camera_uniform_from_world(world: &RenderWorld) -> CameraUniform {
         .as_ref()
         .map(|camera| camera.transform.translation)
         .unwrap_or_else(|| engine_core::math::Vec3::new(0.0, 0.0, 5.0));
-    let view = look_at_rh(eye, engine_core::math::Vec3::ZERO, engine_core::math::Vec3::new(0.0, 1.0, 0.0));
+    let view = look_at_rh(
+        eye,
+        engine_core::math::Vec3::ZERO,
+        engine_core::math::Vec3::new(0.0, 1.0, 0.0),
+    );
     let fov = world
         .camera
         .as_ref()
@@ -1266,6 +1436,82 @@ fn camera_uniform_from_world(world: &RenderWorld) -> CameraUniform {
     }
 }
 
+fn lighting_uniform_from_world(world: &RenderWorld) -> LightingUniform {
+    let mut uniform = LightingUniform::default();
+    let mut count = 0usize;
+
+    for light in &world.lights {
+        if light.intensity <= 0.0 {
+            continue;
+        }
+        uniform.lights[count] = forward_light_uniform(light);
+        count += 1;
+        if count == MAX_FORWARD_LIGHTS {
+            break;
+        }
+    }
+
+    if count == 0 {
+        uniform.lights[0] = ForwardLightUniform {
+            position_type: [0.0, 0.0, 0.0, 0.0],
+            direction_range: [-0.5, -1.0, -0.25, 0.0],
+            color_intensity: [1.0, 1.0, 1.0, 1.0],
+            spot_angles: [1.0, 1.0, 0.0, 0.0],
+        };
+        count = 1;
+    }
+
+    uniform.params = [count as u32, 0, 0, 0];
+    uniform
+}
+
+fn forward_light_uniform(light: &RenderLight) -> ForwardLightUniform {
+    let light_type = match light.kind.as_str() {
+        "point" => 1.0,
+        "spot" => 2.0,
+        _ => 0.0,
+    };
+    let direction = rotate_vec3(
+        light.transform.rotation,
+        engine_core::math::Vec3::new(0.0, 0.0, -1.0),
+    )
+    .normalized();
+    let direction = if direction.length_squared() <= f32::EPSILON {
+        engine_core::math::Vec3::new(0.0, -1.0, 0.0)
+    } else {
+        direction
+    };
+    let range = light.range.max(0.001);
+    let outer_half_angle = (light.spot_angle.clamp(1.0, 179.0) * 0.5).to_radians();
+    let inner_half_angle = outer_half_angle * 0.75;
+
+    ForwardLightUniform {
+        position_type: [
+            light.transform.translation.x,
+            light.transform.translation.y,
+            light.transform.translation.z,
+            light_type,
+        ],
+        direction_range: [direction.x, direction.y, direction.z, range],
+        color_intensity: [
+            light.color.x.clamp(0.0, 1.0),
+            light.color.y.clamp(0.0, 1.0),
+            light.color.z.clamp(0.0, 1.0),
+            light.intensity.max(0.0),
+        ],
+        spot_angles: [inner_half_angle.cos(), outer_half_angle.cos(), 0.0, 0.0],
+    }
+}
+
+fn rotate_vec3(
+    rotation: engine_core::math::Quat,
+    vector: engine_core::math::Vec3,
+) -> engine_core::math::Vec3 {
+    let q = engine_core::math::Vec3::new(rotation.x, rotation.y, rotation.z);
+    let t = cross(q, vector) * 2.0;
+    vector + t * rotation.w + cross(q, t)
+}
+
 const IDENTITY_MAT4: [[f32; 4]; 4] = [
     [1.0, 0.0, 0.0, 0.0],
     [0.0, 1.0, 0.0, 0.0],
@@ -1273,7 +1519,11 @@ const IDENTITY_MAT4: [[f32; 4]; 4] = [
     [0.0, 0.0, 0.0, 1.0],
 ];
 
-fn look_at_rh(eye: engine_core::math::Vec3, target: engine_core::math::Vec3, up: engine_core::math::Vec3) -> [[f32; 4]; 4] {
+fn look_at_rh(
+    eye: engine_core::math::Vec3,
+    target: engine_core::math::Vec3,
+    up: engine_core::math::Vec3,
+) -> [[f32; 4]; 4] {
     let f = (target - eye).normalized();
     let r = cross(f, up).normalized();
     let u = cross(r, f);
@@ -1355,41 +1605,137 @@ fn color_for_material(material: &str) -> [f32; 4] {
 // Cube vertices with hard normals (24 vertices, 4 per face × 6 faces).
 const CUBE_VERTICES: &[Vertex] = &[
     // Front face (+Z)
-    Vertex { position: [-0.5, -0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [0.0, 0.0] },
-    Vertex { position: [ 0.5, -0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [1.0, 0.0] },
-    Vertex { position: [ 0.5,  0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [1.0, 1.0] },
-    Vertex { position: [-0.5,  0.5,  0.5], normal: [ 0.0,  0.0,  1.0], uv: [0.0, 1.0] },
+    Vertex {
+        position: [-0.5, -0.5, 0.5],
+        normal: [0.0, 0.0, 1.0],
+        uv: [0.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, -0.5, 0.5],
+        normal: [0.0, 0.0, 1.0],
+        uv: [1.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, 0.5, 0.5],
+        normal: [0.0, 0.0, 1.0],
+        uv: [1.0, 1.0],
+    },
+    Vertex {
+        position: [-0.5, 0.5, 0.5],
+        normal: [0.0, 0.0, 1.0],
+        uv: [0.0, 1.0],
+    },
     // Back face (-Z)
-    Vertex { position: [ 0.5, -0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [0.0, 0.0] },
-    Vertex { position: [-0.5, -0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [1.0, 0.0] },
-    Vertex { position: [-0.5,  0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [1.0, 1.0] },
-    Vertex { position: [ 0.5,  0.5, -0.5], normal: [ 0.0,  0.0, -1.0], uv: [0.0, 1.0] },
+    Vertex {
+        position: [0.5, -0.5, -0.5],
+        normal: [0.0, 0.0, -1.0],
+        uv: [0.0, 0.0],
+    },
+    Vertex {
+        position: [-0.5, -0.5, -0.5],
+        normal: [0.0, 0.0, -1.0],
+        uv: [1.0, 0.0],
+    },
+    Vertex {
+        position: [-0.5, 0.5, -0.5],
+        normal: [0.0, 0.0, -1.0],
+        uv: [1.0, 1.0],
+    },
+    Vertex {
+        position: [0.5, 0.5, -0.5],
+        normal: [0.0, 0.0, -1.0],
+        uv: [0.0, 1.0],
+    },
     // Right face (+X)
-    Vertex { position: [ 0.5, -0.5,  0.5], normal: [ 1.0,  0.0,  0.0], uv: [0.0, 0.0] },
-    Vertex { position: [ 0.5, -0.5, -0.5], normal: [ 1.0,  0.0,  0.0], uv: [1.0, 0.0] },
-    Vertex { position: [ 0.5,  0.5, -0.5], normal: [ 1.0,  0.0,  0.0], uv: [1.0, 1.0] },
-    Vertex { position: [ 0.5,  0.5,  0.5], normal: [ 1.0,  0.0,  0.0], uv: [0.0, 1.0] },
+    Vertex {
+        position: [0.5, -0.5, 0.5],
+        normal: [1.0, 0.0, 0.0],
+        uv: [0.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, -0.5, -0.5],
+        normal: [1.0, 0.0, 0.0],
+        uv: [1.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, 0.5, -0.5],
+        normal: [1.0, 0.0, 0.0],
+        uv: [1.0, 1.0],
+    },
+    Vertex {
+        position: [0.5, 0.5, 0.5],
+        normal: [1.0, 0.0, 0.0],
+        uv: [0.0, 1.0],
+    },
     // Left face (-X)
-    Vertex { position: [-0.5, -0.5, -0.5], normal: [-1.0,  0.0,  0.0], uv: [0.0, 0.0] },
-    Vertex { position: [-0.5, -0.5,  0.5], normal: [-1.0,  0.0,  0.0], uv: [1.0, 0.0] },
-    Vertex { position: [-0.5,  0.5,  0.5], normal: [-1.0,  0.0,  0.0], uv: [1.0, 1.0] },
-    Vertex { position: [-0.5,  0.5, -0.5], normal: [-1.0,  0.0,  0.0], uv: [0.0, 1.0] },
+    Vertex {
+        position: [-0.5, -0.5, -0.5],
+        normal: [-1.0, 0.0, 0.0],
+        uv: [0.0, 0.0],
+    },
+    Vertex {
+        position: [-0.5, -0.5, 0.5],
+        normal: [-1.0, 0.0, 0.0],
+        uv: [1.0, 0.0],
+    },
+    Vertex {
+        position: [-0.5, 0.5, 0.5],
+        normal: [-1.0, 0.0, 0.0],
+        uv: [1.0, 1.0],
+    },
+    Vertex {
+        position: [-0.5, 0.5, -0.5],
+        normal: [-1.0, 0.0, 0.0],
+        uv: [0.0, 1.0],
+    },
     // Top face (+Y)
-    Vertex { position: [-0.5,  0.5,  0.5], normal: [ 0.0,  1.0,  0.0], uv: [0.0, 0.0] },
-    Vertex { position: [ 0.5,  0.5,  0.5], normal: [ 0.0,  1.0,  0.0], uv: [1.0, 0.0] },
-    Vertex { position: [ 0.5,  0.5, -0.5], normal: [ 0.0,  1.0,  0.0], uv: [1.0, 1.0] },
-    Vertex { position: [-0.5,  0.5, -0.5], normal: [ 0.0,  1.0,  0.0], uv: [0.0, 1.0] },
+    Vertex {
+        position: [-0.5, 0.5, 0.5],
+        normal: [0.0, 1.0, 0.0],
+        uv: [0.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, 0.5, 0.5],
+        normal: [0.0, 1.0, 0.0],
+        uv: [1.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, 0.5, -0.5],
+        normal: [0.0, 1.0, 0.0],
+        uv: [1.0, 1.0],
+    },
+    Vertex {
+        position: [-0.5, 0.5, -0.5],
+        normal: [0.0, 1.0, 0.0],
+        uv: [0.0, 1.0],
+    },
     // Bottom face (-Y)
-    Vertex { position: [-0.5, -0.5, -0.5], normal: [ 0.0, -1.0,  0.0], uv: [0.0, 0.0] },
-    Vertex { position: [ 0.5, -0.5, -0.5], normal: [ 0.0, -1.0,  0.0], uv: [1.0, 0.0] },
-    Vertex { position: [ 0.5, -0.5,  0.5], normal: [ 0.0, -1.0,  0.0], uv: [1.0, 1.0] },
-    Vertex { position: [-0.5, -0.5,  0.5], normal: [ 0.0, -1.0,  0.0], uv: [0.0, 1.0] },
+    Vertex {
+        position: [-0.5, -0.5, -0.5],
+        normal: [0.0, -1.0, 0.0],
+        uv: [0.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, -0.5, -0.5],
+        normal: [0.0, -1.0, 0.0],
+        uv: [1.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, -0.5, 0.5],
+        normal: [0.0, -1.0, 0.0],
+        uv: [1.0, 1.0],
+    },
+    Vertex {
+        position: [-0.5, -0.5, 0.5],
+        normal: [0.0, -1.0, 0.0],
+        uv: [0.0, 1.0],
+    },
 ];
 
 const CUBE_INDICES: &[u32] = &[
-     0,  1,  2,  2,  3,  0, // front
-     4,  5,  6,  6,  7,  4, // back
-     8,  9, 10, 10, 11,  8, // right
+    0, 1, 2, 2, 3, 0, // front
+    4, 5, 6, 6, 7, 4, // back
+    8, 9, 10, 10, 11, 8, // right
     12, 13, 14, 14, 15, 12, // left
     16, 17, 18, 18, 19, 16, // top
     20, 21, 22, 22, 23, 20, // bottom
@@ -1455,10 +1801,26 @@ fn generate_sphere(segments: u32) -> (Vec<Vertex>, Vec<u32>) {
 
 fn generate_plane() -> (Vec<Vertex>, Vec<u32>) {
     let vertices = vec![
-        Vertex { position: [-0.5, -0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [0.0, 0.0] },
-        Vertex { position: [ 0.5, -0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [1.0, 0.0] },
-        Vertex { position: [ 0.5,  0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [1.0, 1.0] },
-        Vertex { position: [-0.5,  0.5, 0.0], normal: [0.0, 0.0, 1.0], uv: [0.0, 1.0] },
+        Vertex {
+            position: [-0.5, -0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [0.0, 0.0],
+        },
+        Vertex {
+            position: [0.5, -0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [1.0, 0.0],
+        },
+        Vertex {
+            position: [0.5, 0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [1.0, 1.0],
+        },
+        Vertex {
+            position: [-0.5, 0.5, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [0.0, 1.0],
+        },
     ];
     let indices = vec![0, 1, 2, 2, 3, 0];
     (vertices, indices)
@@ -1480,11 +1842,25 @@ struct MaterialUniform {
     roughness: f32,
 };
 
+struct ForwardLight {
+    position_type: vec4<f32>,
+    direction_range: vec4<f32>,
+    color_intensity: vec4<f32>,
+    spot_angles: vec4<f32>,
+};
+
+struct LightingUniform {
+    ambient: vec4<f32>,
+    params: vec4<u32>,
+    lights: array<ForwardLight, 8>,
+};
+
 @group(0) @binding(0) var<uniform> camera: CameraUniform;
 @group(0) @binding(1) var<uniform> model: ModelUniform;
 @group(0) @binding(2) var<uniform> material: MaterialUniform;
 @group(0) @binding(3) var material_texture: texture_2d<f32>;
 @group(0) @binding(4) var material_sampler: sampler;
+@group(0) @binding(5) var<uniform> lighting: LightingUniform;
 
 struct VsIn {
     @location(0) position: vec3<f32>,
@@ -1500,14 +1876,15 @@ struct VsOut {
     @location(0) world_normal: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) world_position: vec3<f32>,
 };
 
 @vertex
 fn vs_main(input: VsIn) -> VsOut {
     var out: VsOut;
     let world_pos = input.position * input.scale + input.offset;
-    let world_pos4 = vec4<f32>(world_pos, 1.0);
-    out.position = camera.view_projection * model.model * world_pos4;
+    let world_pos4 = model.model * vec4<f32>(world_pos, 1.0);
+    out.position = camera.view_projection * world_pos4;
     let normal_mat = mat3x3<f32>(
         model.model[0].xyz,
         model.model[1].xyz,
@@ -1516,19 +1893,47 @@ fn vs_main(input: VsIn) -> VsOut {
     out.world_normal = normalize(normal_mat * input.normal);
     out.uv = input.uv;
     out.color = input.color;
+    out.world_position = world_pos4.xyz;
     return out;
 }
 
 @fragment
 fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
-    let light_dir = normalize(vec3<f32>(0.5, 1.0, 0.25));
-    let ambient = vec3<f32>(0.08, 0.08, 0.08);
     let n = normalize(input.world_normal);
-    let ndotl = max(dot(n, light_dir), 0.0);
-    let diffuse = ndotl * vec3<f32>(0.95, 0.95, 0.95);
     let tex_color = textureSample(material_texture, material_sampler, input.uv);
     let base = material.base_color.rgb * input.color.rgb * tex_color.rgb;
-    let lit = base * (ambient + diffuse);
+    var radiance = lighting.ambient.rgb;
+
+    for (var i: u32 = 0u; i < lighting.params.x; i = i + 1u) {
+        let light = lighting.lights[i];
+        let light_type = light.position_type.w;
+        let light_color = light.color_intensity.rgb;
+        let intensity = light.color_intensity.w;
+        var light_dir = vec3<f32>(0.0, 1.0, 0.0);
+        var attenuation = 1.0;
+        var spot = 1.0;
+
+        if (light_type < 0.5) {
+            light_dir = normalize(-light.direction_range.xyz);
+        } else {
+            let to_light = light.position_type.xyz - input.world_position;
+            let distance = length(to_light);
+            light_dir = to_light / max(distance, 0.001);
+            let range = max(light.direction_range.w, 0.001);
+            let falloff = max(1.0 - distance / range, 0.0);
+            attenuation = falloff * falloff;
+
+            if (light_type > 1.5) {
+                let spot_alignment = dot(normalize(-light_dir), normalize(light.direction_range.xyz));
+                spot = smoothstep(light.spot_angles.y, light.spot_angles.x, spot_alignment);
+            }
+        }
+
+        let ndotl = max(dot(n, light_dir), 0.0);
+        radiance = radiance + light_color * intensity * ndotl * attenuation * spot;
+    }
+
+    let lit = base * min(radiance, vec3<f32>(3.0, 3.0, 3.0));
     let alpha = material.base_color.a * input.color.a * tex_color.a;
     return vec4<f32>(lit, alpha);
 }
@@ -1541,8 +1946,16 @@ mod tests {
     #[test]
     fn cube_has_24_vertices_and_36_indices() {
         let (verts, indices) = generate_cube();
-        assert_eq!(verts.len(), 24, "cube must have 24 vertices with hard normals");
-        assert_eq!(indices.len(), 36, "cube must have 36 indices (6 faces × 2 triangles × 3)");
+        assert_eq!(
+            verts.len(),
+            24,
+            "cube must have 24 vertices with hard normals"
+        );
+        assert_eq!(
+            indices.len(),
+            36,
+            "cube must have 36 indices (6 faces × 2 triangles × 3)"
+        );
     }
 
     #[test]
@@ -1550,11 +1963,17 @@ mod tests {
         let (verts, _indices) = generate_cube();
         // Front face vertices should have normal +Z
         for v in &verts[0..4] {
-            assert!((v.normal[2] - 1.0).abs() < 0.001, "front face normal should be +Z");
+            assert!(
+                (v.normal[2] - 1.0).abs() < 0.001,
+                "front face normal should be +Z"
+            );
         }
         // Back face vertices should have normal -Z
         for v in &verts[4..8] {
-            assert!((v.normal[2] + 1.0).abs() < 0.001, "back face normal should be -Z");
+            assert!(
+                (v.normal[2] + 1.0).abs() < 0.001,
+                "back face normal should be -Z"
+            );
         }
     }
 
@@ -1594,5 +2013,43 @@ mod tests {
         assert_eq!(cube, DebugMesh::Cube);
         assert_eq!(sphere, DebugMesh::Sphere(8));
         assert_eq!(plane, DebugMesh::Plane);
+    }
+
+    #[test]
+    fn packs_scene_lights_into_forward_uniform() {
+        let light = RenderLight {
+            object: engine_core::EntityId::from_u128(7),
+            transform: engine_core::math::Transform {
+                translation: engine_core::math::Vec3::new(1.0, 2.0, 3.0),
+                rotation: engine_core::math::Quat::IDENTITY,
+                scale: engine_core::math::Vec3::ONE,
+            },
+            kind: "point".to_string(),
+            color: engine_core::math::Vec3::new(0.5, 0.75, 1.0),
+            intensity: 3.0,
+            range: 12.0,
+            spot_angle: 45.0,
+        };
+        let world = RenderWorld {
+            camera: None,
+            objects: Vec::new(),
+            lights: vec![light],
+        };
+
+        let uniform = lighting_uniform_from_world(&world);
+
+        assert_eq!(uniform.params[0], 1);
+        assert_eq!(uniform.lights[0].position_type, [1.0, 2.0, 3.0, 1.0]);
+        assert_eq!(uniform.lights[0].color_intensity, [0.5, 0.75, 1.0, 3.0]);
+        assert_eq!(uniform.lights[0].direction_range[3], 12.0);
+    }
+
+    #[test]
+    fn uses_fallback_directional_light_when_scene_has_no_lights() {
+        let uniform = lighting_uniform_from_world(&RenderWorld::default());
+
+        assert_eq!(uniform.params[0], 1);
+        assert_eq!(uniform.lights[0].position_type[3], 0.0);
+        assert_eq!(uniform.lights[0].color_intensity[3], 1.0);
     }
 }

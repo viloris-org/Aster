@@ -150,7 +150,7 @@ fn build_profile(profile: Profile) -> EngineResult<()> {
         Profile::Editor | Profile::AgentTools | Profile::DevFull => cargo([
             "build",
             "-p",
-            "engine-cli",
+            "aster",
             "--no-default-features",
             "--features",
             profile.name(),
@@ -175,7 +175,7 @@ fn package(request: PackageRequest) -> EngineResult<()> {
     cargo([
         "build",
         "-p",
-        "engine-cli",
+        "aster",
         "--no-default-features",
         "--features",
         profile.name(),
@@ -195,7 +195,7 @@ fn package(request: PackageRequest) -> EngineResult<()> {
 
     let cli_source = PathBuf::from("target")
         .join("debug")
-        .join(executable_name("engine-cli"));
+        .join(executable_name("aster"));
     let cli_dest = bin_dir.join(executable_name("aster"));
     fs::copy(&cli_source, &cli_dest).map_err(|source| EngineError::Filesystem {
         path: cli_source.clone(),

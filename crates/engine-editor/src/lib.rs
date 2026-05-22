@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 pub mod agent;
 
 pub mod native;
+pub mod physics;
 pub mod render;
 pub use native::{
     GizmoOperation, GizmoService, GizmoSpace, OutlineEntry, OutlineService, PickRequest,
@@ -376,6 +377,14 @@ impl SelectionService {
     pub fn selected(&self) -> Option<&Selection> {
         self.selected.as_ref()
     }
+
+    /// Returns the selected asset path, if any.
+    pub fn as_asset(&self) -> Option<&PathBuf> {
+        match &self.selected {
+            Some(Selection::Asset(path)) => Some(path),
+            _ => None,
+        }
+    }
 }
 
 /// Target selected in the editor.
@@ -722,11 +731,32 @@ pub fn register_core_commands(registry: &mut CommandRegistry) {
             CommandAvailability::Always,
         ),
         command(
+            "scene.open",
+            "Open Scene",
+            "File",
+            Some("Ctrl+O"),
+            CommandAvailability::ProjectOpen,
+        ),
+        command(
             "scene.save",
             "Save",
             "File",
             Some("Ctrl+S"),
             CommandAvailability::DirtyScene,
+        ),
+        command(
+            "scene.save_as",
+            "Save As",
+            "File",
+            Some("Ctrl+Shift+S"),
+            CommandAvailability::ProjectOpen,
+        ),
+        command(
+            "project.close",
+            "Close Project",
+            "File",
+            None,
+            CommandAvailability::ProjectOpen,
         ),
         command(
             "project.build",
@@ -754,7 +784,7 @@ pub fn register_core_commands(registry: &mut CommandRegistry) {
             "Play",
             "Play",
             Some("Ctrl+P"),
-            CommandAvailability::Always,
+            CommandAvailability::ProjectOpen,
         ),
         command(
             "play.pause",
@@ -843,19 +873,7 @@ impl ProjectContext {
     pub fn open(project_root: impl Into<PathBuf>) -> EngineResult<Self> {
         let project_root: PathBuf = project_root.into();
 
-        let manifest_path = project_root.join("aster.project.toml");
-        let manifest_toml =
-            fs::read_to_string(&manifest_path).map_err(|source| EngineError::Filesystem {
-                path: manifest_path.clone(),
-                source,
-            })?;
-        let manifest: engine_ecs::ProjectManifest =
-            toml::from_str(&manifest_toml).map_err(|error| {
-                EngineError::other(format!(
-                    "failed to parse {}: {error}",
-                    manifest_path.display()
-                ))
-            })?;
+        let manifest = engine_ecs::ProjectManifest::load(&project_root)?;
 
         let diagnostics = manifest.diagnostics();
         if !diagnostics.is_empty() {
@@ -960,7 +978,10 @@ mod tests {
             "edit.undo",
             "edit.redo",
             "assets.reload",
+            "scene.open",
             "scene.save",
+            "scene.save_as",
+            "project.close",
             "project.build",
             "command.palette",
         ] {

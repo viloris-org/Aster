@@ -82,8 +82,14 @@ pub struct RenderLight {
     pub transform: Transform,
     /// Light kind.
     pub kind: String,
+    /// RGB light color.
+    pub color: engine_core::math::Vec3,
     /// Light intensity.
     pub intensity: f32,
+    /// Light range for point and spot lights.
+    pub range: f32,
+    /// Spot cone angle in degrees for spot lights.
+    pub spot_angle: f32,
 }
 
 /// Minimal render queue shared by runtime, editor Scene View, and Game View.
@@ -136,10 +142,7 @@ impl RenderWorld {
                         let mesh_name = mesh
                             .builtin_mesh
                             .clone()
-                            .or_else(|| {
-                                mesh.mesh
-                                    .map(|id| format!("asset:{:016x}", id.as_u128()))
-                            })
+                            .or_else(|| mesh.mesh.map(|id| format!("asset:{:016x}", id.as_u128())))
                             .unwrap_or_default();
                         let material_name = mesh
                             .material
@@ -163,7 +166,10 @@ impl RenderWorld {
                             object: obj.id,
                             transform,
                             kind: light.kind.clone(),
+                            color: light.color,
                             intensity: light.intensity,
+                            range: light.range,
+                            spot_angle: light.spot_angle,
                         });
                     }
                     _ => {}
@@ -385,6 +391,7 @@ mod tests {
                     far: 100.0,
                     aspect_ratio: None,
                     primary: true,
+                    clear_color: engine_core::math::Vec3::new(0.1, 0.1, 0.1),
                 }),
             )
             .unwrap();
@@ -399,6 +406,7 @@ mod tests {
                     builtin_mesh: Some("debug/cube".to_string()),
                     material: engine_ecs::MaterialRef::debug(),
                     casts_shadows: true,
+                    receive_shadows: true,
                 }),
             )
             .unwrap();
@@ -413,6 +421,7 @@ mod tests {
                     builtin_mesh: Some("debug/sphere".to_string()),
                     material: engine_ecs::MaterialRef::debug(),
                     casts_shadows: false,
+                    receive_shadows: true,
                 }),
             )
             .unwrap();
@@ -439,8 +448,16 @@ mod tests {
         assert_eq!(cam.far, 100.0);
 
         // Verify mesh names
-        let cube = world.objects.iter().find(|o| o.mesh == "debug/cube").unwrap();
-        let sphere = world.objects.iter().find(|o| o.mesh == "debug/sphere").unwrap();
+        let cube = world
+            .objects
+            .iter()
+            .find(|o| o.mesh == "debug/cube")
+            .unwrap();
+        let sphere = world
+            .objects
+            .iter()
+            .find(|o| o.mesh == "debug/sphere")
+            .unwrap();
         assert_eq!(cube.material, "debug/default");
         assert_eq!(sphere.material, "debug/default");
         assert_ne!(sphere.object.as_u128(), 0);
