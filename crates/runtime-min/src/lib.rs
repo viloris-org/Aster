@@ -12,6 +12,8 @@ use std::{
 
 #[cfg(feature = "script-python")]
 use std::time::Instant;
+#[cfg(feature = "script-rhai")]
+use engine_script_rhai::RhaiScriptBackend;
 
 use engine_assets::{
     import_builtin_asset, scan_project_assets, AssetDatabase, AssetGuid, AssetRegistry,
@@ -41,6 +43,16 @@ use engine_render::{
 };
 #[cfg(feature = "wgpu")]
 pub use engine_render_wgpu::WgpuRenderDevice;
+
+#[cfg(feature = "script-rhai")]
+struct RhaiWrapper(RhaiScriptBackend);
+
+#[cfg(feature = "script-rhai")]
+impl std::fmt::Debug for RhaiWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RhaiScriptBackend").finish_non_exhaustive()
+    }
+}
 
 /// Explicit runtime services. There is no hidden global mutable state.
 #[derive(Debug)]
@@ -96,6 +108,8 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     python_script_runtime: PythonScriptRuntimeConfig,
     #[cfg(feature = "script-python")]
     script_diagnostics_this_frame: usize,
+    #[cfg(feature = "script-rhai")]
+    rhai_script_backend: RhaiWrapper,
     #[cfg(feature = "audio")]
     audio_bindings: Vec<AudioBinding>,
     #[cfg(feature = "audio")]
@@ -249,6 +263,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
             python_script_runtime: PythonScriptRuntimeConfig::default(),
             #[cfg(feature = "script-python")]
             script_diagnostics_this_frame: 0,
+            #[cfg(feature = "script-rhai")]
+            rhai_script_backend: RhaiWrapper(RhaiScriptBackend::new()),
             #[cfg(feature = "audio")]
             audio_bindings: Vec::new(),
             #[cfg(feature = "audio")]
@@ -302,6 +318,14 @@ impl<R: RenderDevice> RuntimeServices<R> {
 
         let should_simulate = !self.paused || single_step;
 
+        // ── script setup (Rhai) ──────────────────────────────────────
+        #[cfg(feature = "script-rhai")]
+        {
+            self.rhai_script_backend
+                .0
+                .set_input_state(self.input.clone());
+        }
+
         if should_simulate {
             #[cfg(feature = "physics")]
             self.ensure_physics_bindings()?;
@@ -309,6 +333,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
             self.ensure_audio_bindings()?;
             #[cfg(feature = "script-python")]
             self.run_python_scripts("start", dt);
+            #[cfg(feature = "script-rhai")]
+            self.run_rhai_scripts_start();
 
             // ── fixed_timestep_loop ────────────────────────────────────
             let mut fixed_steps = 0;
@@ -327,6 +353,11 @@ impl<R: RenderDevice> RuntimeServices<R> {
                     let fixed_dt = self.time.fixed_delta_seconds;
                     self.run_python_scripts("fixed_update", fixed_dt);
                 }
+                #[cfg(feature = "script-rhai")]
+                {
+                    let fixed_dt = self.time.fixed_delta_seconds;
+                    self.run_rhai_scripts_fixed_update(fixed_dt);
+                }
                 self.scene.tick_fixed_frame();
                 fixed_steps += 1;
             }
@@ -335,6 +366,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
             self.apply_builtin_player_controller();
             #[cfg(feature = "script-python")]
             self.run_python_scripts("update", dt);
+            #[cfg(feature = "script-rhai")]
+            self.run_rhai_scripts_update(dt);
 
             // ── late_update ────────────────────────────────────────────
             self.scene.tick_runtime_frame();
@@ -370,6 +403,147 @@ impl<R: RenderDevice> RuntimeServices<R> {
     /// Current frame index.
     pub fn frame_index(&self) -> u64 {
         self.frame_counter.get()
+    }
+
+    #[cfg(feature = "script-rhai")]
+    fn run_rhai_scripts_start(&mut self) {
+        let invocations: Vec<(String, PathBuf)> = self
+            .scene
+            .iter_objects()
+            .flat_map(|(entity, object)| {
+                let entity_id = format_entity_id(entity);
+                object
+                    .scripts
+                    .iter()
+                    .chain(
+                        object
+                            .components
+                            .iter()
+                            .filter_map(|c| match c {
+                                engine_ecs::ComponentData::Script(s) => Some(s),
+                                _ => None,
+                            }),
+                    )
+                    .filter(|s| s.backend == "rhai")
+                    .map(move |s| (entity_id.clone(), PathBuf::from(&s.script)))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        for (entity_id, script_ref) in &invocations {
+            let Ok(script_path) =
+                resolve_rhai_script_path(script_ref.as_path(), self.project_root.as_deref())
+            else {
+                continue;
+            };
+            if let Err(error) = self.rhai_script_backend.0.load_script(&script_path) {
+                self.diagnostics.push(RuntimeDiagnostic {
+                    source: "script".to_string(),
+                    level: "error".to_string(),
+                    message: format!("rhai load error: {error}"),
+                    file: Some(script_path),
+                    line: None,
+                });
+                continue;
+            }
+            let scene = std::mem::take(&mut self.scene);
+            self.rhai_script_backend.0.set_scene(scene);
+            match self.rhai_script_backend.0.run_start(entity_id, &script_path) {
+                Ok(Some(entry)) => {
+                    self.diagnostics
+                        .push(console_to_runtime_diagnostic(entry));
+                }
+                Err(error) => {
+                    self.diagnostics.push(RuntimeDiagnostic {
+                        source: "script".to_string(),
+                        level: "error".to_string(),
+                        message: format!("rhai start error: {error}"),
+                        file: Some(script_path),
+                        line: None,
+                    });
+                }
+                _ => {}
+            }
+            self.scene = self.rhai_script_backend.0.take_scene().unwrap_or_default();
+        }
+    }
+
+    #[cfg(feature = "script-rhai")]
+    fn run_rhai_scripts_fixed_update(&mut self, fixed_dt: f32) {
+        self.run_rhai_lifecycle("on_fixed_update", fixed_dt);
+    }
+
+    #[cfg(feature = "script-rhai")]
+    fn run_rhai_scripts_update(&mut self, dt: f32) {
+        self.run_rhai_lifecycle("on_update", dt);
+    }
+
+    #[cfg(feature = "script-rhai")]
+    fn run_rhai_lifecycle(&mut self, stage: &str, dt: f32) {
+        let invocations: Vec<(String, PathBuf)> = self
+            .scene
+            .iter_objects()
+            .flat_map(|(entity, object)| {
+                let entity_id = format_entity_id(entity);
+                object
+                    .scripts
+                    .iter()
+                    .chain(
+                        object
+                            .components
+                            .iter()
+                            .filter_map(|c| match c {
+                                engine_ecs::ComponentData::Script(s) => Some(s),
+                                _ => None,
+                            }),
+                    )
+                    .filter(|s| s.backend == "rhai")
+                    .map(move |s| (entity_id.clone(), PathBuf::from(&s.script)))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        if invocations.is_empty() {
+            return;
+        }
+
+        let scene = std::mem::take(&mut self.scene);
+        self.rhai_script_backend.0.set_scene(scene);
+
+        for (entity_id, script_ref) in &invocations {
+            let Ok(script_path) = resolve_rhai_script_path(script_ref.as_path(), self.project_root.as_deref())
+            else {
+                continue;
+            };
+            let result = match stage {
+                "on_fixed_update" => self
+                    .rhai_script_backend
+                    .0
+                    .run_fixed_update(entity_id, &script_path, dt),
+                _ => self
+                    .rhai_script_backend
+                    .0
+                    .run_update(entity_id, &script_path, dt),
+            };
+            match result {
+                Ok(Some(entry)) => {
+                    self.diagnostics
+                        .push(console_to_runtime_diagnostic(entry));
+                }
+                Err(error) => {
+                    self.diagnostics.push(RuntimeDiagnostic {
+                        source: "script".to_string(),
+                        level: "error".to_string(),
+                        message: format!("rhai {stage} error: {error}"),
+                        file: Some(script_path),
+                        line: None,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        self.scene = self.rhai_script_backend.0.take_scene().unwrap_or_default();
     }
 
     /// Returns true if any key bound to `action_name` was pressed this frame.
@@ -601,6 +775,21 @@ impl<R: RenderDevice> RuntimeServices<R> {
             }
             ResourceKind::Model | ResourceKind::SkinnedModel => {
                 let model = ModelResource::from_bytes(&cpu.bytes).map_err(EngineError::from)?;
+                // Upload each mesh sub-object to the GPU
+                for (i, mesh) in model.meshes.iter().enumerate() {
+                    let mesh_name = if model.meshes.len() == 1 {
+                        format!("asset:{:032x}", guid.as_u128())
+                    } else {
+                        format!("asset:{:032x}:{}", guid.as_u128(), i)
+                    };
+                    self.renderer.upload_mesh_data(
+                        &mesh_name,
+                        &mesh.positions,
+                        &mesh.normals,
+                        &mesh.texcoords,
+                        &mesh.indices,
+                    )?;
+                }
                 self.mesh_resources.insert(guid.as_asset_id(), model);
             }
             ResourceKind::Material => {
@@ -661,8 +850,12 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 )
                 .is_ok()
             {
-                if let Ok(transform) = self.physics.backend().body_transform(binding.body) {
-                    self.scene.transforms_mut().set_local(player, transform);
+                if let Ok(world_transform) =
+                    self.physics.backend().body_transform(binding.body)
+                {
+                    self.scene
+                        .transforms_mut()
+                        .set_world(player, world_transform);
                     return;
                 }
             }
@@ -739,8 +932,13 @@ impl<R: RenderDevice> RuntimeServices<R> {
             else {
                 continue;
             };
-            let mut desc = RigidbodyDesc {
-                transform: self.scene.transforms().local(entity).unwrap_or_default(),
+            let world_transform = self
+                .scene
+                .transforms()
+                .world(entity)
+                .unwrap_or_default();
+            let desc = RigidbodyDesc {
+                transform: world_transform,
                 kind: match rigidbody.body_type.as_str() {
                     "static" => BodyKind::Static,
                     "kinematic" => BodyKind::Kinematic,
@@ -749,7 +947,6 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 gravity_scale: if rigidbody.use_gravity { 1.0 } else { 0.0 },
                 ..RigidbodyDesc::default()
             };
-            desc.transform = self.scene.transforms().local(entity).unwrap_or_default();
             let body = self.physics.backend_mut().create_body(&desc)?;
             for collider in object
                 .components
@@ -775,7 +972,11 @@ impl<R: RenderDevice> RuntimeServices<R> {
     fn sync_scene_to_physics(&mut self) -> EngineResult<()> {
         for binding in &self.physics_bindings {
             if let Some(entity) = self.scene.find_by_id(binding.object) {
-                let transform = self.scene.transforms().local(entity).unwrap_or_default();
+                let transform = self
+                    .scene
+                    .transforms()
+                    .world(entity)
+                    .unwrap_or_default();
                 self.physics
                     .backend_mut()
                     .set_body_transform(binding.body, transform)?;
@@ -789,7 +990,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         for binding in &self.physics_bindings {
             if let Some(entity) = self.scene.find_by_id(binding.object) {
                 let transform = self.physics.backend().body_transform(binding.body)?;
-                self.scene.transforms_mut().set_local(entity, transform);
+                self.scene.transforms_mut().set_world(entity, transform);
             }
         }
         Ok(())
@@ -872,7 +1073,11 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 }
                 continue;
             };
-            let transform = self.scene.transforms().local(entity).unwrap_or_default();
+            let transform = self
+                .scene
+                .transforms()
+                .world(entity)
+                .unwrap_or_default();
             let source = self.audio.backend_mut().spawn_source(&AudioSourceDesc {
                 clip,
                 volume: audio_source.volume,
@@ -896,7 +1101,11 @@ impl<R: RenderDevice> RuntimeServices<R> {
             .main_camera()
             .or_else(|| self.scene.game_camera())
         {
-            let transform = self.scene.transforms().local(camera).unwrap_or_default();
+            let transform = self
+                .scene
+                .transforms()
+                .world(camera)
+                .unwrap_or_default();
             self.audio.backend_mut().set_listener(&AudioListenerDesc {
                 position: transform.translation,
                 ..AudioListenerDesc::default()
@@ -904,7 +1113,11 @@ impl<R: RenderDevice> RuntimeServices<R> {
         }
         for binding in &self.audio_bindings {
             if let Some(entity) = self.scene.find_by_id(binding.object) {
-                let transform = self.scene.transforms().local(entity).unwrap_or_default();
+                let transform = self
+                    .scene
+                    .transforms()
+                    .world(entity)
+                    .unwrap_or_default();
                 let Some(object) = self.scene.object(entity) else {
                     continue;
                 };
@@ -1382,7 +1595,10 @@ pub fn load_runtime_project(project: impl AsRef<Path>) -> EngineResult<RuntimePr
 pub fn extract_render_world(scene: &Scene) -> RenderWorld {
     let mut world = RenderWorld::default();
     for (entity, object) in scene.iter_objects() {
-        let transform = scene.transforms().local(entity).unwrap_or_default();
+        let transform = scene
+            .transforms()
+            .world(entity)
+            .unwrap_or_default();
         for component in &object.components {
             match component {
                 ComponentData::Camera(camera) => {
@@ -1769,6 +1985,42 @@ pub fn run_project(_project: impl AsRef<Path>) -> EngineResult<()> {
     Err(EngineError::UnsupportedCapability {
         capability: "runtime-game",
     })
+}
+
+#[cfg(feature = "script-rhai")]
+fn resolve_rhai_script_path(script_path: &Path, project_root: Option<&Path>) -> EngineResult<PathBuf> {
+    let path = if let Ok(stripped) = script_path.strip_prefix("project:/") {
+        project_root
+            .map(|root| root.join(stripped))
+            .ok_or_else(|| EngineError::config("project root is not set"))?
+    } else if script_path.is_absolute() {
+        script_path.to_path_buf()
+    } else {
+        project_root
+            .map(|root| root.join(script_path))
+            .unwrap_or_else(|| script_path.to_path_buf())
+    };
+    Ok(path)
+}
+
+fn format_entity_id(entity: engine_ecs::Entity) -> String {
+    let handle = entity.handle();
+    format!("{}:{}", handle.slot(), handle.generation().get())
+}
+
+#[cfg(feature = "script-rhai")]
+fn console_to_runtime_diagnostic(entry: engine_editor::ConsoleEntry) -> RuntimeDiagnostic {
+    RuntimeDiagnostic {
+        source: entry.source.subsystem,
+        level: match entry.level {
+            engine_editor::ConsoleLevel::Error => "error".to_string(),
+            engine_editor::ConsoleLevel::Warn => "warning".to_string(),
+            _ => "info".to_string(),
+        },
+        message: entry.message,
+        file: entry.source.file,
+        line: entry.source.line,
+    }
 }
 
 #[cfg(test)]

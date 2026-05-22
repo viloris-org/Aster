@@ -42,6 +42,7 @@ fn render_one_frame_with_debug_cube_succeeds() {
             material: "debug/default".to_string(),
         }],
         lights: vec![],
+        particles: vec![],
     };
 
     device

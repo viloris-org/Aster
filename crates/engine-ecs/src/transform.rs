@@ -28,6 +28,21 @@ impl TransformHierarchy {
         self.locals.get(&entity).copied()
     }
 
+    /// Sets the world-space transform, converting it to local space.
+    ///
+    /// When the entity has a parent, the local transform is computed as
+    /// `parent_world⁻¹ * world`. When there is no parent, local = world.
+    pub fn set_world(&mut self, entity: Entity, world: Transform) {
+        let local = match self.parent(entity) {
+            Some(parent) => self
+                .world(parent)
+                .map(|parent_world| parent_world.inverse().compose(&world))
+                .unwrap_or(world),
+            None => world,
+        };
+        self.set_local(entity, local);
+    }
+
     /// Sets a parent relationship. Parent and child must be distinct and acyclic.
     pub fn set_parent(&mut self, child: Entity, parent: Option<Entity>) -> EngineResult<()> {
         self.clear_parent(child);
@@ -107,6 +122,29 @@ impl TransformHierarchy {
         self.dirty.contains(&entity)
     }
 
+    /// Computes the world-space transform for an entity by walking the parent chain.
+    ///
+    /// If the entity has no local transform, returns `None`.
+    /// Composes transforms top-down: root → ... → entity.
+    pub fn world(&self, entity: Entity) -> Option<Transform> {
+        let _local = self.locals.get(&entity)?;
+        // Walk up to root, collecting entities from child to root
+        let mut chain = vec![entity];
+        let mut current = entity;
+        while let Some(parent) = self.parents.get(&current).copied() {
+            chain.push(parent);
+            current = parent;
+        }
+        // Compose top-down: root first, then down to entity
+        let mut world = Transform::IDENTITY;
+        for ancestor in chain.into_iter().rev() {
+            if let Some(local) = self.locals.get(&ancestor).copied() {
+                world = world.compose(&local);
+            }
+        }
+        Some(world)
+    }
+
     /// Clears all dirty transform markers after recomputation.
     pub fn clear_dirty(&mut self) {
         self.dirty.clear();
@@ -133,6 +171,7 @@ impl TransformHierarchy {
 
 #[cfg(test)]
 mod tests {
+    use engine_core::math::{Transform, Vec3};
     use engine_core::HandleAllocator;
 
     use super::*;
@@ -150,6 +189,84 @@ mod tests {
 
         hierarchy.set_parent(child, Some(root)).unwrap();
         assert!(hierarchy.set_parent(root, Some(child)).is_err());
+    }
+
+    #[test]
+    fn computes_world_transform_from_parent_chain() {
+        let mut allocator = HandleAllocator::default();
+        let root = entity(&mut allocator);
+        let child = entity(&mut allocator);
+        let grandchild = entity(&mut allocator);
+        let mut hierarchy = TransformHierarchy::default();
+
+        hierarchy.set_parent(child, Some(root)).unwrap();
+        hierarchy.set_parent(grandchild, Some(child)).unwrap();
+
+        hierarchy.set_local(
+            root,
+            Transform {
+                translation: Vec3::new(1.0, 0.0, 0.0),
+                ..Transform::IDENTITY
+            },
+        );
+        hierarchy.set_local(
+            child,
+            Transform {
+                translation: Vec3::new(2.0, 0.0, 0.0),
+                ..Transform::IDENTITY
+            },
+        );
+        hierarchy.set_local(
+            grandchild,
+            Transform {
+                translation: Vec3::new(4.0, 0.0, 0.0),
+                ..Transform::IDENTITY
+            },
+        );
+
+        let world_root = hierarchy.world(root).unwrap();
+        assert!((world_root.translation.x - 1.0).abs() < 0.001);
+
+        let world_child = hierarchy.world(child).unwrap();
+        assert!((world_child.translation.x - 3.0).abs() < 0.001);
+
+        let world_grandchild = hierarchy.world(grandchild).unwrap();
+        assert!((world_grandchild.translation.x - 7.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn set_world_correctly_preserves_local() {
+        let mut allocator = HandleAllocator::default();
+        let root = entity(&mut allocator);
+        let child = entity(&mut allocator);
+        let mut hierarchy = TransformHierarchy::default();
+
+        hierarchy.set_parent(child, Some(root)).unwrap();
+        hierarchy.set_local(
+            root,
+            Transform {
+                translation: Vec3::new(10.0, 0.0, 0.0),
+                ..Transform::IDENTITY
+            },
+        );
+        hierarchy.set_local(child, Transform::IDENTITY);
+
+        // Set child world position to (15, 0, 0)
+        hierarchy.set_world(
+            child,
+            Transform {
+                translation: Vec3::new(15.0, 0.0, 0.0),
+                ..Transform::IDENTITY
+            },
+        );
+
+        // Child local should be (5, 0, 0) since parent is at 10
+        let local_child = hierarchy.local(child).unwrap();
+        assert!((local_child.translation.x - 5.0).abs() < 0.001);
+
+        // World should be 15
+        let world_child = hierarchy.world(child).unwrap();
+        assert!((world_child.translation.x - 15.0).abs() < 0.001);
     }
 
     #[test]

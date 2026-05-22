@@ -2924,6 +2924,7 @@ dependencies = [
  "engine-platform",
  "engine-render",
  "engine-render-wgpu",
+ "engine-script-rhai",
  "serde_json",
  "toml",
  "winit",

@@ -169,6 +169,7 @@ pub struct WgpuRenderDevice {
     index_buffer: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
     instance_capacity: usize,
+    mesh_cache: HashMap<String, MeshBuffers>,
     surface: Option<wgpu::Surface<'static>>,
     surface_config: Option<wgpu::SurfaceConfiguration>,
     surface_depth: Option<wgpu::Texture>,
@@ -455,19 +456,36 @@ impl WgpuRenderDevice {
         self.game_target.size()
     }
 
+    /// Prepares instance buffer from mesh batches for rendering.
+    fn prepare_render_batches(
+        &mut self,
+        world: &RenderWorld,
+    ) -> Vec<(String, u32)> {
+        let batches = mesh_batches_from_world(world);
+        let total_instances: usize = batches.iter().map(|(_, inst)| inst.len()).sum();
+        if total_instances > self.instance_capacity {
+            self.instance_capacity = total_instances.next_power_of_two();
+            self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
+        }
+        let all_instances: Vec<Instance> = batches
+            .iter()
+            .flat_map(|(_, instances)| instances.iter().copied())
+            .collect();
+        if !all_instances.is_empty() {
+            self.queue
+                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&all_instances));
+        }
+        batches
+            .into_iter()
+            .map(|(name, instances)| (name, instances.len() as u32))
+            .collect()
+    }
+
     /// Renders a render world to the default offscreen target, bypassing any surface.
     ///
     /// Use this when the host composites the result into its own UI (e.g., egui).
     pub fn render_world_offscreen(&mut self, world: &RenderWorld) -> EngineResult<()> {
-        let instances = instances_from_world(world);
-        if instances.len() > self.instance_capacity {
-            self.instance_capacity = instances.len().next_power_of_two();
-            self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
-        }
-        if !instances.is_empty() {
-            self.queue
-                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
-        }
+        let batches = self.prepare_render_batches(world);
         let uniform = camera_uniform_from_world(world);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
@@ -484,16 +502,17 @@ impl WgpuRenderDevice {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("aster offscreen render world encoder"),
             });
-        encode_forward_pass(
+        encode_batched_forward_pass(
             &mut encoder,
             &target.color_view,
             target.depth_view.as_ref(),
             &self.pipeline,
             &self.camera_bind_group,
+            &self.mesh_cache,
             &self.vertex_buffer,
-            &self.instance_buffer,
             &self.index_buffer,
-            instances.len() as u32,
+            &self.instance_buffer,
+            &batches,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
         self.submitted_worlds = self.submitted_worlds.saturating_add(1);
@@ -504,15 +523,7 @@ impl WgpuRenderDevice {
     ///
     /// Use this when the host composites the game view result into its own UI (e.g., egui).
     pub fn render_world_offscreen_game(&mut self, world: &RenderWorld) -> EngineResult<()> {
-        let instances = instances_from_world(world);
-        if instances.len() > self.instance_capacity {
-            self.instance_capacity = instances.len().next_power_of_two();
-            self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
-        }
-        if !instances.is_empty() {
-            self.queue
-                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
-        }
+        let batches = self.prepare_render_batches(world);
         let uniform = camera_uniform_from_world(world);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
@@ -529,16 +540,17 @@ impl WgpuRenderDevice {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("aster game offscreen render world encoder"),
             });
-        encode_forward_pass(
+        encode_batched_forward_pass(
             &mut encoder,
             &target.color_view,
             target.depth_view.as_ref(),
             &self.pipeline,
             &self.camera_bind_group,
+            &self.mesh_cache,
             &self.vertex_buffer,
-            &self.instance_buffer,
             &self.index_buffer,
-            instances.len() as u32,
+            &self.instance_buffer,
+            &batches,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
         self.submitted_worlds = self.submitted_worlds.saturating_add(1);
@@ -858,7 +870,7 @@ impl WgpuRenderDevice {
             .map(|(surface, config)| (Some(surface), Some(config)))
             .unwrap_or((None, None));
 
-        Ok(Self {
+        let mut renderer = Self {
             _instance: instance,
             adapter,
             device,
@@ -882,6 +894,7 @@ impl WgpuRenderDevice {
             index_buffer,
             instance_buffer,
             instance_capacity,
+            mesh_cache: HashMap::new(),
             surface,
             surface_config,
             surface_depth: None,
@@ -889,7 +902,9 @@ impl WgpuRenderDevice {
             surface_suspended: false,
             next_gui_texture: 1,
             submitted_worlds: 0,
-        })
+        };
+        renderer.upload_debug_meshes();
+        Ok(renderer)
     }
 
     /// Number of render worlds submitted to this backend.
@@ -921,20 +936,40 @@ impl WgpuRenderDevice {
     /// Creates GPU vertex and index buffers from a procedural debug mesh.
     pub fn create_mesh_buffers(&self, mesh: &DebugMesh) -> MeshBuffers {
         let (vertices, indices) = generate_mesh(mesh);
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("aster debug mesh vertices"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("aster debug mesh indices"),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+        Self::buffers_from_data(&self.device, &vertices, &indices)
+    }
+
+    /// Uploads a mesh from vertex/index data into the mesh cache.
+    pub fn upload_mesh(&mut self, name: &str, vertices: &[Vertex], indices: &[u32]) {
+        let buffers = Self::buffers_from_data(&self.device, vertices, indices);
+        self.mesh_cache.insert(name.to_string(), buffers);
+    }
+
+    /// Pre-loads procedural debug meshes into the cache.
+    pub fn upload_debug_meshes(&mut self) {
+        for mesh in &[DebugMesh::Cube, DebugMesh::Sphere(8), DebugMesh::Plane] {
+            let name = mesh_name(mesh);
+            let buffers = self.create_mesh_buffers(mesh);
+            self.mesh_cache.insert(name, buffers);
+        }
+    }
+
+    /// Returns true when a mesh is available in the cache.
+    pub fn has_mesh(&self, name: &str) -> bool {
+        self.mesh_cache.contains_key(name) || name == "debug/cube"
+    }
+
+    fn buffers_from_data(device: &wgpu::Device, vertices: &[Vertex], indices: &[u32]) -> MeshBuffers {
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aster mesh vertices"),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aster mesh indices"),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
         MeshBuffers {
             vertex_buffer,
             index_buffer,
@@ -983,15 +1018,7 @@ impl RenderDevice for WgpuRenderDevice {
         world: &RenderWorld,
         _frame: RenderFrame,
     ) -> EngineResult<()> {
-        let instances = instances_from_world(world);
-        if instances.len() > self.instance_capacity {
-            self.instance_capacity = instances.len().next_power_of_two();
-            self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
-        }
-        if !instances.is_empty() {
-            self.queue
-                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
-        }
+        let batches = self.prepare_render_batches(world);
         let uniform = camera_uniform_from_world(world);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
@@ -1029,16 +1056,17 @@ impl RenderDevice for WgpuRenderDevice {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("aster surface render world encoder"),
                 });
-            encode_forward_pass(
+            encode_batched_forward_pass(
                 &mut encoder,
                 &view,
                 self.surface_depth_view.as_ref(),
                 &self.pipeline,
                 &self.camera_bind_group,
+                &self.mesh_cache,
                 &self.vertex_buffer,
-                &self.instance_buffer,
                 &self.index_buffer,
-                instances.len() as u32,
+                &self.instance_buffer,
+                &batches,
             );
             self.queue.submit(std::iter::once(encoder.finish()));
             frame.present();
@@ -1055,22 +1083,24 @@ impl RenderDevice for WgpuRenderDevice {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("aster render world encoder"),
             });
-        encode_forward_pass(
+        encode_batched_forward_pass(
             &mut encoder,
             &target.color_view,
             target.depth_view.as_ref(),
             &self.pipeline,
             &self.camera_bind_group,
+            &self.mesh_cache,
             &self.vertex_buffer,
-            &self.instance_buffer,
             &self.index_buffer,
-            instances.len() as u32,
+            &self.instance_buffer,
+            &batches,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
         self.submitted_worlds = self.submitted_worlds.saturating_add(1);
         Ok(())
     }
 
+    /// Prepares instance buffer from mesh batches for rendering.
     fn execute_graph(&mut self, _graph: &RenderGraph, _frame: RenderFrame) -> EngineResult<()> {
         Ok(())
     }
@@ -1211,6 +1241,26 @@ impl RenderDevice for WgpuRenderDevice {
         Ok(())
     }
 
+    fn upload_mesh_data(
+        &mut self,
+        mesh_name: &str,
+        positions: &[[f32; 3]],
+        normals: &[[f32; 3]],
+        texcoords: &[[f32; 2]],
+        indices: &[u32],
+    ) -> EngineResult<()> {
+        let vertex_count = positions.len().min(normals.len()).min(texcoords.len());
+        let vertices: Vec<Vertex> = (0..vertex_count)
+            .map(|i| Vertex {
+                position: positions[i],
+                normal: normals[i],
+                uv: texcoords[i],
+            })
+            .collect();
+        self.upload_mesh(mesh_name, &vertices, indices);
+        Ok(())
+    }
+
     fn flush_destroy_queue(&mut self, _frame_index: u64) {}
 }
 
@@ -1296,16 +1346,17 @@ fn from_wgpu_format(format: wgpu::TextureFormat) -> Option<ImageFormat> {
     }
 }
 
-fn encode_forward_pass(
+fn encode_batched_forward_pass<'a>(
     encoder: &mut wgpu::CommandEncoder,
     color_view: &wgpu::TextureView,
     depth_view: Option<&wgpu::TextureView>,
     pipeline: &wgpu::RenderPipeline,
     camera_bind_group: &wgpu::BindGroup,
-    vertex_buffer: &wgpu::Buffer,
+    mesh_cache: &'a HashMap<String, MeshBuffers>,
+    default_vertex_buffer: &'a wgpu::Buffer,
+    default_index_buffer: &'a wgpu::Buffer,
     instance_buffer: &wgpu::Buffer,
-    index_buffer: &wgpu::Buffer,
-    instance_count: u32,
+    batches: &[(String, u32)],
 ) {
     let color_attachment = Some(wgpu::RenderPassColorAttachment {
         view: color_view,
@@ -1337,13 +1388,24 @@ fn encode_forward_pass(
         occlusion_query_set: None,
         multiview_mask: None,
     });
-    if instance_count > 0 {
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, camera_bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, camera_bind_group, &[]);
+
+    let mut instance_offset = 0u32;
+    for (mesh_name, count) in batches {
+        if *count == 0 {
+            continue;
+        }
+        let buffers = mesh_cache.get(mesh_name);
+        let (vertex_buf, index_buf, index_count) = match buffers {
+            Some(b) => (&b.vertex_buffer, &b.index_buffer, b.index_count),
+            None => (default_vertex_buffer, default_index_buffer, CUBE_INDEX_COUNT),
+        };
+        pass.set_vertex_buffer(0, vertex_buf.slice(..));
         pass.set_vertex_buffer(1, instance_buffer.slice(..));
-        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..CUBE_INDEX_COUNT, 0, 0..instance_count);
+        pass.set_index_buffer(index_buf.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..index_count, 0, instance_offset..instance_offset + count);
+        instance_offset += count;
     }
 }
 
@@ -1567,47 +1629,56 @@ fn mul_mat4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     result
 }
 
-fn instances_from_world(world: &RenderWorld) -> Vec<Instance> {
-    let mut instances = world
-        .objects
-        .iter()
-        .enumerate()
-        .map(|(index, object)| {
-            let color = color_for_material(&object.material);
-            let transform = object.transform;
-            Instance {
-                offset: [
-                    transform.translation.x,
-                    transform.translation.y,
-                    transform.translation.z + index as f32 * 0.01,
-                ],
-                scale: [
-                    transform.scale.x.max(0.05),
-                    transform.scale.y.max(0.05),
-                    transform.scale.z.max(0.05),
-                ],
-                color,
-            }
-        })
-        .collect::<Vec<_>>();
+fn mesh_name(mesh: &DebugMesh) -> String {
+    match mesh {
+        DebugMesh::Cube => "debug/cube".to_string(),
+        DebugMesh::Sphere(_) => "debug/sphere".to_string(),
+        DebugMesh::Plane => "debug/plane".to_string(),
+    }
+}
 
-    instances.extend(world.particles.iter().map(|particle| {
-        let transform = particle.transform;
-        Instance {
-            offset: [
-                transform.translation.x,
-                transform.translation.y,
-                transform.translation.z,
-            ],
+/// Groups render objects by mesh name for batched instanced rendering.
+fn mesh_batches_from_world(world: &RenderWorld) -> Vec<(String, Vec<Instance>)> {
+    let mut batches: HashMap<String, Vec<Instance>> = HashMap::new();
+    for object in &world.objects {
+        let color = color_for_material(&object.material);
+        let t = object.transform;
+        let mesh = if object.mesh.is_empty() {
+            "debug/cube".to_string()
+        } else {
+            object.mesh.clone()
+        };
+        batches.entry(mesh).or_default().push(Instance {
+            offset: [t.translation.x, t.translation.y, t.translation.z],
             scale: [
-                transform.scale.x.max(0.01),
-                transform.scale.y.max(0.01),
-                transform.scale.z.max(0.01),
+                t.scale.x.max(0.05),
+                t.scale.y.max(0.05),
+                t.scale.z.max(0.05),
             ],
-            color: particle.color,
-        }
-    }));
-    instances
+            color,
+        });
+    }
+    // Particles go into their own particle mesh batch
+    if !world.particles.is_empty() {
+        let particle_instances: Vec<Instance> = world
+            .particles
+            .iter()
+            .map(|particle| {
+                let t = particle.transform;
+                Instance {
+                    offset: [t.translation.x, t.translation.y, t.translation.z],
+                    scale: [
+                        t.scale.x.max(0.01),
+                        t.scale.y.max(0.01),
+                        t.scale.z.max(0.01),
+                    ],
+                    color: particle.color,
+                }
+            })
+            .collect();
+        batches.insert("debug/plane".to_string(), particle_instances);
+    }
+    batches.into_iter().collect()
 }
 
 fn color_for_material(material: &str) -> [f32; 4] {
@@ -2052,6 +2123,7 @@ mod tests {
             camera: None,
             objects: Vec::new(),
             lights: vec![light],
+            particles: vec![],
         };
 
         let uniform = lighting_uniform_from_world(&world);

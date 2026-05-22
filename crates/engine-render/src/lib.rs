@@ -264,6 +264,21 @@ pub trait RenderDevice {
     /// Submits a GUI draw list for rendering.
     fn draw_gui(&mut self, draw_list: &GuiDrawList) -> EngineResult<()>;
 
+    /// Uploads a mesh to the GPU with vertex data and indices.
+    ///
+    /// The default implementation is a no-op; backends that support mesh
+    /// rendering should override this.
+    fn upload_mesh_data(
+        &mut self,
+        _mesh_name: &str,
+        _positions: &[[f32; 3]],
+        _normals: &[[f32; 3]],
+        _texcoords: &[[f32; 2]],
+        _indices: &[u32],
+    ) -> EngineResult<()> {
+        Ok(())
+    }
+
     /// Flushes the delayed destruction queue for the given frame.
     fn flush_destroy_queue(&mut self, frame_index: u64);
 }

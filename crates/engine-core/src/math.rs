@@ -64,6 +64,20 @@ impl Vec3 {
             self.z.max(other.z),
         )
     }
+
+    /// Cross product.
+    pub fn cross(self, other: Self) -> Self {
+        Self::new(
+            self.y * other.z - self.z * other.y,
+            self.z * other.x - self.x * other.z,
+            self.x * other.y - self.y * other.x,
+        )
+    }
+
+    /// Linear interpolation between two vectors.
+    pub fn lerp(self, other: Self, t: f32) -> Self {
+        self + (other - self) * t
+    }
 }
 
 impl std::ops::Add for Vec3 {
@@ -102,11 +116,27 @@ impl std::ops::Mul<f32> for Vec3 {
     }
 }
 
+impl std::ops::Mul for Vec3 {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self::new(self.x * rhs.x, self.y * rhs.y, self.z * rhs.z)
+    }
+}
+
 impl std::ops::Div<f32> for Vec3 {
     type Output = Self;
 
     fn div(self, rhs: f32) -> Self::Output {
         Self::new(self.x / rhs, self.y / rhs, self.z / rhs)
+    }
+}
+
+impl std::ops::Neg for Vec3 {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self::new(-self.x, -self.y, -self.z)
     }
 }
 
@@ -131,6 +161,33 @@ impl Quat {
         z: 0.0,
         w: 1.0,
     };
+
+    /// Quaternion multiplication (rotation composition).
+    pub fn mul(self, rhs: Self) -> Self {
+        Self {
+            w: self.w * rhs.w - self.x * rhs.x - self.y * rhs.y - self.z * rhs.z,
+            x: self.w * rhs.x + self.x * rhs.w + self.y * rhs.z - self.z * rhs.y,
+            y: self.w * rhs.y - self.x * rhs.z + self.y * rhs.w + self.z * rhs.x,
+            z: self.w * rhs.z + self.x * rhs.y - self.y * rhs.x + self.z * rhs.w,
+        }
+    }
+
+    /// Rotates a vector by this quaternion.
+    pub fn rotate(self, v: Vec3) -> Vec3 {
+        let q = Vec3::new(self.x, self.y, self.z);
+        let t = q.cross(v) * 2.0;
+        v + t * self.w + q.cross(t)
+    }
+
+    /// Inverse of this quaternion.
+    pub fn inverse(self) -> Self {
+        Self {
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+            w: self.w,
+        }
+    }
 
     /// Decomposes rotation into Euler angles (yaw, pitch, roll) in degrees.
     /// Convention: YXZ intrinsic (yaw around Y, pitch around X, roll around Z).
@@ -208,6 +265,40 @@ impl Transform {
         rotation: Quat::IDENTITY,
         scale: Vec3::ONE,
     };
+
+    /// Transforms a point from local space to parent space.
+    pub fn transform_point(&self, point: Vec3) -> Vec3 {
+        self.translation + self.rotation.rotate(point * self.scale)
+    }
+
+    /// Composes two transforms: `self` (parent world) * `child` (child local).
+    pub fn compose(&self, child: &Self) -> Self {
+        Self {
+            translation: self.transform_point(child.translation),
+            rotation: self.rotation.mul(child.rotation),
+            scale: Vec3::new(
+                self.scale.x * child.scale.x,
+                self.scale.y * child.scale.y,
+                self.scale.z * child.scale.z,
+            ),
+        }
+    }
+
+    /// Inverse of this transform (world-to-local).
+    pub fn inverse(&self) -> Self {
+        let inv_rotation = self.rotation.inverse();
+        let inv_scale = Vec3::new(
+            1.0 / self.scale.x.max(f32::EPSILON),
+            1.0 / self.scale.y.max(f32::EPSILON),
+            1.0 / self.scale.z.max(f32::EPSILON),
+        );
+        let inv_translation = inv_rotation.rotate(-self.translation) * inv_scale;
+        Self {
+            translation: inv_translation,
+            rotation: inv_rotation,
+            scale: inv_scale,
+        }
+    }
 }
 
 impl Default for Transform {
