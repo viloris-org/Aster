@@ -151,7 +151,7 @@ mod editor_tests {
     fn core_commands_are_registered() {
         let mut registry = CommandRegistry::default();
         register_core_commands(&mut registry);
-        for id in ["play", "pause", "stop", "reload", "save", "build"] {
+        for id in ["play.toggle", "play.pause", "play.stop", "assets.reload", "scene.save", "project.build"] {
             assert!(registry.get(id).is_some(), "missing command: {id}");
         }
     }
@@ -161,7 +161,7 @@ mod editor_tests {
         let shell = EditorShell::with_core_services(EditorPreferences::default());
         assert!(shell.panels().get("scene_view").is_some());
         assert!(shell.panels().get("game_view").is_some());
-        assert!(shell.commands().get("play").is_some());
+        assert!(shell.commands().get("play.toggle").is_some());
     }
 
     #[test]

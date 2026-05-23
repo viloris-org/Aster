@@ -23,6 +23,8 @@ Use Rust 2021 and keep code formatted with `cargo fmt --workspace`. Prefer expli
 
 Use Rust’s built-in test framework. Put crate integration tests in `crates/<crate>/tests/` and unit tests near the code they cover. Name tests after behavior, for example `loads_runtime_services` or `rejects_invalid_manifest`. When changing feature-gated code, run the targeted feature command as well as the full workspace tests.
 
+Before finishing any task, run `cargo test --workspace` to check for regressions.
+
 ## Commit & Pull Request Guidelines
 
 Recent history uses short imperative commit subjects, such as `Add editor UI hub foundations` and `Improve project creation dialog`. Follow that style: one concise subject, capitalized, no trailing period. Pull requests should include a brief summary, the commands run, linked issues if applicable, and screenshots or recordings for editor UI changes.
