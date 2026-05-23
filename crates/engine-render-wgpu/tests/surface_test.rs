@@ -3,9 +3,22 @@
 use engine_render_wgpu::WgpuRenderDevice;
 use winit::window::WindowAttributes;
 
+#[cfg(target_os = "linux")]
+fn has_linux_display() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var_os("WAYLAND_SOCKET").is_some()
+        || std::env::var_os("DISPLAY").is_some()
+}
+
 #[allow(deprecated)]
 #[test]
 fn surface_creation_succeeds_with_winit_window() {
+    #[cfg(target_os = "linux")]
+    if !has_linux_display() {
+        eprintln!("skipping wgpu surface test: neither Wayland nor X11 display is available");
+        return;
+    }
+
     let mut builder = winit::event_loop::EventLoop::builder();
     #[cfg(target_os = "linux")]
     {
