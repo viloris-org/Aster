@@ -5,14 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::super::operations::asset_ops::{
-    create_default_material, create_script_asset, delete_asset, open_asset, reimport_asset,
-    show_in_file_manager, thumbnail_color,
+    delete_asset, open_asset, reimport_asset, show_in_file_manager, thumbnail_color,
 };
 use super::super::operations::command::push_error;
-use super::super::types::{InfernuxPalette, ScriptTemplateBackend, ShellUiState};
+use super::super::types::{InfernuxPalette, ShellUiState};
 use super::super::widgets::buttons::small_chip;
 use super::super::widgets::icons::ui as icon;
-use super::super::widgets::layout::{empty_view, search_field, toolbar_row};
+use super::super::widgets::layout::{empty_view, search_field};
 use super::super::widgets::text::paint_text_in_rect;
 use crate::{resource_kind_label, EditorShell};
 use engine_assets::ResourceState;
@@ -26,81 +25,7 @@ pub fn draw_project_panel(
     pal: &InfernuxPalette,
     tr: &Translations,
 ) {
-    toolbar_row(ui, pal, |ui| {
-        if small_chip(ui, tr.tr("project_create"), 64.0, pal).clicked() {
-            create_default_material(shell);
-        }
-        if small_chip(ui, tr.tr("project_create_script"), 76.0, pal).clicked() {
-            create_script_asset(shell, ui_state, tr);
-        }
-        egui::ComboBox::from_id_salt("project_new_script_backend")
-            .selected_text(ui_state.project_new_script_backend.component_backend())
-            .width(72.0)
-            .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut ui_state.project_new_script_backend,
-                    ScriptTemplateBackend::Python,
-                    "python",
-                );
-                ui.selectable_value(
-                    &mut ui_state.project_new_script_backend,
-                    ScriptTemplateBackend::Rhai,
-                    "rhai",
-                );
-            });
-        ui.add_sized(
-            Vec2::new(120.0, 20.0),
-            egui::TextEdit::singleline(&mut ui_state.project_new_script_name)
-                .hint_text(tr.tr("project_script_name_hint"))
-                .font(FontId::proportional(11.0))
-                .text_color(pal.text),
-        );
-        if small_chip(ui, tr.tr("project_rescan"), 56.0, pal).clicked() {
-            match shell.project_mut().map(|project| {
-                project.rescan_assets()?;
-                Ok::<_, engine_core::EngineError>(format!(
-                    "scan: {} assets",
-                    project.database.iter_entries().count()
-                ))
-            }) {
-                Some(Ok(status)) => ui_state.project_import_status = Some(status),
-                Some(Err(error)) => push_error(shell, error.to_string()),
-                None => {}
-            }
-        }
-        if small_chip(ui, tr.tr("project_import"), 64.0, pal).clicked() {
-            let path = PathBuf::from(ui_state.project_import_path.trim());
-            if path.as_os_str().is_empty() {
-                ui_state.project_import_status = Some(tr.tr("project_import_hint").to_owned());
-            } else {
-                match shell
-                    .project_mut()
-                    .map(|project| project.import_file(&path))
-                {
-                    Some(Ok(())) => {
-                        ui_state.project_import_status =
-                            Some(format!("imported {}", path.display()));
-                    }
-                    Some(Err(error)) => push_error(shell, error.to_string()),
-                    None => {}
-                }
-            }
-        }
-        ui.add_space(6.0);
-        ui.add_sized(
-            Vec2::new(170.0, 20.0),
-            egui::TextEdit::singleline(&mut ui_state.project_import_path)
-                .hint_text(tr.tr("project_file_path_hint"))
-                .font(FontId::proportional(11.0))
-                .text_color(pal.text),
-        );
-        search_field(
-            ui,
-            tr.tr("project_search"),
-            &mut ui_state.project_filter,
-            pal,
-        );
-    });
+    draw_project_browser_toolbar(ui, shell, ui_state, pal, tr);
 
     for dropped in ui.input(|input| input.raw.dropped_files.clone()) {
         if let Some(path) = dropped.path {
@@ -263,6 +188,41 @@ pub fn draw_project_panel(
             }
         }
     }
+}
+
+fn draw_project_browser_toolbar(
+    ui: &mut egui::Ui,
+    shell: &mut EditorShell,
+    ui_state: &mut ShellUiState,
+    pal: &InfernuxPalette,
+    tr: &Translations,
+) {
+    egui::Frame::NONE
+        .fill(pal.menu_bar)
+        .inner_margin(egui::Margin::symmetric(8, 5))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if small_chip(ui, tr.tr("project_rescan"), 62.0, pal).clicked() {
+                    match shell.project_mut().map(|project| {
+                        project.rescan_assets()?;
+                        Ok::<_, engine_core::EngineError>(format!(
+                            "scan: {} assets",
+                            project.database.iter_entries().count()
+                        ))
+                    }) {
+                        Some(Ok(status)) => ui_state.project_import_status = Some(status),
+                        Some(Err(error)) => push_error(shell, error.to_string()),
+                        None => {}
+                    }
+                }
+                search_field(
+                    ui,
+                    tr.tr("project_search"),
+                    &mut ui_state.project_filter,
+                    pal,
+                );
+            });
+        });
 }
 
 fn format_size(bytes: u64) -> String {

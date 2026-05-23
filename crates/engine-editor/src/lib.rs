@@ -815,6 +815,20 @@ pub fn register_core_commands(registry: &mut CommandRegistry) {
             CommandAvailability::ProjectOpen,
         ),
         command(
+            "assets.create_material",
+            "Create Material",
+            "Assets",
+            None,
+            CommandAvailability::ProjectOpen,
+        ),
+        command(
+            "assets.create_script",
+            "Create Script",
+            "Assets",
+            None,
+            CommandAvailability::ProjectOpen,
+        ),
+        command(
             "gameobject.create_empty",
             "Create Empty",
             "GameObject",

@@ -177,6 +177,10 @@ pub struct WgpuRenderDevice {
     surface_suspended: bool,
     next_gui_texture: u64,
     submitted_worlds: u64,
+    grid_pipeline: wgpu::RenderPipeline,
+    grid_bind_group: wgpu::BindGroup,
+    grid_vertex_buffer: wgpu::Buffer,
+    grid_vertex_count: u32,
 }
 
 impl std::fmt::Debug for WgpuRenderDevice {
@@ -457,10 +461,7 @@ impl WgpuRenderDevice {
     }
 
     /// Prepares instance buffer from mesh batches for rendering.
-    fn prepare_render_batches(
-        &mut self,
-        world: &RenderWorld,
-    ) -> Vec<(String, u32)> {
+    fn prepare_render_batches(&mut self, world: &RenderWorld) -> Vec<(String, u32)> {
         let batches = mesh_batches_from_world(world);
         let total_instances: usize = batches.iter().map(|(_, inst)| inst.len()).sum();
         if total_instances > self.instance_capacity {
@@ -472,8 +473,11 @@ impl WgpuRenderDevice {
             .flat_map(|(_, instances)| instances.iter().copied())
             .collect();
         if !all_instances.is_empty() {
-            self.queue
-                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&all_instances));
+            self.queue.write_buffer(
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&all_instances),
+            );
         }
         batches
             .into_iter()
@@ -514,6 +518,15 @@ impl WgpuRenderDevice {
             &self.instance_buffer,
             &batches,
         );
+        encode_grid_pass(
+            &mut encoder,
+            &target.color_view,
+            target.depth_view.as_ref(),
+            &self.grid_pipeline,
+            &self.grid_bind_group,
+            &self.grid_vertex_buffer,
+            self.grid_vertex_count,
+        );
         self.queue.submit(std::iter::once(encoder.finish()));
         self.submitted_worlds = self.submitted_worlds.saturating_add(1);
         Ok(())
@@ -551,6 +564,15 @@ impl WgpuRenderDevice {
             &self.index_buffer,
             &self.instance_buffer,
             &batches,
+        );
+        encode_grid_pass(
+            &mut encoder,
+            &target.color_view,
+            target.depth_view.as_ref(),
+            &self.grid_pipeline,
+            &self.grid_bind_group,
+            &self.grid_vertex_buffer,
+            self.grid_vertex_count,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
         self.submitted_worlds = self.submitted_worlds.saturating_add(1);
@@ -828,6 +850,101 @@ impl WgpuRenderDevice {
             cache: None,
         });
 
+        // --- Grid pipeline ---
+        let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("aster grid shader"),
+            source: wgpu::ShaderSource::Wgsl(GRID_SHADER.into()),
+        });
+        let grid_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("aster grid bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let grid_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("aster grid bind group"),
+            layout: &grid_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_uniform.as_entire_binding(),
+            }],
+        });
+        let grid_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("aster grid pipeline layout"),
+                bind_group_layouts: &[Some(&grid_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let grid_color_format = surface_state
+            .as_ref()
+            .map(|(_, config)| config.format)
+            .unwrap_or_else(|| to_wgpu_format(format));
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("aster grid pipeline"),
+            layout: Some(&grid_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &grid_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
+                }],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &grid_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: grid_color_format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let grid_vertices = generate_grid();
+        let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aster grid vertices"),
+            contents: bytemuck::cast_slice(&grid_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let grid_vertex_count = grid_vertices.len() as u32;
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("aster cube vertices"),
             contents: bytemuck::cast_slice(CUBE_VERTICES),
@@ -902,6 +1019,10 @@ impl WgpuRenderDevice {
             surface_suspended: false,
             next_gui_texture: 1,
             submitted_worlds: 0,
+            grid_pipeline,
+            grid_bind_group,
+            grid_vertex_buffer,
+            grid_vertex_count,
         };
         renderer.upload_debug_meshes();
         Ok(renderer)
@@ -959,7 +1080,11 @@ impl WgpuRenderDevice {
         self.mesh_cache.contains_key(name) || name == "debug/cube"
     }
 
-    fn buffers_from_data(device: &wgpu::Device, vertices: &[Vertex], indices: &[u32]) -> MeshBuffers {
+    fn buffers_from_data(
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        indices: &[u32],
+    ) -> MeshBuffers {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("aster mesh vertices"),
             contents: bytemuck::cast_slice(vertices),
@@ -1068,6 +1193,15 @@ impl RenderDevice for WgpuRenderDevice {
                 &self.instance_buffer,
                 &batches,
             );
+            encode_grid_pass(
+                &mut encoder,
+                &view,
+                self.surface_depth_view.as_ref(),
+                &self.grid_pipeline,
+                &self.grid_bind_group,
+                &self.grid_vertex_buffer,
+                self.grid_vertex_count,
+            );
             self.queue.submit(std::iter::once(encoder.finish()));
             frame.present();
             self.submitted_worlds = self.submitted_worlds.saturating_add(1);
@@ -1094,6 +1228,15 @@ impl RenderDevice for WgpuRenderDevice {
             &self.index_buffer,
             &self.instance_buffer,
             &batches,
+        );
+        encode_grid_pass(
+            &mut encoder,
+            &target.color_view,
+            target.depth_view.as_ref(),
+            &self.grid_pipeline,
+            &self.grid_bind_group,
+            &self.grid_vertex_buffer,
+            self.grid_vertex_count,
         );
         self.queue.submit(std::iter::once(encoder.finish()));
         self.submitted_worlds = self.submitted_worlds.saturating_add(1);
@@ -1399,7 +1542,11 @@ fn encode_batched_forward_pass<'a>(
         let buffers = mesh_cache.get(mesh_name);
         let (vertex_buf, index_buf, index_count) = match buffers {
             Some(b) => (&b.vertex_buffer, &b.index_buffer, b.index_count),
-            None => (default_vertex_buffer, default_index_buffer, CUBE_INDEX_COUNT),
+            None => (
+                default_vertex_buffer,
+                default_index_buffer,
+                CUBE_INDEX_COUNT,
+            ),
         };
         pass.set_vertex_buffer(0, vertex_buf.slice(..));
         pass.set_vertex_buffer(1, instance_buffer.slice(..));
@@ -1407,6 +1554,46 @@ fn encode_batched_forward_pass<'a>(
         pass.draw_indexed(0..index_count, 0, instance_offset..instance_offset + count);
         instance_offset += count;
     }
+}
+
+fn encode_grid_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    color_view: &wgpu::TextureView,
+    depth_view: Option<&wgpu::TextureView>,
+    pipeline: &wgpu::RenderPipeline,
+    bind_group: &wgpu::BindGroup,
+    vertex_buffer: &wgpu::Buffer,
+    vertex_count: u32,
+) {
+    let color_attachment = Some(wgpu::RenderPassColorAttachment {
+        view: color_view,
+        depth_slice: None,
+        resolve_target: None,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store: wgpu::StoreOp::Store,
+        },
+    });
+    let depth_attachment = depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
+        view,
+        depth_ops: Some(wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store: wgpu::StoreOp::Store,
+        }),
+        stencil_ops: None,
+    });
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("aster grid pass"),
+        color_attachments: &[color_attachment],
+        depth_stencil_attachment: depth_attachment,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+    pass.draw(0..vertex_count, 0..1);
 }
 
 fn to_wgpu_texture_usage(usage: ImageUsage) -> wgpu::TextureUsages {
@@ -1490,7 +1677,13 @@ fn camera_uniform_from_world(world: &RenderWorld) -> CameraUniform {
         .as_ref()
         .map(|camera| camera.far)
         .unwrap_or(100.0);
-    let proj = perspective_rh(fov.to_radians(), 16.0 / 9.0, near, far);
+    let aspect = 16.0 / 9.0;
+    let proj = match world.camera.as_ref().map(|camera| camera.projection) {
+        Some(engine_render::RenderProjection::Orthographic { vertical_size }) => {
+            orthographic_rh(vertical_size.max(0.001), aspect, near, far)
+        }
+        _ => perspective_rh(fov.to_radians(), aspect, near, far),
+    };
     let vp = mul_mat4(&proj, &view);
     CameraUniform {
         view_projection: vp,
@@ -1613,6 +1806,25 @@ fn perspective_rh(fov_y: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4]
         [0.0, f, 0.0, 0.0],
         [0.0, 0.0, (far + near) * range_inv, -1.0],
         [0.0, 0.0, 2.0 * far * near * range_inv, 0.0],
+    ]
+}
+
+fn orthographic_rh(vertical_size: f32, aspect: f32, near: f32, far: f32) -> [[f32; 4]; 4] {
+    let top = vertical_size * 0.5;
+    let bottom = -top;
+    let right = top * aspect;
+    let left = -right;
+    let range_inv = 1.0 / (near - far);
+    [
+        [2.0 / (right - left), 0.0, 0.0, 0.0],
+        [0.0, 2.0 / (top - bottom), 0.0, 0.0],
+        [0.0, 0.0, 2.0 * range_inv, 0.0],
+        [
+            -(right + left) / (right - left),
+            -(top + bottom) / (top - bottom),
+            (far + near) * range_inv,
+            1.0,
+        ],
     ]
 }
 
@@ -1915,6 +2127,42 @@ fn generate_plane() -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
+fn generate_grid() -> Vec<Vertex> {
+    let half = 50.0;
+    let mut vertices = Vec::with_capacity(404);
+
+    for i in -50..=50 {
+        let x = i as f32;
+        let alpha = if i % 5 == 0 { 0.35 } else { 0.15 };
+        vertices.push(Vertex {
+            position: [x, 0.0, -half],
+            normal: [0.0, 1.0, 0.0],
+            uv: [alpha, 0.0],
+        });
+        vertices.push(Vertex {
+            position: [x, 0.0, half],
+            normal: [0.0, 1.0, 0.0],
+            uv: [alpha, 0.0],
+        });
+    }
+    for i in -50..=50 {
+        let z = i as f32;
+        let alpha = if i % 5 == 0 { 0.35 } else { 0.15 };
+        vertices.push(Vertex {
+            position: [-half, 0.0, z],
+            normal: [0.0, 1.0, 0.0],
+            uv: [alpha, 0.0],
+        });
+        vertices.push(Vertex {
+            position: [half, 0.0, z],
+            normal: [0.0, 1.0, 0.0],
+            uv: [alpha, 0.0],
+        });
+    }
+
+    vertices
+}
+
 const FORWARD_SHADER: &str = r#"
 struct CameraUniform {
     view_projection: mat4x4<f32>,
@@ -2025,6 +2273,46 @@ fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
     let lit = base * min(radiance, vec3<f32>(3.0, 3.0, 3.0));
     let alpha = material.base_color.a * input.color.a * tex_color.a;
     return vec4<f32>(lit, alpha);
+}
+"#;
+
+const GRID_SHADER: &str = r#"
+struct CameraUniform {
+    view_projection: mat4x4<f32>,
+    camera_position: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> camera: CameraUniform;
+
+struct VsIn {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+};
+
+struct VsOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) world_pos: vec3<f32>,
+    @location(1) alpha_factor: f32,
+};
+
+@vertex
+fn vs_main(input: VsIn) -> VsOut {
+    var out: VsOut;
+    out.position = camera.view_projection * vec4<f32>(input.position, 1.0);
+    out.world_pos = input.position;
+    out.alpha_factor = input.uv.x;
+    return out;
+}
+
+@fragment
+fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
+    let half_extent = 50.0;
+    let fade_start = half_extent * 0.7;
+    let dist = length(input.world_pos.xz);
+    let fade = 1.0 - smoothstep(fade_start, half_extent, dist);
+    let alpha = input.alpha_factor * fade;
+    return vec4<f32>(vec3<f32>(0.6), alpha);
 }
 "#;
 
@@ -2141,5 +2429,48 @@ mod tests {
         assert_eq!(uniform.params[0], 1);
         assert_eq!(uniform.lights[0].position_type[3], 0.0);
         assert_eq!(uniform.lights[0].color_intensity[3], 1.0);
+    }
+
+    #[test]
+    fn grid_generates_404_vertices() {
+        let vertices = generate_grid();
+        assert_eq!(
+            vertices.len(),
+            404,
+            "grid must have 404 vertices (202 lines × 2)"
+        );
+    }
+
+    #[test]
+    fn grid_vertices_lie_on_y_zero() {
+        let vertices = generate_grid();
+        for v in &vertices {
+            assert!(
+                (v.position[1] - 0.0).abs() < f32::EPSILON,
+                "every grid vertex must lie on Y=0"
+            );
+        }
+    }
+
+    #[test]
+    fn grid_major_lines_have_alpha_0_35() {
+        let vertices = generate_grid();
+        assert!((vertices[0].uv[0] - 0.35).abs() < 0.001);
+        assert!((vertices[202].uv[0] - 0.35).abs() < 0.001);
+    }
+
+    #[test]
+    fn grid_minor_lines_have_alpha_0_15() {
+        let vertices = generate_grid();
+        assert!((vertices[2].uv[0] - 0.15).abs() < 0.001);
+    }
+
+    #[test]
+    fn grid_vertices_within_extent() {
+        let vertices = generate_grid();
+        for v in &vertices {
+            assert!(v.position[0].abs() <= 50.0 + f32::EPSILON);
+            assert!(v.position[2].abs() <= 50.0 + f32::EPSILON);
+        }
     }
 }

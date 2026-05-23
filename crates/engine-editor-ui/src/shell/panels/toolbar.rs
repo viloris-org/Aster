@@ -3,7 +3,7 @@
 use egui::{Color32, RichText, Vec2};
 
 use super::super::operations::command::{command_enabled, execute_shell_command};
-use super::super::types::{InfernuxPalette, ShellUiState};
+use super::super::types::{EditorTransformSpace, InfernuxPalette, ShellUiState};
 use super::super::widgets::buttons::{dropdown_pill, panel_toggle, small_text_button_widget};
 use super::super::widgets::icons::{actions, transport};
 use crate::EditorShell;
@@ -18,7 +18,7 @@ pub fn draw_toolbar(
     tr: &Translations,
 ) {
     ui.horizontal_centered(|ui| {
-        dropdown_pill(ui, tr.tr("tool_global"), 76.0, pal);
+        transform_space_dropdown(ui, ui_state, tr);
         dropdown_pill(ui, tr.tr("tool_pivot"), 68.0, pal);
         ui.add_space(12.0);
         if transport_command_button(
@@ -121,6 +121,36 @@ pub fn draw_toolbar(
             );
         });
     });
+}
+
+fn transform_space_dropdown(ui: &mut egui::Ui, ui_state: &mut ShellUiState, tr: &Translations) {
+    egui::ComboBox::from_id_salt("toolbar_transform_space")
+        .width(76.0)
+        .selected_text(transform_space_label(ui_state.editor_transform_space, tr))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(
+                &mut ui_state.editor_transform_space,
+                EditorTransformSpace::Global,
+                tr.tr("tool_global"),
+            )
+            .on_hover_text(tr.tr("tool_global_hint"));
+            ui.selectable_value(
+                &mut ui_state.editor_transform_space,
+                EditorTransformSpace::Local,
+                tr.tr("tool_local"),
+            )
+            .on_hover_text(tr.tr("tool_local_hint"));
+        })
+        .response
+        .on_hover_text(tr.tr("tool_transform_space_hint"));
+}
+
+fn transform_space_label(space: EditorTransformSpace, tr: &Translations) -> String {
+    match space {
+        EditorTransformSpace::Global => tr.tr("tool_global"),
+        EditorTransformSpace::Local => tr.tr("tool_local"),
+    }
+    .to_owned()
 }
 /// Renders a transport control button (play/pause/stop).
 

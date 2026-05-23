@@ -6,6 +6,7 @@ use engine_editor::{ConsoleEntry, ConsoleLevel, ConsoleSource};
 use engine_i18n::Translations;
 
 use super::super::types::{EditorAction, InfernuxPalette, PlayModeRequest, ShellUiState};
+use super::asset_ops::{create_default_material, create_script_asset};
 use super::scene_ops::{
     add_component_to_selected, create_empty_object, create_root_object_with_component,
 };
@@ -120,6 +121,8 @@ pub fn execute_shell_command(
             Some(Err(error)) => push_error(shell, error.to_string()),
             None => {}
         },
+        "assets.create_material" => create_default_material(shell),
+        "assets.create_script" => create_script_asset(shell, ui_state, tr),
         "gameobject.create_empty" => create_empty_object(shell),
         "gameobject.create_camera" => create_root_object_with_component(
             shell,

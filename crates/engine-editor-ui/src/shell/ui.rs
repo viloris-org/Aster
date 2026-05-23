@@ -9,11 +9,11 @@ use egui::{Frame, Margin};
 use super::operations::command::{apply_visuals, handle_command_shortcuts};
 use super::panels::{
     draw_bottom_dock, draw_center_dock, draw_close_project_dialog, draw_command_palette,
-    draw_hierarchy, draw_inspector, draw_menu_bar, draw_script_editor, draw_status_bar,
-    draw_toolbar,
+    draw_hierarchy, draw_inspector, draw_menu_bar, draw_project_panel, draw_script_editor,
+    draw_status_bar, draw_toolbar,
 };
 use super::types::{InfernuxPalette, ShellUiState};
-use super::widgets::layout::panel_frame;
+use super::widgets::layout::{panel_frame, panel_title};
 use crate::EditorShell;
 use engine_i18n::Translations;
 
@@ -62,14 +62,28 @@ pub fn draw_shell(
         )
         .show(ctx, |ui| draw_status_bar(ui, shell, ui_state, &pal, &tr));
 
-    // Left hierarchy panel
-    if ui_state.show_hierarchy {
+    // Left panel (hierarchy + project)
+    if ui_state.show_hierarchy || ui_state.show_project {
         egui::SidePanel::left("infernux_hierarchy")
-            .default_size(260.0)
-            .min_width(180.0)
+            .default_size(220.0)
+            .min_width(150.0)
             .frame(panel_frame(&pal))
             .show(ctx, |ui| {
-                draw_hierarchy(ui, shell, ui_state, &pal, &tr);
+                ui.vertical(|ui| {
+                    if ui_state.show_hierarchy {
+                        if ui_state.show_project {
+                            ui.set_max_height(ui.available_height() * 0.75);
+                        }
+                        draw_hierarchy(ui, shell, ui_state, &pal, &tr);
+                    }
+                    if ui_state.show_hierarchy && ui_state.show_project {
+                        ui.separator();
+                    }
+                    if ui_state.show_project {
+                        panel_title(ui, tr.tr("panel_project"), &pal);
+                        draw_project_panel(ui, shell, ui_state, &pal, &tr);
+                    }
+                });
             });
     }
 
@@ -84,8 +98,8 @@ pub fn draw_shell(
             });
     }
 
-    // Bottom dock (project + console)
-    if ui_state.show_project || ui_state.show_console {
+    // Bottom dock (console)
+    if ui_state.show_console {
         egui::TopBottomPanel::bottom("infernux_bottom_dock")
             .default_height(230.0)
             .min_height(120.0)

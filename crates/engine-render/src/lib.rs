@@ -52,12 +52,32 @@ pub struct RenderCamera {
     pub object: EntityId,
     /// World transform.
     pub transform: Transform,
+    /// Projection used to render this camera.
+    pub projection: RenderProjection,
     /// Vertical field of view in degrees.
     pub vertical_fov_degrees: f32,
     /// Near clipping plane.
     pub near: f32,
     /// Far clipping plane.
     pub far: f32,
+}
+
+/// Camera projection used by a render view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RenderProjection {
+    /// Perspective projection using [`RenderCamera::vertical_fov_degrees`].
+    Perspective,
+    /// Orthographic projection with the given vertical world-space size.
+    Orthographic {
+        /// Vertical visible size in world units.
+        vertical_size: f32,
+    },
+}
+
+impl Default for RenderProjection {
+    fn default() -> Self {
+        Self::Perspective
+    }
 }
 
 /// Mesh draw data extracted from a scene for rendering.
@@ -148,6 +168,7 @@ impl RenderWorld {
                         world.camera = Some(RenderCamera {
                             object: obj.id,
                             transform,
+                            projection: RenderProjection::Perspective,
                             vertical_fov_degrees: cam.vertical_fov_degrees,
                             near: cam.near,
                             far: cam.far,
@@ -494,6 +515,7 @@ mod tests {
         assert_eq!(world.lights.len(), 0, "should have no lights");
 
         let cam = world.camera.unwrap();
+        assert_eq!(cam.projection, RenderProjection::Perspective);
         assert_eq!(cam.vertical_fov_degrees, 60.0);
         assert_eq!(cam.near, 0.1);
         assert_eq!(cam.far, 100.0);

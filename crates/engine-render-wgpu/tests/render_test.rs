@@ -31,6 +31,7 @@ fn render_one_frame_with_debug_cube_succeeds() {
         camera: Some(RenderCamera {
             object: engine_core::EntityId::from_u128(1),
             transform: Transform::default(),
+            projection: engine_render::RenderProjection::Perspective,
             vertical_fov_degrees: 60.0,
             near: 0.1,
             far: 100.0,

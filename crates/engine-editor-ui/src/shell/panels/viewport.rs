@@ -2,19 +2,26 @@
 
 use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
-use super::super::operations::scene_ops::{create_object_from_asset, select_first_scene_object};
-use super::super::types::{rgb, InfernuxPalette, ShellUiState, ViewportTargetState};
+use super::super::operations::scene_ops::{
+    create_object_from_asset, push_scene_undo, scene_snapshot, select_first_scene_object,
+};
+use super::super::types::{
+    rgb, EditorSceneViewOrientation, EditorSceneViewProjection, EditorTransformSpace,
+    InfernuxPalette, ShellUiState, ViewportTargetState,
+};
 use super::super::widgets::layout::{empty_view, panel_title};
 use super::super::widgets::text::{paint_text_in_rect, paint_wrapped_text_in_rect};
 use super::console::draw_console;
-use super::project::draw_project_panel;
 use crate::EditorShell;
-use engine_core::math::{Quat, Transform, Vec3 as EngineVec3};
+use engine_core::{
+    math::{Quat, Transform, Vec3 as EngineVec3},
+    EntityId,
+};
 use engine_ecs::ComponentData;
 use engine_i18n::Translations;
 use engine_render::{
-    RenderCamera, RenderLight, RenderObject, RenderParticle, RenderTargetDesc, RenderWorld,
-    ViewKind,
+    RenderCamera, RenderLight, RenderObject, RenderParticle, RenderProjection, RenderTargetDesc,
+    RenderWorld, ViewKind,
 };
 
 const EDITOR_CAMERA_MIN_DISTANCE: f32 = 0.5;
@@ -70,20 +77,9 @@ pub fn draw_bottom_dock(
     pal: &InfernuxPalette,
     tr: &Translations,
 ) {
-    ui.horizontal(|ui| {
-        if ui_state.show_project {
-            ui.vertical(|ui| {
-                ui.set_width(ui.available_width() * if ui_state.show_console { 0.5 } else { 1.0 });
-                panel_title(ui, tr.tr("panel_project"), pal);
-                draw_project_panel(ui, shell, ui_state, pal, tr);
-            });
-        }
-        if ui_state.show_console {
-            ui.vertical(|ui| {
-                panel_title(ui, tr.tr("panel_console"), pal);
-                draw_console(ui, shell, ui_state, pal, tr);
-            });
-        }
+    ui.vertical(|ui| {
+        panel_title(ui, tr.tr("panel_console"), pal);
+        draw_console(ui, shell, ui_state, pal, tr);
     });
 }
 
@@ -136,17 +132,21 @@ fn viewport_panel(
         .rect_filled(tab, CornerRadius::same(0), pal.header);
     paint_text_in_rect(
         ui,
-        tab.shrink2(Vec2::new(10.0, 0.0)),
+        tab.shrink2(Vec2::new(if scene_tools { 130.0 } else { 10.0 }, 0.0)),
         label,
         FontId::proportional(13.0),
         pal.text,
         Align2::LEFT_CENTER,
     );
+    if scene_tools {
+        let menu_rect = Rect::from_min_size(tab.min + Vec2::new(8.0, 3.0), Vec2::new(112.0, 20.0));
+        draw_scene_view_menu(ui, menu_rect, ui_state, tr);
+    }
 
     let content_rect = rect.shrink2(Vec2::new(0.0, 26.0));
     draw_render_viewport(ui, shell, ui_state, content_rect, scene_tools, pal, tr);
 
-    let mut orientation_clicked = false;
+    let mut viewport_interaction_consumed = false;
     if scene_tools {
         update_editor_camera_zoom(ui, ui_state, response.hovered());
 
@@ -176,8 +176,9 @@ fn viewport_panel(
             }
         }
 
-        draw_scene_overlay(ui, rect, pal);
-        orientation_clicked = draw_orientation_gizmo(ui, rect, ui_state, pal);
+        viewport_interaction_consumed |=
+            draw_scene_overlay(ui, content_rect, shell, ui_state, pal, tr);
+        viewport_interaction_consumed |= draw_orientation_gizmo(ui, rect, ui_state, pal);
     }
 
     if ui_state.playing || ui_state.paused {
@@ -190,9 +191,80 @@ fn viewport_panel(
         );
     }
 
-    if response.clicked() && !orientation_clicked {
+    if response.clicked() && !viewport_interaction_consumed {
         select_first_scene_object(shell);
     }
+}
+
+fn draw_scene_view_menu(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    ui_state: &mut ShellUiState,
+    tr: &Translations,
+) {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.set_width(rect.width());
+        ui.menu_button(scene_view_label(ui_state, tr), |ui| {
+            if ui.button(tr.tr("viewport_view_2d")).clicked() {
+                set_editor_camera_2d_view(ui_state);
+                ui.close();
+            }
+            if ui.button(tr.tr("viewport_view_3d")).clicked() {
+                set_editor_camera_3d_view(ui_state);
+                ui.close();
+            }
+            ui.separator();
+            for (orientation, key) in [
+                (EditorSceneViewOrientation::Top, "viewport_view_top"),
+                (EditorSceneViewOrientation::Bottom, "viewport_view_bottom"),
+                (EditorSceneViewOrientation::Left, "viewport_view_left"),
+                (EditorSceneViewOrientation::Right, "viewport_view_right"),
+                (EditorSceneViewOrientation::Front, "viewport_view_front"),
+                (EditorSceneViewOrientation::Rear, "viewport_view_rear"),
+            ] {
+                if ui.button(tr.tr(key)).clicked() {
+                    set_editor_camera_orientation(ui_state, orientation);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui
+                .button(match ui_state.editor_scene_view_projection {
+                    EditorSceneViewProjection::Perspective => {
+                        tr.tr("viewport_projection_orthographic")
+                    }
+                    EditorSceneViewProjection::Orthographic => {
+                        tr.tr("viewport_projection_perspective")
+                    }
+                })
+                .clicked()
+            {
+                toggle_editor_camera_projection(ui_state);
+                ui.close();
+            }
+            ui.checkbox(
+                &mut ui_state.editor_scene_view_auto_orthographic,
+                tr.tr("viewport_auto_orthographic"),
+            );
+        });
+    });
+}
+
+fn scene_view_label(ui_state: &ShellUiState, tr: &Translations) -> String {
+    let projection = match ui_state.editor_scene_view_projection {
+        EditorSceneViewProjection::Perspective => tr.tr("viewport_projection_perspective"),
+        EditorSceneViewProjection::Orthographic => tr.tr("viewport_projection_orthographic"),
+    };
+    match ui_state.editor_scene_view_orientation {
+        EditorSceneViewOrientation::Free => projection,
+        EditorSceneViewOrientation::Top => tr.tr("viewport_view_top"),
+        EditorSceneViewOrientation::Bottom => tr.tr("viewport_view_bottom"),
+        EditorSceneViewOrientation::Left => tr.tr("viewport_view_left"),
+        EditorSceneViewOrientation::Right => tr.tr("viewport_view_right"),
+        EditorSceneViewOrientation::Front => tr.tr("viewport_view_front"),
+        EditorSceneViewOrientation::Rear => tr.tr("viewport_view_rear"),
+    }
+    .to_owned()
 }
 
 fn draw_render_viewport(
@@ -210,7 +282,7 @@ fn draw_render_viewport(
     }
 
     let world = if scene_tools {
-        extract_render_world(shell, true)
+        build_editor_render_world(shell, ui_state)
     } else {
         ui_state
             .runtime_game_world
@@ -310,13 +382,14 @@ fn paint_render_target_placeholder(
         top,
     );
     let horizon = rect.center().y + rect.height() * 0.12;
-    ui.painter().line_segment(
-        [
-            Pos2::new(rect.left(), horizon),
-            Pos2::new(rect.right(), horizon),
-        ],
-        Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 32)),
-    );
+    match state.world.camera.as_ref().map(|camera| camera.projection) {
+        Some(RenderProjection::Orthographic { .. }) => {
+            paint_orthographic_reference_grid(ui, rect, horizon);
+        }
+        _ => {
+            paint_perspective_reference_grid(ui, rect, horizon);
+        }
+    }
     for (idx, object) in state.world.objects.iter().enumerate() {
         let x = rect.left() + rect.width() * (0.2 + (idx as f32 * 0.19) % 0.62);
         let y = horizon - object.transform.translation.y * 7.0;
@@ -340,6 +413,76 @@ fn paint_render_target_placeholder(
     }
 }
 
+fn paint_perspective_reference_grid(ui: &mut egui::Ui, rect: Rect, horizon: f32) {
+    let minor = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 24));
+    let major = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 42));
+    ui.painter().line_segment(
+        [
+            Pos2::new(rect.left(), horizon),
+            Pos2::new(rect.right(), horizon),
+        ],
+        major,
+    );
+
+    let vanishing = Pos2::new(rect.center().x, horizon);
+    for i in -6..=6 {
+        let t = i as f32 / 6.0;
+        let x = rect.center().x + t * rect.width() * 0.75;
+        ui.painter()
+            .line_segment([vanishing, Pos2::new(x, rect.bottom())], minor);
+    }
+
+    for i in 1..=8 {
+        let depth = i as f32 / 8.0;
+        let y = horizon + (rect.bottom() - horizon) * depth.powf(1.75);
+        let inset = rect.width() * 0.5 * (1.0 - depth);
+        ui.painter().line_segment(
+            [
+                Pos2::new(rect.left() + inset, y),
+                Pos2::new(rect.right() - inset, y),
+            ],
+            minor,
+        );
+    }
+}
+
+fn paint_orthographic_reference_grid(ui: &mut egui::Ui, rect: Rect, horizon: f32) {
+    let minor = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 22));
+    let major = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 42));
+    let spacing = 28.0;
+    let mut x = rect.center().x;
+    while x <= rect.right() {
+        let stroke = if (x - rect.center().x).abs() < f32::EPSILON {
+            major
+        } else {
+            minor
+        };
+        ui.painter()
+            .line_segment([Pos2::new(x, horizon), Pos2::new(x, rect.bottom())], stroke);
+        x += spacing;
+    }
+    let mut x = rect.center().x - spacing;
+    while x >= rect.left() {
+        ui.painter()
+            .line_segment([Pos2::new(x, horizon), Pos2::new(x, rect.bottom())], minor);
+        x -= spacing;
+    }
+
+    let mut y = horizon;
+    while y <= rect.bottom() {
+        let stroke = if (y - horizon).abs() < f32::EPSILON {
+            major
+        } else {
+            minor
+        };
+        ui.painter().line_segment(
+            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+            stroke,
+        );
+        y += spacing;
+    }
+}
+
 fn draw_viewport_hint(ui: &mut egui::Ui, rect: Rect, hint: &str, pal: &InfernuxPalette) {
     paint_wrapped_text_in_rect(
         ui,
@@ -351,8 +494,19 @@ fn draw_viewport_hint(ui: &mut egui::Ui, rect: Rect, hint: &str, pal: &InfernuxP
     );
 }
 
-fn draw_scene_overlay(ui: &mut egui::Ui, rect: Rect, pal: &InfernuxPalette) {
-    let cursor = rect.min + Vec2::new(8.0, 34.0);
+fn draw_scene_overlay(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    shell: &mut EditorShell,
+    ui_state: &mut ShellUiState,
+    pal: &InfernuxPalette,
+    tr: &Translations,
+) -> bool {
+    let guides = collect_scene_guides(shell);
+    let consumed = paint_scene_guides(ui, rect, shell, ui_state, &guides, pal);
+    finish_scene_guide_drag_if_released(ui, shell, ui_state);
+
+    let cursor = rect.min + Vec2::new(8.0, 8.0);
 
     let pill = Rect::from_min_size(cursor, Vec2::new(86.0, 22.0));
     ui.painter().rect_filled(
@@ -363,11 +517,436 @@ fn draw_scene_overlay(ui: &mut egui::Ui, rect: Rect, pal: &InfernuxPalette) {
     paint_text_in_rect(
         ui,
         pill.shrink2(Vec2::new(6.0, 0.0)),
-        "Global",
+        transform_space_label(ui_state.editor_transform_space, tr),
         FontId::proportional(12.0),
         pal.text,
         Align2::CENTER_CENTER,
     );
+    consumed
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum SceneGuideKind {
+    Camera,
+    Light,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SceneGuide {
+    id: EntityId,
+    name: String,
+    kind: SceneGuideKind,
+    position: EngineVec3,
+    direction: EngineVec3,
+}
+
+fn collect_scene_guides(shell: &EditorShell) -> Vec<SceneGuide> {
+    let Some(project) = shell.project() else {
+        return Vec::new();
+    };
+
+    let mut guides = Vec::new();
+    for (entity, object) in project.scene.objects() {
+        if !object.active {
+            continue;
+        }
+        let transform = project
+            .scene
+            .transforms()
+            .local(entity)
+            .unwrap_or(Transform::IDENTITY);
+        let direction = transform
+            .rotation
+            .rotate(EngineVec3::new(0.0, 0.0, -1.0))
+            .normalized();
+
+        for component in project.scene.components(entity).unwrap_or(&[]) {
+            let kind = match component {
+                ComponentData::Camera(_) => Some(SceneGuideKind::Camera),
+                ComponentData::Light(_) => Some(SceneGuideKind::Light),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                guides.push(SceneGuide {
+                    id: object.id,
+                    name: object.name.clone(),
+                    kind,
+                    position: transform.translation,
+                    direction,
+                });
+            }
+        }
+    }
+    guides
+}
+
+fn paint_scene_guides(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    shell: &mut EditorShell,
+    ui_state: &mut ShellUiState,
+    guides: &[SceneGuide],
+    pal: &InfernuxPalette,
+) -> bool {
+    let camera = scene_overlay_camera(ui_state);
+    let mut consumed = false;
+    for guide in guides {
+        let Some(origin) = project_world_to_viewport(guide.position, rect, &camera) else {
+            continue;
+        };
+        let end_world = guide.position + guide.direction.normalized() * guide_length(guide.kind);
+        let end = project_world_to_viewport(end_world, rect, &camera).unwrap_or(origin);
+        let color = match guide.kind {
+            SceneGuideKind::Camera => rgb(95, 155, 235),
+            SceneGuideKind::Light => pal.warning,
+        };
+        let label = match guide.kind {
+            SceneGuideKind::Camera => format!("CAM {}", guide.name),
+            SceneGuideKind::Light => format!("LIGHT {}", guide.name),
+        };
+
+        ui.painter()
+            .line_segment([origin, end], Stroke::new(1.5, color));
+        draw_arrow_head(ui, origin, end, color);
+        let icon_rect = match guide.kind {
+            SceneGuideKind::Camera => {
+                let icon = Rect::from_center_size(origin, Vec2::new(18.0, 12.0));
+                ui.painter().rect_filled(
+                    icon,
+                    CornerRadius::same(2),
+                    Color32::from_rgba_premultiplied(20, 35, 55, 220),
+                );
+                ui.painter().rect_stroke(
+                    icon,
+                    CornerRadius::same(2),
+                    Stroke::new(1.0, color),
+                    StrokeKind::Inside,
+                );
+                let lens = [
+                    Pos2::new(icon.right(), icon.center().y - 4.0),
+                    Pos2::new(icon.right() + 7.0, icon.center().y),
+                    Pos2::new(icon.right(), icon.center().y + 4.0),
+                ];
+                ui.painter().add(egui::Shape::convex_polygon(
+                    lens.to_vec(),
+                    Color32::from_rgba_premultiplied(20, 35, 55, 220),
+                    Stroke::new(1.0, color),
+                ));
+                Rect::from_min_max(icon.min, Pos2::new(icon.right() + 7.0, icon.bottom()))
+            }
+            SceneGuideKind::Light => {
+                ui.painter().circle_filled(
+                    origin,
+                    7.0,
+                    Color32::from_rgba_premultiplied(70, 50, 20, 220),
+                );
+                ui.painter()
+                    .circle_stroke(origin, 7.0, Stroke::new(1.5, color));
+                ui.painter().circle_stroke(
+                    origin,
+                    11.0,
+                    Stroke::new(
+                        1.0,
+                        Color32::from_rgba_premultiplied(color.r(), color.g(), color.b(), 90),
+                    ),
+                );
+                Rect::from_center_size(origin, Vec2::splat(24.0))
+            }
+        };
+
+        let move_response = ui
+            .interact(
+                icon_rect.expand(4.0),
+                ui.make_persistent_id(("scene_guide_move", guide.id.as_u128(), guide.kind)),
+                Sense::click_and_drag(),
+            )
+            .on_hover_text("Drag to move");
+        if move_response.clicked() {
+            shell.select_entity_id(guide.id);
+        }
+        consumed |= move_response.clicked() || move_response.dragged();
+        if move_response.drag_started() {
+            begin_scene_guide_drag(shell, ui_state, guide.id);
+        }
+        if move_response.dragged() {
+            let delta = ui.ctx().input(|input| input.pointer.delta());
+            translate_scene_guide(shell, &camera, rect, guide, delta);
+            ui.ctx().request_repaint();
+        }
+
+        let direction_response = ui
+            .interact(
+                Rect::from_center_size(end, Vec2::splat(22.0)),
+                ui.make_persistent_id(("scene_guide_direction", guide.id.as_u128(), guide.kind)),
+                Sense::click_and_drag(),
+            )
+            .on_hover_text("Drag to aim");
+        if direction_response.clicked() {
+            shell.select_entity_id(guide.id);
+        }
+        consumed |= direction_response.clicked() || direction_response.dragged();
+        if direction_response.drag_started() {
+            begin_scene_guide_drag(shell, ui_state, guide.id);
+        }
+        if direction_response.dragged() {
+            if let Some(pointer) = ui.ctx().input(|input| input.pointer.interact_pos()) {
+                aim_scene_guide(shell, &camera, rect, guide, pointer);
+                ui.ctx().request_repaint();
+            }
+        }
+
+        let label_rect =
+            Rect::from_min_size(origin + Vec2::new(12.0, -18.0), Vec2::new(150.0, 18.0));
+        paint_text_in_rect(
+            ui,
+            label_rect,
+            &label,
+            FontId::proportional(11.0),
+            pal.text,
+            Align2::LEFT_CENTER,
+        );
+    }
+    consumed
+}
+
+fn begin_scene_guide_drag(shell: &EditorShell, ui_state: &mut ShellUiState, guide_id: EntityId) {
+    if ui_state.scene_guide_drag_before.is_none() {
+        if let Some(before) = scene_snapshot(shell) {
+            ui_state.scene_guide_drag_before = Some((guide_id, before));
+        }
+    }
+}
+
+fn finish_scene_guide_drag_if_released(
+    ui: &egui::Ui,
+    shell: &mut EditorShell,
+    ui_state: &mut ShellUiState,
+) {
+    if ui_state.scene_guide_drag_before.is_none() {
+        return;
+    }
+    if !ui.input(|input| input.pointer.any_released()) {
+        return;
+    }
+    if let Some((guide_id, before)) = ui_state.scene_guide_drag_before.take() {
+        push_scene_undo(
+            shell,
+            "Adjust Scene Guide",
+            format!("{:032x}", guide_id.as_u128()),
+            Some(before),
+        );
+    }
+}
+
+fn translate_scene_guide(
+    shell: &mut EditorShell,
+    camera: &SceneOverlayCamera,
+    rect: Rect,
+    guide: &SceneGuide,
+    delta: Vec2,
+) {
+    let depth = (guide.position - camera.eye).dot(camera.forward).max(0.01);
+    let world_delta = screen_delta_to_world_delta(delta, rect, camera, depth);
+    if world_delta.length_squared() <= f32::EPSILON {
+        return;
+    }
+    update_scene_guide_transform(shell, guide.id, |transform| {
+        transform.translation += world_delta;
+    });
+}
+
+fn aim_scene_guide(
+    shell: &mut EditorShell,
+    camera: &SceneOverlayCamera,
+    rect: Rect,
+    guide: &SceneGuide,
+    pointer: Pos2,
+) {
+    let end_world = guide.position + guide.direction.normalized() * guide_length(guide.kind);
+    let depth = (end_world - camera.eye).dot(camera.forward).max(0.01);
+    let Some(world_point) = screen_to_world_at_depth(pointer, rect, camera, depth) else {
+        return;
+    };
+    let direction = (world_point - guide.position).normalized();
+    if direction.length_squared() <= f32::EPSILON {
+        return;
+    }
+    update_scene_guide_transform(shell, guide.id, |transform| {
+        transform.rotation = quat_look_at(direction, EngineVec3::new(0.0, 1.0, 0.0));
+    });
+}
+
+fn update_scene_guide_transform(
+    shell: &mut EditorShell,
+    guide_id: EntityId,
+    update: impl FnOnce(&mut Transform),
+) {
+    if let Some(project) = shell.project_mut() {
+        if let Some(entity) = project.scene.find_by_id(guide_id) {
+            if let Some(mut transform) = project.scene.transforms().local(entity) {
+                update(&mut transform);
+                project.scene.transforms_mut().set_local(entity, transform);
+                project.scene_dirty = true;
+            }
+        }
+    }
+}
+
+fn draw_arrow_head(ui: &mut egui::Ui, origin: Pos2, end: Pos2, color: Color32) {
+    let delta = end - origin;
+    let len = delta.length();
+    if len <= 8.0 {
+        return;
+    }
+    let dir = delta / len;
+    let side = Vec2::new(-dir.y, dir.x);
+    let tip = end;
+    let left = tip - dir * 8.0 + side * 4.0;
+    let right = tip - dir * 8.0 - side * 4.0;
+    ui.painter()
+        .line_segment([left, tip], Stroke::new(1.5, color));
+    ui.painter()
+        .line_segment([right, tip], Stroke::new(1.5, color));
+}
+
+fn guide_length(kind: SceneGuideKind) -> f32 {
+    match kind {
+        SceneGuideKind::Camera => 1.4,
+        SceneGuideKind::Light => 1.0,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SceneOverlayCamera {
+    eye: EngineVec3,
+    forward: EngineVec3,
+    right: EngineVec3,
+    up: EngineVec3,
+    projection: EditorSceneViewProjection,
+    vertical_fov_degrees: f32,
+    orthographic_vertical_size: f32,
+}
+
+fn scene_overlay_camera(ui_state: &ShellUiState) -> SceneOverlayCamera {
+    let yaw = ui_state.editor_camera_yaw;
+    let pitch = ui_state.editor_camera_pitch;
+    let dist = ui_state.editor_camera_distance;
+    let target = EngineVec3::new(
+        ui_state.editor_camera_target[0],
+        ui_state.editor_camera_target[1],
+        ui_state.editor_camera_target[2],
+    );
+
+    let eye = EngineVec3::new(
+        target.x + dist * pitch.cos() * yaw.sin(),
+        target.y + dist * pitch.sin(),
+        target.z + dist * pitch.cos() * yaw.cos(),
+    );
+    let forward = (target - eye).normalized();
+    let world_up = EngineVec3::new(0.0, 1.0, 0.0);
+    let mut right = forward.cross(world_up).normalized();
+    if right.length_squared() <= f32::EPSILON {
+        right = EngineVec3::new(yaw.cos(), 0.0, -yaw.sin()).normalized();
+    }
+    let up = right.cross(forward).normalized();
+
+    SceneOverlayCamera {
+        eye,
+        forward,
+        right,
+        up,
+        projection: ui_state.editor_scene_view_projection,
+        vertical_fov_degrees: 60.0,
+        orthographic_vertical_size: ui_state.editor_camera_distance * 2.0,
+    }
+}
+
+fn project_world_to_viewport(
+    point: EngineVec3,
+    rect: Rect,
+    camera: &SceneOverlayCamera,
+) -> Option<Pos2> {
+    let local = point - camera.eye;
+    let x = local.dot(camera.right);
+    let y = local.dot(camera.up);
+    let z = local.dot(camera.forward);
+    let aspect = (rect.width() / rect.height().max(1.0)).max(0.001);
+
+    let (ndc_x, ndc_y) = match camera.projection {
+        EditorSceneViewProjection::Perspective => {
+            if z <= 0.01 {
+                return None;
+            }
+            let f = 1.0 / (camera.vertical_fov_degrees.to_radians() * 0.5).tan();
+            ((x * f / aspect) / z, (y * f) / z)
+        }
+        EditorSceneViewProjection::Orthographic => {
+            let half_h = (camera.orthographic_vertical_size * 0.5).max(0.001);
+            let half_w = half_h * aspect;
+            (x / half_w, y / half_h)
+        }
+    };
+
+    if ndc_x.abs() > 1.15 || ndc_y.abs() > 1.15 {
+        return None;
+    }
+
+    Some(Pos2::new(
+        rect.center().x + ndc_x * rect.width() * 0.5,
+        rect.center().y - ndc_y * rect.height() * 0.5,
+    ))
+}
+
+fn screen_delta_to_world_delta(
+    delta: Vec2,
+    rect: Rect,
+    camera: &SceneOverlayCamera,
+    depth: f32,
+) -> EngineVec3 {
+    let units_per_pixel = match camera.projection {
+        EditorSceneViewProjection::Perspective => {
+            let visible_height =
+                2.0 * depth * (camera.vertical_fov_degrees.to_radians() * 0.5).tan();
+            visible_height / rect.height().max(1.0)
+        }
+        EditorSceneViewProjection::Orthographic => {
+            camera.orthographic_vertical_size / rect.height().max(1.0)
+        }
+    };
+    camera.right * (delta.x * units_per_pixel) - camera.up * (delta.y * units_per_pixel)
+}
+
+fn screen_to_world_at_depth(
+    position: Pos2,
+    rect: Rect,
+    camera: &SceneOverlayCamera,
+    depth: f32,
+) -> Option<EngineVec3> {
+    if !rect.is_positive() {
+        return None;
+    }
+    let ndc_x = ((position.x - rect.center().x) / (rect.width() * 0.5)).clamp(-4.0, 4.0);
+    let ndc_y = ((rect.center().y - position.y) / (rect.height() * 0.5)).clamp(-4.0, 4.0);
+    let aspect = (rect.width() / rect.height().max(1.0)).max(0.001);
+    let (x, y) = match camera.projection {
+        EditorSceneViewProjection::Perspective => {
+            let f = 1.0 / (camera.vertical_fov_degrees.to_radians() * 0.5).tan();
+            (ndc_x * depth * aspect / f, ndc_y * depth / f)
+        }
+        EditorSceneViewProjection::Orthographic => {
+            let half_h = (camera.orthographic_vertical_size * 0.5).max(0.001);
+            let half_w = half_h * aspect;
+            (ndc_x * half_w, ndc_y * half_h)
+        }
+    };
+    Some(camera.eye + camera.forward * depth + camera.right * x + camera.up * y)
+}
+
+fn transform_space_label(space: EditorTransformSpace, tr: &Translations) -> &str {
+    match space {
+        EditorTransformSpace::Global => tr.tr("tool_global"),
+        EditorTransformSpace::Local => tr.tr("tool_local"),
+    }
 }
 
 fn draw_orientation_gizmo(
@@ -451,36 +1030,83 @@ fn orbit_editor_camera(ui_state: &mut ShellUiState, delta: Vec2) {
     ui_state.editor_camera_pitch = (ui_state.editor_camera_pitch
         + delta.y * EDITOR_CAMERA_ORBIT_SENSITIVITY)
         .clamp(-EDITOR_CAMERA_TOP_PITCH, EDITOR_CAMERA_TOP_PITCH);
+    ui_state.editor_scene_view_orientation = EditorSceneViewOrientation::Free;
+    if ui_state.editor_scene_view_auto_orthographic {
+        ui_state.editor_scene_view_projection = EditorSceneViewProjection::Perspective;
+    }
 }
 
 fn set_editor_camera_axis_view(ui_state: &mut ShellUiState, axis: &str) {
-    match axis {
-        "+X" => {
+    let orientation = match axis {
+        "+X" => Some(EditorSceneViewOrientation::Right),
+        "-X" => Some(EditorSceneViewOrientation::Left),
+        "+Y" => Some(EditorSceneViewOrientation::Top),
+        "-Y" => Some(EditorSceneViewOrientation::Bottom),
+        "+Z" => Some(EditorSceneViewOrientation::Front),
+        "-Z" => Some(EditorSceneViewOrientation::Rear),
+        _ => None,
+    };
+    if let Some(orientation) = orientation {
+        set_editor_camera_orientation(ui_state, orientation);
+    }
+}
+
+fn set_editor_camera_orientation(
+    ui_state: &mut ShellUiState,
+    orientation: EditorSceneViewOrientation,
+) {
+    match orientation {
+        EditorSceneViewOrientation::Right => {
             ui_state.editor_camera_yaw = std::f32::consts::FRAC_PI_2;
             ui_state.editor_camera_pitch = 0.0;
         }
-        "-X" => {
+        EditorSceneViewOrientation::Left => {
             ui_state.editor_camera_yaw = -std::f32::consts::FRAC_PI_2;
             ui_state.editor_camera_pitch = 0.0;
         }
-        "+Y" => {
+        EditorSceneViewOrientation::Top => {
             ui_state.editor_camera_yaw = 0.0;
             ui_state.editor_camera_pitch = EDITOR_CAMERA_TOP_PITCH;
         }
-        "-Y" => {
+        EditorSceneViewOrientation::Bottom => {
             ui_state.editor_camera_yaw = 0.0;
             ui_state.editor_camera_pitch = -EDITOR_CAMERA_TOP_PITCH;
         }
-        "+Z" => {
+        EditorSceneViewOrientation::Front => {
             ui_state.editor_camera_yaw = 0.0;
             ui_state.editor_camera_pitch = 0.0;
         }
-        "-Z" => {
+        EditorSceneViewOrientation::Rear => {
             ui_state.editor_camera_yaw = std::f32::consts::PI;
             ui_state.editor_camera_pitch = 0.0;
         }
-        _ => {}
+        EditorSceneViewOrientation::Free => {}
     }
+    ui_state.editor_scene_view_orientation = orientation;
+    if orientation != EditorSceneViewOrientation::Free
+        && ui_state.editor_scene_view_auto_orthographic
+    {
+        ui_state.editor_scene_view_projection = EditorSceneViewProjection::Orthographic;
+    }
+}
+
+fn set_editor_camera_2d_view(ui_state: &mut ShellUiState) {
+    set_editor_camera_orientation(ui_state, EditorSceneViewOrientation::Top);
+    ui_state.editor_scene_view_projection = EditorSceneViewProjection::Orthographic;
+    ui_state.editor_camera_target[1] = 0.0;
+}
+
+fn set_editor_camera_3d_view(ui_state: &mut ShellUiState) {
+    ui_state.editor_scene_view_orientation = EditorSceneViewOrientation::Free;
+    ui_state.editor_scene_view_projection = EditorSceneViewProjection::Perspective;
+    ui_state.editor_camera_pitch = 0.3;
+}
+
+fn toggle_editor_camera_projection(ui_state: &mut ShellUiState) {
+    ui_state.editor_scene_view_projection = match ui_state.editor_scene_view_projection {
+        EditorSceneViewProjection::Perspective => EditorSceneViewProjection::Orthographic,
+        EditorSceneViewProjection::Orthographic => EditorSceneViewProjection::Perspective,
+    };
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -598,6 +1224,7 @@ fn extract_render_world(shell: &EditorShell, scene_view: bool) -> RenderWorld {
                 .transforms()
                 .local(entity)
                 .unwrap_or(Transform::IDENTITY),
+            projection: RenderProjection::Perspective,
             vertical_fov_degrees: camera.vertical_fov_degrees,
             near: camera.near,
             far: camera.far,
@@ -691,6 +1318,12 @@ pub fn build_editor_render_world(shell: &EditorShell, ui_state: &ShellUiState) -
         let forward =
             EngineVec3::new(target[0] - eye_x, target[1] - eye_y, target[2] - eye_z).normalized();
         camera.transform.rotation = quat_look_at(forward, EngineVec3::new(0.0, 1.0, 0.0));
+        camera.projection = match ui_state.editor_scene_view_projection {
+            EditorSceneViewProjection::Perspective => RenderProjection::Perspective,
+            EditorSceneViewProjection::Orthographic => RenderProjection::Orthographic {
+                vertical_size: ui_state.editor_camera_distance * 2.0,
+            },
+        };
     }
     world
 }
@@ -771,6 +1404,14 @@ mod tests {
         set_editor_camera_axis_view(&mut ui_state, "+X");
         assert_eq!(ui_state.editor_camera_yaw, std::f32::consts::FRAC_PI_2);
         assert_eq!(ui_state.editor_camera_pitch, 0.0);
+        assert_eq!(
+            ui_state.editor_scene_view_orientation,
+            EditorSceneViewOrientation::Right
+        );
+        assert_eq!(
+            ui_state.editor_scene_view_projection,
+            EditorSceneViewProjection::Orthographic
+        );
 
         set_editor_camera_axis_view(&mut ui_state, "-X");
         assert_eq!(ui_state.editor_camera_yaw, -std::f32::consts::FRAC_PI_2);
@@ -791,6 +1432,57 @@ mod tests {
         set_editor_camera_axis_view(&mut ui_state, "-Z");
         assert_eq!(ui_state.editor_camera_yaw, std::f32::consts::PI);
         assert_eq!(ui_state.editor_camera_pitch, 0.0);
+    }
+
+    #[test]
+    fn scene_view_modes_switch_projection_and_orientation() {
+        let mut ui_state = ShellUiState::all_open();
+        assert_eq!(
+            ui_state.editor_transform_space,
+            EditorTransformSpace::Global
+        );
+
+        set_editor_camera_2d_view(&mut ui_state);
+        assert_eq!(
+            ui_state.editor_scene_view_orientation,
+            EditorSceneViewOrientation::Top
+        );
+        assert_eq!(
+            ui_state.editor_scene_view_projection,
+            EditorSceneViewProjection::Orthographic
+        );
+        assert_eq!(ui_state.editor_camera_target[1], 0.0);
+
+        set_editor_camera_3d_view(&mut ui_state);
+        assert_eq!(
+            ui_state.editor_scene_view_orientation,
+            EditorSceneViewOrientation::Free
+        );
+        assert_eq!(
+            ui_state.editor_scene_view_projection,
+            EditorSceneViewProjection::Perspective
+        );
+
+        toggle_editor_camera_projection(&mut ui_state);
+        assert_eq!(
+            ui_state.editor_scene_view_projection,
+            EditorSceneViewProjection::Orthographic
+        );
+    }
+
+    #[test]
+    fn transform_space_is_independent_from_scene_view_projection() {
+        let mut ui_state = ShellUiState::all_open();
+
+        ui_state.editor_transform_space = EditorTransformSpace::Local;
+        toggle_editor_camera_projection(&mut ui_state);
+        set_editor_camera_orientation(&mut ui_state, EditorSceneViewOrientation::Front);
+
+        assert_eq!(ui_state.editor_transform_space, EditorTransformSpace::Local);
+        assert_eq!(
+            ui_state.editor_scene_view_projection,
+            EditorSceneViewProjection::Orthographic
+        );
     }
 
     #[test]
@@ -817,6 +1509,14 @@ mod tests {
         orbit_editor_camera(&mut ui_state, Vec2::new(10.0, 20.0));
 
         assert_eq!(
+            ui_state.editor_scene_view_orientation,
+            EditorSceneViewOrientation::Free
+        );
+        assert_eq!(
+            ui_state.editor_scene_view_projection,
+            EditorSceneViewProjection::Perspective
+        );
+        assert_eq!(
             ui_state.editor_camera_yaw,
             -10.0 * EDITOR_CAMERA_ORBIT_SENSITIVITY
         );
@@ -828,5 +1528,27 @@ mod tests {
         orbit_editor_camera(&mut ui_state, Vec2::new(0.0, 10_000.0));
 
         assert_eq!(ui_state.editor_camera_pitch, EDITOR_CAMERA_TOP_PITCH);
+    }
+
+    #[test]
+    fn scene_overlay_camera_projects_target_to_view_center() {
+        let ui_state = ShellUiState::all_open();
+        let camera = scene_overlay_camera(&ui_state);
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let target = EngineVec3::new(
+            ui_state.editor_camera_target[0],
+            ui_state.editor_camera_target[1],
+            ui_state.editor_camera_target[2],
+        );
+
+        let projected = project_world_to_viewport(target, rect, &camera).unwrap();
+
+        assert!((projected.x - rect.center().x).abs() < 0.001);
+        assert!((projected.y - rect.center().y).abs() < 0.001);
+    }
+
+    #[test]
+    fn guide_lengths_make_camera_handles_more_visible_than_lights() {
+        assert!(guide_length(SceneGuideKind::Camera) > guide_length(SceneGuideKind::Light));
     }
 }

@@ -10,10 +10,10 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "script-python")]
-use std::time::Instant;
 #[cfg(feature = "script-rhai")]
 use engine_script_rhai::RhaiScriptBackend;
+#[cfg(feature = "script-python")]
+use std::time::Instant;
 
 use engine_assets::{
     import_builtin_asset, scan_project_assets, AssetDatabase, AssetGuid, AssetRegistry,
@@ -415,15 +415,10 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 object
                     .scripts
                     .iter()
-                    .chain(
-                        object
-                            .components
-                            .iter()
-                            .filter_map(|c| match c {
-                                engine_ecs::ComponentData::Script(s) => Some(s),
-                                _ => None,
-                            }),
-                    )
+                    .chain(object.components.iter().filter_map(|c| match c {
+                        engine_ecs::ComponentData::Script(s) => Some(s),
+                        _ => None,
+                    }))
                     .filter(|s| s.backend == "rhai")
                     .map(move |s| (entity_id.clone(), PathBuf::from(&s.script)))
                     .collect::<Vec<_>>()
@@ -448,10 +443,13 @@ impl<R: RenderDevice> RuntimeServices<R> {
             }
             let scene = std::mem::take(&mut self.scene);
             self.rhai_script_backend.0.set_scene(scene);
-            match self.rhai_script_backend.0.run_start(entity_id, &script_path) {
+            match self
+                .rhai_script_backend
+                .0
+                .run_start(entity_id, &script_path)
+            {
                 Ok(Some(entry)) => {
-                    self.diagnostics
-                        .push(console_to_runtime_diagnostic(entry));
+                    self.diagnostics.push(console_to_runtime_diagnostic(entry));
                 }
                 Err(error) => {
                     self.diagnostics.push(RuntimeDiagnostic {
@@ -488,15 +486,10 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 object
                     .scripts
                     .iter()
-                    .chain(
-                        object
-                            .components
-                            .iter()
-                            .filter_map(|c| match c {
-                                engine_ecs::ComponentData::Script(s) => Some(s),
-                                _ => None,
-                            }),
-                    )
+                    .chain(object.components.iter().filter_map(|c| match c {
+                        engine_ecs::ComponentData::Script(s) => Some(s),
+                        _ => None,
+                    }))
                     .filter(|s| s.backend == "rhai")
                     .map(move |s| (entity_id.clone(), PathBuf::from(&s.script)))
                     .collect::<Vec<_>>()
@@ -511,15 +504,17 @@ impl<R: RenderDevice> RuntimeServices<R> {
         self.rhai_script_backend.0.set_scene(scene);
 
         for (entity_id, script_ref) in &invocations {
-            let Ok(script_path) = resolve_rhai_script_path(script_ref.as_path(), self.project_root.as_deref())
+            let Ok(script_path) =
+                resolve_rhai_script_path(script_ref.as_path(), self.project_root.as_deref())
             else {
                 continue;
             };
             let result = match stage {
-                "on_fixed_update" => self
-                    .rhai_script_backend
-                    .0
-                    .run_fixed_update(entity_id, &script_path, dt),
+                "on_fixed_update" => {
+                    self.rhai_script_backend
+                        .0
+                        .run_fixed_update(entity_id, &script_path, dt)
+                }
                 _ => self
                     .rhai_script_backend
                     .0
@@ -527,8 +522,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             };
             match result {
                 Ok(Some(entry)) => {
-                    self.diagnostics
-                        .push(console_to_runtime_diagnostic(entry));
+                    self.diagnostics.push(console_to_runtime_diagnostic(entry));
                 }
                 Err(error) => {
                     self.diagnostics.push(RuntimeDiagnostic {
@@ -850,9 +844,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 )
                 .is_ok()
             {
-                if let Ok(world_transform) =
-                    self.physics.backend().body_transform(binding.body)
-                {
+                if let Ok(world_transform) = self.physics.backend().body_transform(binding.body) {
                     self.scene
                         .transforms_mut()
                         .set_world(player, world_transform);
@@ -932,11 +924,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             else {
                 continue;
             };
-            let world_transform = self
-                .scene
-                .transforms()
-                .world(entity)
-                .unwrap_or_default();
+            let world_transform = self.scene.transforms().world(entity).unwrap_or_default();
             let desc = RigidbodyDesc {
                 transform: world_transform,
                 kind: match rigidbody.body_type.as_str() {
@@ -972,11 +960,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
     fn sync_scene_to_physics(&mut self) -> EngineResult<()> {
         for binding in &self.physics_bindings {
             if let Some(entity) = self.scene.find_by_id(binding.object) {
-                let transform = self
-                    .scene
-                    .transforms()
-                    .world(entity)
-                    .unwrap_or_default();
+                let transform = self.scene.transforms().world(entity).unwrap_or_default();
                 self.physics
                     .backend_mut()
                     .set_body_transform(binding.body, transform)?;
@@ -1073,11 +1057,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 }
                 continue;
             };
-            let transform = self
-                .scene
-                .transforms()
-                .world(entity)
-                .unwrap_or_default();
+            let transform = self.scene.transforms().world(entity).unwrap_or_default();
             let source = self.audio.backend_mut().spawn_source(&AudioSourceDesc {
                 clip,
                 volume: audio_source.volume,
@@ -1101,11 +1081,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             .main_camera()
             .or_else(|| self.scene.game_camera())
         {
-            let transform = self
-                .scene
-                .transforms()
-                .world(camera)
-                .unwrap_or_default();
+            let transform = self.scene.transforms().world(camera).unwrap_or_default();
             self.audio.backend_mut().set_listener(&AudioListenerDesc {
                 position: transform.translation,
                 ..AudioListenerDesc::default()
@@ -1113,11 +1089,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         }
         for binding in &self.audio_bindings {
             if let Some(entity) = self.scene.find_by_id(binding.object) {
-                let transform = self
-                    .scene
-                    .transforms()
-                    .world(entity)
-                    .unwrap_or_default();
+                let transform = self.scene.transforms().world(entity).unwrap_or_default();
                 let Some(object) = self.scene.object(entity) else {
                     continue;
                 };
@@ -1595,10 +1567,7 @@ pub fn load_runtime_project(project: impl AsRef<Path>) -> EngineResult<RuntimePr
 pub fn extract_render_world(scene: &Scene) -> RenderWorld {
     let mut world = RenderWorld::default();
     for (entity, object) in scene.iter_objects() {
-        let transform = scene
-            .transforms()
-            .world(entity)
-            .unwrap_or_default();
+        let transform = scene.transforms().world(entity).unwrap_or_default();
         for component in &object.components {
             match component {
                 ComponentData::Camera(camera) => {
@@ -1675,6 +1644,7 @@ fn camera_to_render(
     engine_render::RenderCamera {
         object,
         transform,
+        projection: engine_render::RenderProjection::Perspective,
         vertical_fov_degrees: camera.vertical_fov_degrees,
         near: camera.near,
         far: camera.far,
@@ -1988,7 +1958,10 @@ pub fn run_project(_project: impl AsRef<Path>) -> EngineResult<()> {
 }
 
 #[cfg(feature = "script-rhai")]
-fn resolve_rhai_script_path(script_path: &Path, project_root: Option<&Path>) -> EngineResult<PathBuf> {
+fn resolve_rhai_script_path(
+    script_path: &Path,
+    project_root: Option<&Path>,
+) -> EngineResult<PathBuf> {
     let path = if let Ok(stripped) = script_path.strip_prefix("project:/") {
         project_root
             .map(|root| root.join(stripped))

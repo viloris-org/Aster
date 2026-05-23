@@ -128,6 +128,46 @@ pub struct ViewportTexture {
     pub height: u32,
 }
 
+/// Projection mode used by the editor Scene View camera.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EditorSceneViewProjection {
+    /// Perspective 3D view.
+    #[default]
+    Perspective,
+    /// Orthographic editor view.
+    Orthographic,
+}
+
+/// Named editor Scene View orientation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EditorSceneViewOrientation {
+    /// Free orbit view.
+    #[default]
+    Free,
+    /// Top view looking down the Y axis.
+    Top,
+    /// Bottom view looking up the Y axis.
+    Bottom,
+    /// Left view.
+    Left,
+    /// Right view.
+    Right,
+    /// Front view.
+    Front,
+    /// Rear view.
+    Rear,
+}
+
+/// Transform gizmo coordinate space used by editor tools.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EditorTransformSpace {
+    /// Align transform handles to world axes.
+    #[default]
+    Global,
+    /// Align transform handles to the selected object's local axes.
+    Local,
+}
+
 /// Transient UI state for the editor shell.
 #[derive(Debug, Default)]
 pub struct ShellUiState {
@@ -199,10 +239,20 @@ pub struct ShellUiState {
     pub editor_camera_target_distance: f32,
     /// Editor camera look-at target in world space.
     pub editor_camera_target: [f32; 3],
+    /// Current Scene View projection mode.
+    pub editor_scene_view_projection: EditorSceneViewProjection,
+    /// Whether axis presets automatically switch Scene View to orthographic mode.
+    pub editor_scene_view_auto_orthographic: bool,
+    /// Current named Scene View orientation.
+    pub editor_scene_view_orientation: EditorSceneViewOrientation,
+    /// Current transform tool coordinate space.
+    pub editor_transform_space: EditorTransformSpace,
     /// Inspector component type IDs that are currently collapsed.
     pub inspector_collapsed: Vec<String>,
     /// Scene snapshot captured before a transform drag began (batches undo to drag session).
     pub inspector_drag_before: Option<String>,
+    /// Scene snapshot captured before a Scene View guide drag began.
+    pub scene_guide_drag_before: Option<(EntityId, String)>,
     /// Filter text for the Add Component searchable dropdown.
     pub add_component_filter: String,
     /// Component type ID awaiting removal confirmation (two-click delete).
@@ -267,8 +317,13 @@ impl ShellUiState {
             editor_camera_distance: 6.0,
             editor_camera_target_distance: 6.0,
             editor_camera_target: [0.0, 1.0, 0.0],
+            editor_scene_view_projection: EditorSceneViewProjection::Perspective,
+            editor_scene_view_auto_orthographic: true,
+            editor_scene_view_orientation: EditorSceneViewOrientation::Free,
+            editor_transform_space: EditorTransformSpace::Global,
             inspector_collapsed: Vec::new(),
             inspector_drag_before: None,
+            scene_guide_drag_before: None,
             add_component_filter: String::new(),
             remove_confirm: None,
             status_toast: None,
