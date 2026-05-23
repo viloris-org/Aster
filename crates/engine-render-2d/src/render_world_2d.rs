@@ -96,8 +96,7 @@ pub struct RenderWorld2D {
 impl RenderWorld2D {
     /// Returns true when there is visible geometry and a camera.
     pub fn is_visible(&self) -> bool {
-        self.camera.is_some()
-            && (!self.sprites.is_empty() || !self.tilemaps.is_empty())
+        self.camera.is_some() && (!self.sprites.is_empty() || !self.tilemaps.is_empty())
     }
 
     /// Extracts 2D renderable data from a Scene.

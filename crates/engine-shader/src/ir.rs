@@ -182,10 +182,7 @@ pub fn validate(ir: &ShaderIR) -> EngineResult<()> {
         binding_set.insert(key, &uniform.name);
     }
 
-    let has_entry = ir
-        .functions
-        .iter()
-        .any(|f| f.name == ir.entry_point);
+    let has_entry = ir.functions.iter().any(|f| f.name == ir.entry_point);
     if !has_entry {
         return Err(engine_core::EngineError::other(format!(
             "entry point '{}' not found",

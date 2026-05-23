@@ -14,8 +14,6 @@ pub mod parser;
 pub mod tokenizer;
 
 pub use codegen::{ShaderBackend, WgslCodegen};
-pub use ir::{
-    FunctionIR, OpIR, ShaderIR, UniformDesc, UniformType, VaryingDesc,
-};
+pub use ir::{FunctionIR, OpIR, ShaderIR, UniformDesc, UniformType, VaryingDesc};
 pub use material::{AlphaMode, StandardMaterial3D};
 pub use material_instance::{MaterialInstance, MaterialParam};

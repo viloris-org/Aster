@@ -30,21 +30,13 @@ impl ActionContext {
     }
 
     /// Binds an action to a key.
-    pub fn bind_key(
-        &mut self,
-        action: impl Into<String>,
-        key: crate::input::KeyCode,
-    ) {
+    pub fn bind_key(&mut self, action: impl Into<String>, key: crate::input::KeyCode) {
         let entry = self.actions.entry(action.into()).or_default();
         entry.positive_keys.push(key);
     }
 
     /// Binds an action to a mouse button.
-    pub fn bind_mouse(
-        &mut self,
-        action: impl Into<String>,
-        button: crate::input::MouseButton,
-    ) {
+    pub fn bind_mouse(&mut self, action: impl Into<String>, button: crate::input::MouseButton) {
         let entry = self.actions.entry(action.into()).or_default();
         entry.positive_mouse.push(button);
     }
@@ -80,10 +72,7 @@ impl ActionContextManager {
     ///
     /// When the same action is defined in multiple contexts, the highest
     /// priority context wins.
-    pub fn evaluate(
-        &self,
-        input: &crate::input::InputState,
-    ) -> HashMap<String, f32> {
+    pub fn evaluate(&self, input: &crate::input::InputState) -> HashMap<String, f32> {
         let mut resolved: HashMap<String, f32> = HashMap::new();
         let mut seen: HashMap<String, i32> = HashMap::new();
 
@@ -121,14 +110,8 @@ fn evaluate_single(
 ) -> f32 {
     let deadzone = binding.dead_zone.unwrap_or_default();
 
-    let positive = binding
-        .positive_keys
-        .iter()
-        .any(|k| input.key_down(*k));
-    let negative = binding
-        .negative_keys
-        .iter()
-        .any(|k| input.key_down(*k));
+    let positive = binding.positive_keys.iter().any(|k| input.key_down(*k));
+    let negative = binding.negative_keys.iter().any(|k| input.key_down(*k));
 
     let raw: f32 = match (negative, positive) {
         (true, false) => -1.0,
@@ -136,12 +119,7 @@ fn evaluate_single(
         _ => 0.0,
     };
 
-    if !binding.chord_keys.is_empty()
-        && !binding
-            .chord_keys
-            .iter()
-            .all(|k| input.key_down(*k))
-    {
+    if !binding.chord_keys.is_empty() && !binding.chord_keys.iter().all(|k| input.key_down(*k)) {
         return 0.0;
     }
 

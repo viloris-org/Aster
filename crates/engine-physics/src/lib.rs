@@ -17,9 +17,7 @@ use std::{
 use engine_core::{EngineError, EngineResult};
 use serde::{Deserialize, Serialize};
 
-pub use crate::joints::{
-    JointDesc, JointHandle, JointLimits, JointMotor, JointState, JointType,
-};
+pub use crate::joints::{JointDesc, JointHandle, JointLimits, JointMotor, JointState, JointType};
 pub use engine_core::math::{Quat, Transform, Vec3};
 
 // ── Primitive types ──────────────────────────────────────────────────────────
@@ -1064,11 +1062,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         Ok(())
     }
 
-    fn set_joint_limits(
-        &mut self,
-        joint: JointHandle,
-        limits: JointLimits,
-    ) -> EngineResult<()> {
+    fn set_joint_limits(&mut self, joint: JointHandle, limits: JointLimits) -> EngineResult<()> {
         let desc = self
             .joints
             .get_mut(&joint)
@@ -1095,14 +1089,9 @@ impl SimplePhysicsBackend {
         let joints = self.joints.clone();
         for (_handle, desc) in &joints {
             match &desc.joint_type {
-                JointType::Pin {
-                    anchor_a,
-                    anchor_b,
-                } => {
-                    let transform_a =
-                        self.bodies.get(&desc.body_a).map(|b| b.transform);
-                    let transform_b =
-                        self.bodies.get(&desc.body_b).map(|b| b.transform);
+                JointType::Pin { anchor_a, anchor_b } => {
+                    let transform_a = self.bodies.get(&desc.body_a).map(|b| b.transform);
+                    let transform_b = self.bodies.get(&desc.body_b).map(|b| b.transform);
                     if let (Some(ta), Some(tb)) = (transform_a, transform_b) {
                         let world_a = ta.transform_point(*anchor_a);
                         let world_b = tb.transform_point(*anchor_b);
@@ -1121,10 +1110,8 @@ impl SimplePhysicsBackend {
                     stiffness,
                     damping,
                 } => {
-                    let transform_a =
-                        self.bodies.get(&desc.body_a).map(|b| b.transform);
-                    let transform_b =
-                        self.bodies.get(&desc.body_b).map(|b| b.transform);
+                    let transform_a = self.bodies.get(&desc.body_a).map(|b| b.transform);
+                    let transform_b = self.bodies.get(&desc.body_b).map(|b| b.transform);
                     if let (Some(ta), Some(tb)) = (transform_a, transform_b) {
                         let world_a = ta.transform_point(*anchor_a);
                         let world_b = tb.transform_point(*anchor_b);
@@ -1134,10 +1121,8 @@ impl SimplePhysicsBackend {
                             let direction = delta / distance;
                             // Scale force and damping by dt for frame-rate independence
                             let dt = dt.max(0.0001);
-                            let force = direction
-                                * ((distance - rest_length) * *stiffness * dt);
-                            let damping_factor =
-                                (1.0 - (*damping).min(1.0)).powf(dt * 60.0);
+                            let force = direction * ((distance - rest_length) * *stiffness * dt);
+                            let damping_factor = (1.0 - (*damping).min(1.0)).powf(dt * 60.0);
                             if let Some(body) = self.bodies.get_mut(&desc.body_a) {
                                 if body.desc.kind == BodyKind::Dynamic {
                                     body.velocity += force;

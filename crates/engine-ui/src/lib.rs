@@ -364,9 +364,7 @@ impl ControlTree {
             children: Vec::new(),
             visible: true,
             enabled: true,
-            widget: Box::new(LabelWidget {
-                text: text.into(),
-            }),
+            widget: Box::new(LabelWidget { text: text.into() }),
         });
     }
 
@@ -431,11 +429,7 @@ fn layout_node(node: &mut ControlNode, theme: &Theme) {
     }
 }
 
-fn handle_event_node(
-    node: &mut ControlNode,
-    event: &UiEvent,
-    theme: &Theme,
-) -> EventResult {
+fn handle_event_node(node: &mut ControlNode, event: &UiEvent, theme: &Theme) -> EventResult {
     if !node.visible || !node.enabled {
         return EventResult::Ignored;
     }

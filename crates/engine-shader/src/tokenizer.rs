@@ -111,7 +111,9 @@ pub fn tokenize(source: &str) -> Result<Vec<ShaderToken>, TokenizeError> {
             continue;
         }
 
-        if ch.is_ascii_digit() || (ch == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit()) {
+        if ch.is_ascii_digit()
+            || (ch == '.' && pos + 1 < chars.len() && chars[pos + 1].is_ascii_digit())
+        {
             let start = pos;
             let mut has_dot = false;
             while pos < chars.len() {
@@ -132,13 +134,9 @@ pub fn tokenize(source: &str) -> Result<Vec<ShaderToken>, TokenizeError> {
             }
             let num_str: String = chars[start..pos].iter().collect();
             if has_dot {
-                tokens.push(ShaderToken::Number(
-                    num_str.parse().unwrap_or(0.0),
-                ));
+                tokens.push(ShaderToken::Number(num_str.parse().unwrap_or(0.0)));
             } else {
-                tokens.push(ShaderToken::Int(
-                    num_str.parse().unwrap_or(0),
-                ));
+                tokens.push(ShaderToken::Int(num_str.parse().unwrap_or(0)));
             }
             continue;
         }

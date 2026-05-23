@@ -10,4 +10,4 @@ pub use types::{
     EditorAction, PlayModeRequest, ScriptEditorState, ScriptTemplateBackend, ShellUiState,
     ViewportTexture,
 };
-pub use ui::{build_editor_render_world, draw_shell};
+pub use ui::{build_camera_preview_render_world, build_editor_render_world, draw_shell};

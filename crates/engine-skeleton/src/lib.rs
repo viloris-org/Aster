@@ -53,9 +53,7 @@ impl Mat4 {
         let mut result = Self::IDENTITY;
         for i in 0..4 {
             for j in 0..4 {
-                result.0[j][i] = (0..4)
-                    .map(|k| self.0[k][i] * other.0[j][k])
-                    .sum();
+                result.0[j][i] = (0..4).map(|k| self.0[k][i] * other.0[j][k]).sum();
             }
         }
         result
@@ -232,7 +230,11 @@ impl CCDIKSolver {
                     .get(i)
                     .map(|t| t.rotation)
                     .unwrap_or_else(|| {
-                        skeleton.bones.get(i).map(|b| b.rest_transform.rotation).unwrap_or(Quat::IDENTITY)
+                        skeleton
+                            .bones
+                            .get(i)
+                            .map(|b| b.rest_transform.rotation)
+                            .unwrap_or(Quat::IDENTITY)
                     })
             })
             .collect();
@@ -287,11 +289,7 @@ impl CCDIKSolver {
     }
 
     /// Sets the chain from bone names.
-    pub fn set_chain_bones(
-        &mut self,
-        skeleton: &Skeleton,
-        names: &[&str],
-    ) {
+    pub fn set_chain_bones(&mut self, skeleton: &Skeleton, names: &[&str]) {
         self.chain = names
             .iter()
             .filter_map(|name| skeleton.bone_map.get(*name).copied())
@@ -373,7 +371,9 @@ impl FABRIKSolver {
         }
 
         // Write back computed local transforms to skeleton
-        skeleton.bone_transforms.resize(skeleton.bones.len(), Transform::IDENTITY);
+        skeleton
+            .bone_transforms
+            .resize(skeleton.bones.len(), Transform::IDENTITY);
 
         for (chain_pos, &bone_idx) in self.chain.iter().enumerate() {
             let bone_pos = positions[chain_pos];
@@ -396,11 +396,7 @@ impl FABRIKSolver {
     }
 
     /// Sets the chain from bone names.
-    pub fn set_chain_bones(
-        &mut self,
-        skeleton: &Skeleton,
-        names: &[&str],
-    ) {
+    pub fn set_chain_bones(&mut self, skeleton: &Skeleton, names: &[&str]) {
         self.chain = names
             .iter()
             .filter_map(|name| skeleton.bone_map.get(*name).copied())

@@ -114,10 +114,7 @@ impl RenderGraphBuilder {
 ///
 /// Derives implicit write→read edges from resource accesses in O(n) time,
 /// then topologically sorts. Returns `Err` if the graph contains a cycle.
-fn topological_sort(
-    passes: &[RenderPass],
-    edges: &[(PassId, PassId)],
-) -> Vec<RenderPass> {
+fn topological_sort(passes: &[RenderPass], edges: &[(PassId, PassId)]) -> Vec<RenderPass> {
     let mut in_degree: HashMap<PassId, usize> = passes.iter().map(|p| (p.id, 0)).collect();
     let mut adj: HashMap<PassId, Vec<PassId>> = passes.iter().map(|p| (p.id, vec![])).collect();
 

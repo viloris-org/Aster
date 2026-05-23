@@ -2,7 +2,10 @@
 
 use egui::Color32;
 use engine_assets::AssetGuid;
-use engine_core::EntityId;
+use engine_core::{
+    math::{Transform, Vec3 as EngineVec3},
+    EntityId,
+};
 use engine_render::{RenderTargetDesc, RenderWorld};
 use std::path::PathBuf;
 
@@ -168,6 +171,84 @@ pub enum EditorTransformSpace {
     Local,
 }
 
+/// Active transform tool in the editor viewport.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EditorTransformTool {
+    /// Inspect/orbit the view without showing a transform gizmo.
+    View,
+    /// Translate the selected object.
+    #[default]
+    Move,
+    /// Rotate the selected object.
+    Rotate,
+    /// Scale the selected object.
+    Scale,
+}
+
+/// Active viewport transform drag operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ViewportTransformDragMode {
+    /// Translate along one world-space gizmo axis.
+    MoveAxis {
+        /// World-space axis used by the active handle.
+        axis: EngineVec3,
+    },
+    /// Translate within the plane spanned by two world-space gizmo axes.
+    MovePlane {
+        /// First world-space axis used by the active plane handle.
+        axis_a: EngineVec3,
+        /// Second world-space axis used by the active plane handle.
+        axis_b: EngineVec3,
+    },
+    /// Transform from raw screen-space movement.
+    Screen,
+    /// Rotate around a world-space axis.
+    RotateAxis {
+        /// World-space rotation axis.
+        axis: EngineVec3,
+    },
+}
+
+/// State captured at the beginning of a viewport transform drag.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewportTransformDragState {
+    /// Entity being transformed.
+    pub selected_id: EntityId,
+    /// Undo snapshot captured before the drag began.
+    pub before_scene: String,
+    /// Transform captured before the drag began.
+    pub start_transform: Transform,
+    /// Pointer position captured before the drag began.
+    pub start_pointer: [f32; 2],
+    /// World-space hit point captured before the drag began.
+    pub start_hit: Option<EngineVec3>,
+    /// Drag operation captured before the drag began.
+    pub mode: ViewportTransformDragMode,
+    /// Previous angle (radians) for rotation drag delta computation.
+    pub rotate_prev_angle: f32,
+}
+
+/// Snap settings for editor transform gizmos.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditorSnapSettings {
+    /// Grid snap increment for move tool (None = disabled).
+    pub move_snap: Option<f32>,
+    /// Angle snap increment in degrees for rotate tool (None = disabled).
+    pub angle_snap: Option<f32>,
+    /// Scale snap increment for scale tool (None = disabled).
+    pub scale_snap: Option<f32>,
+}
+
+impl Default for EditorSnapSettings {
+    fn default() -> Self {
+        Self {
+            move_snap: None,
+            angle_snap: None,
+            scale_snap: None,
+        }
+    }
+}
+
 /// Transient UI state for the editor shell.
 #[derive(Debug, Default)]
 pub struct ShellUiState {
@@ -215,6 +296,8 @@ pub struct ShellUiState {
     pub scene_view_target: Option<ViewportTargetState>,
     /// Last requested Game View render target.
     pub game_view_target: Option<ViewportTargetState>,
+    /// Last requested selected-camera preview render target.
+    pub camera_preview_target: Option<ViewportTargetState>,
     /// Latest Game View render-world produced by Play Mode runtime ticking.
     pub runtime_game_world: Option<RenderWorld>,
     /// Pending Play Mode request for the native editor host to execute.
@@ -229,6 +312,8 @@ pub struct ShellUiState {
     pub scene_view_texture: Option<ViewportTexture>,
     /// Rendered game view texture set by the native host before each egui frame.
     pub game_view_texture: Option<ViewportTexture>,
+    /// Rendered selected-camera preview texture set by the native host.
+    pub camera_preview_texture: Option<ViewportTexture>,
     /// Editor camera orbit state: yaw angle in radians.
     pub editor_camera_yaw: f32,
     /// Editor camera orbit state: pitch angle in radians.
@@ -247,16 +332,30 @@ pub struct ShellUiState {
     pub editor_scene_view_orientation: EditorSceneViewOrientation,
     /// Current transform tool coordinate space.
     pub editor_transform_space: EditorTransformSpace,
+    /// Current transform tool mode.
+    pub editor_transform_tool: EditorTransformTool,
     /// Inspector component type IDs that are currently collapsed.
     pub inspector_collapsed: Vec<String>,
     /// Scene snapshot captured before a transform drag began (batches undo to drag session).
     pub inspector_drag_before: Option<String>,
     /// Scene snapshot captured before a Scene View guide drag began.
     pub scene_guide_drag_before: Option<(EntityId, String)>,
+    /// Scene snapshot captured before a viewport transform drag began.
+    pub viewport_transform_drag_before: Option<(EntityId, String)>,
+    /// Full viewport transform drag state used for stable cumulative edits.
+    pub viewport_transform_drag: Option<ViewportTransformDragState>,
     /// Filter text for the Add Component searchable dropdown.
     pub add_component_filter: String,
     /// Component type ID awaiting removal confirmation (two-click delete).
     pub remove_confirm: Option<String>,
+    /// Editor snap settings for transform gizmos.
+    pub editor_snap_settings: EditorSnapSettings,
+    /// Whether snapping is temporarily toggled via Ctrl key.
+    pub snap_toggle: bool,
+    /// Whether the current drag has produced any accumulated movement.
+    pub drag_dirty: bool,
+    /// Text label shown near the gizmo during drag (e.g. "d 1.23, 0.00, -0.45").
+    pub drag_delta_label: Option<String>,
     /// Temporary status message shown in the status bar.
     pub status_toast: Option<String>,
     /// Frames remaining before the status toast is cleared.
@@ -305,6 +404,7 @@ impl ShellUiState {
             dragged_asset: None,
             scene_view_target: None,
             game_view_target: None,
+            camera_preview_target: None,
             runtime_game_world: None,
             play_mode_request: None,
             command_palette_open: false,
@@ -312,6 +412,7 @@ impl ShellUiState {
             command_status: None,
             scene_view_texture: None,
             game_view_texture: None,
+            camera_preview_texture: None,
             editor_camera_yaw: 0.0,
             editor_camera_pitch: 0.3,
             editor_camera_distance: 6.0,
@@ -321,11 +422,18 @@ impl ShellUiState {
             editor_scene_view_auto_orthographic: true,
             editor_scene_view_orientation: EditorSceneViewOrientation::Free,
             editor_transform_space: EditorTransformSpace::Global,
+            editor_transform_tool: EditorTransformTool::Move,
             inspector_collapsed: Vec::new(),
             inspector_drag_before: None,
             scene_guide_drag_before: None,
+            viewport_transform_drag_before: None,
+            viewport_transform_drag: None,
             add_component_filter: String::new(),
             remove_confirm: None,
+            editor_snap_settings: EditorSnapSettings::default(),
+            snap_toggle: false,
+            drag_dirty: false,
+            drag_delta_label: None,
             status_toast: None,
             status_toast_frames: 0,
             pending_action: None,

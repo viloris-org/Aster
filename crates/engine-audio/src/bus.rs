@@ -200,7 +200,14 @@ fn process_bus(
     let child_solo_found = solo_found || bus.solo;
     for child in &mut bus.children {
         let mut child_samples = samples.to_vec();
-        process_bus(child, &mut child_samples, dt, effective_volume, has_solo, child_solo_found);
+        process_bus(
+            child,
+            &mut child_samples,
+            dt,
+            effective_volume,
+            has_solo,
+            child_solo_found,
+        );
         for (s, cs) in samples.iter_mut().zip(child_samples) {
             *s += cs;
         }

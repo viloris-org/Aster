@@ -19,4 +19,7 @@ pub use menu::draw_menu_bar;
 pub use project::draw_project_panel;
 pub use status_bar::draw_status_bar;
 pub use toolbar::draw_toolbar;
-pub use viewport::{build_editor_render_world, draw_bottom_dock, draw_center_dock};
+pub use viewport::{
+    build_camera_preview_render_world, build_editor_render_world, draw_bottom_dock,
+    draw_center_dock,
+};

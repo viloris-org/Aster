@@ -412,6 +412,7 @@ fn open_editor() -> EngineResult<()> {
         wgpu_render_device: Option<WgpuRenderDevice>,
         scene_view_texture_id: Option<egui::TextureId>,
         game_view_texture_id: Option<egui::TextureId>,
+        camera_preview_texture_id: Option<egui::TextureId>,
         screen: Screen,
         hub: HubState,
         shell: EditorShell,
@@ -437,6 +438,14 @@ fn open_editor() -> EngineResult<()> {
             if !world.is_visible() {
                 self.shell_ui.scene_view_texture = None;
                 return;
+            }
+
+            // Resize GPU target to match the viewport rect from the previous frame.
+            if let Some(target) = &self.shell_ui.scene_view_target {
+                let (cw, ch) = wgpu_dev.default_target_size();
+                if cw != target.desc.width || ch != target.desc.height {
+                    let _ = wgpu_dev.resize_default_target(target.desc.width, target.desc.height);
+                }
             }
 
             if let Err(e) = wgpu_dev.render_world_offscreen(&world) {
@@ -500,6 +509,14 @@ fn open_editor() -> EngineResult<()> {
                 return;
             }
 
+            // Resize GPU target to match the viewport rect from the previous frame.
+            if let Some(target) = &self.shell_ui.game_view_target {
+                let (cw, ch) = wgpu_dev.game_target_size();
+                if cw != target.desc.width || ch != target.desc.height {
+                    let _ = wgpu_dev.resize_game_target(target.desc.width, target.desc.height);
+                }
+            }
+
             if let Err(e) = wgpu_dev.render_world_offscreen_game(world) {
                 self.push_editor_error(format!("game render failed: {e}"));
                 self.shell_ui.game_view_texture = None;
@@ -530,6 +547,59 @@ fn open_editor() -> EngineResult<()> {
             };
 
             self.shell_ui.game_view_texture = Some(engine_editor_ui::ViewportTexture {
+                id: texture_id,
+                width,
+                height,
+            });
+        }
+
+        /// Renders the selected-camera preview for the Inspector.
+        fn render_camera_preview(&mut self) {
+            let Some(wgpu_dev) = self.wgpu_render_device.as_mut() else {
+                return;
+            };
+            let Some(render_state) = self.render_state.as_mut() else {
+                return;
+            };
+            let Some(target) = self.shell_ui.camera_preview_target.as_ref() else {
+                self.shell_ui.camera_preview_texture = None;
+                return;
+            };
+            if !target.world.is_visible() {
+                self.shell_ui.camera_preview_texture = None;
+                return;
+            }
+
+            if let Err(e) = wgpu_dev.render_world_offscreen_preview(&target.world) {
+                self.push_editor_error(format!("camera preview render failed: {e}"));
+                self.shell_ui.camera_preview_texture = None;
+                return;
+            }
+
+            let (width, height) = wgpu_dev.preview_target_size();
+            let egui_texture_id = if let Some(texture_id) = self.camera_preview_texture_id {
+                render_state.renderer.update_egui_texture_from_wgpu_texture(
+                    &render_state.device,
+                    wgpu_dev.preview_target_view(),
+                    wgpu::FilterMode::Linear,
+                    texture_id,
+                );
+                texture_id
+            } else {
+                let texture_id = render_state.renderer.register_native_texture(
+                    &render_state.device,
+                    wgpu_dev.preview_target_view(),
+                    wgpu::FilterMode::Linear,
+                );
+                self.camera_preview_texture_id = Some(texture_id);
+                texture_id
+            };
+
+            let egui::TextureId::User(texture_id) = egui_texture_id else {
+                return;
+            };
+
+            self.shell_ui.camera_preview_texture = Some(engine_editor_ui::ViewportTexture {
                 id: texture_id,
                 width,
                 height,
@@ -751,6 +821,7 @@ fn open_editor() -> EngineResult<()> {
             });
             self.scene_view_texture_id = None;
             self.game_view_texture_id = None;
+            self.camera_preview_texture_id = None;
 
             let wgpu_render_device = WgpuRenderDevice::from_arc_device(
                 instance,
@@ -817,6 +888,7 @@ fn open_editor() -> EngineResult<()> {
                     if matches!(self.screen, Screen::Editor) {
                         self.render_scene_view();
                         self.render_game_view();
+                        self.render_camera_preview();
                     }
 
                     let full_output = egui_ctx.run_ui(raw_input, |ctx| match self.screen {
@@ -833,6 +905,7 @@ fn open_editor() -> EngineResult<()> {
                                         self.shell_ui.paused = false;
                                         self.shell_ui.runtime_game_world = None;
                                         self.shell_ui.game_view_texture = None;
+                                        self.shell_ui.camera_preview_texture = None;
                                         if let Err(error) = self.shell.open_project(&project_path) {
                                             self.shell.console_mut().push(ConsoleEntry {
                                                 timestamp: "now".to_string(),
@@ -973,6 +1046,7 @@ fn open_editor() -> EngineResult<()> {
                                         self.shell_ui.runtime_game_world = None;
                                         self.shell_ui.game_view_texture = None;
                                         self.shell_ui.scene_view_texture = None;
+                                        self.shell_ui.camera_preview_texture = None;
                                         window.set_title("Aster Hub");
                                     }
                                 }
@@ -1122,6 +1196,7 @@ fn open_editor() -> EngineResult<()> {
         wgpu_render_device: None,
         scene_view_texture_id: None,
         game_view_texture_id: None,
+        camera_preview_texture_id: None,
         screen: Screen::Hub,
         hub,
         shell: EditorShell::with_core_services(prefs),

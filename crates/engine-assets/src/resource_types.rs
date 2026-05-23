@@ -195,7 +195,11 @@ impl Resource for ThemeResource {
     }
 
     fn preview_summary(&self) -> String {
-        format!("Theme: {} ({} palette entries)", self.name, self.palette.len())
+        format!(
+            "Theme: {} ({} palette entries)",
+            self.name,
+            self.palette.len()
+        )
     }
 }
 

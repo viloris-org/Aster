@@ -82,8 +82,9 @@ impl Default for StandardMaterial3D {
 impl StandardMaterial3D {
     /// Serializes to JSON.
     pub fn to_json(&self) -> EngineResult<String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| EngineError::other(format!("StandardMaterial3D serialization failed: {e}")))
+        serde_json::to_string_pretty(self).map_err(|e| {
+            EngineError::other(format!("StandardMaterial3D serialization failed: {e}"))
+        })
     }
 
     /// Deserializes from JSON.
@@ -94,8 +95,11 @@ impl StandardMaterial3D {
 
     /// Serializes to JSON bytes.
     pub fn to_binary(&self) -> EngineResult<Vec<u8>> {
-        serde_json::to_vec(self)
-            .map_err(|e| EngineError::other(format!("StandardMaterial3D binary serialization failed: {e}")))
+        serde_json::to_vec(self).map_err(|e| {
+            EngineError::other(format!(
+                "StandardMaterial3D binary serialization failed: {e}"
+            ))
+        })
     }
 
     /// Deserializes from JSON bytes.

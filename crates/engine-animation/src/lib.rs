@@ -203,9 +203,7 @@ fn sample_track(track: &AnimationTrack, time: f32) -> Option<KeyframeValue> {
     }
 
     // Binary search: find first keyframe with time > target
-    let idx = track
-        .keyframes
-        .partition_point(|kf| kf.time <= time);
+    let idx = track.keyframes.partition_point(|kf| kf.time <= time);
     if idx > 0 && idx < track.keyframes.len() {
         let k0 = &track.keyframes[idx - 1];
         let k1 = &track.keyframes[idx];
@@ -252,7 +250,9 @@ fn slerp(a: Quat, b: Quat, t: f32) -> Quat {
             z: a.z + (b.z - a.z) * t,
             w: a.w + (b.w - a.w) * t,
         };
-        let len = (result.x * result.x + result.y * result.y + result.z * result.z + result.w * result.w).sqrt();
+        let len =
+            (result.x * result.x + result.y * result.y + result.z * result.z + result.w * result.w)
+                .sqrt();
         if len > f32::EPSILON {
             return Quat {
                 x: result.x / len,

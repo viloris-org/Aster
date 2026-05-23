@@ -170,11 +170,7 @@ impl InputMap {
             gamepad_value
         };
 
-        if !binding.chord_keys.is_empty()
-            && !binding
-                .chord_keys
-                .iter()
-                .all(|k| input.key_down(*k))
+        if !binding.chord_keys.is_empty() && !binding.chord_keys.iter().all(|k| input.key_down(*k))
         {
             return 0.0;
         }
@@ -193,14 +189,8 @@ impl InputMap {
     }
 
     fn key_axis_value(binding: &InputBinding, input: &InputState) -> f32 {
-        let positive = binding
-            .positive_keys
-            .iter()
-            .any(|k| input.key_down(*k));
-        let negative = binding
-            .negative_keys
-            .iter()
-            .any(|k| input.key_down(*k));
+        let positive = binding.positive_keys.iter().any(|k| input.key_down(*k));
+        let negative = binding.negative_keys.iter().any(|k| input.key_down(*k));
         match (negative, positive) {
             (true, false) => -1.0,
             (false, true) => 1.0,
@@ -286,11 +276,17 @@ mod tests {
         );
 
         let values = map.evaluate(&input);
-        assert!(!values.contains_key("CtrlA"), "chord should not fire without all keys");
+        assert!(
+            !values.contains_key("CtrlA"),
+            "chord should not fire without all keys"
+        );
 
         input.apply_event(crate::input::InputEvent::KeyDown(KeyCode::Character('z')));
         let values = map.evaluate(&input);
-        assert!(values.contains_key("CtrlA"), "chord should fire with all keys");
+        assert!(
+            values.contains_key("CtrlA"),
+            "chord should fire with all keys"
+        );
     }
 
     #[test]
@@ -324,10 +320,7 @@ mod tests {
         let mut map = InputMap::default();
         map.actions.insert(
             "MoveX".to_string(),
-            InputBinding::axis(
-                [KeyCode::Character('a')],
-                [KeyCode::Character('d')],
-            ),
+            InputBinding::axis([KeyCode::Character('a')], [KeyCode::Character('d')]),
         );
 
         let values = map.evaluate(&input);

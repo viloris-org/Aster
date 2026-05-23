@@ -5,7 +5,9 @@ use egui::{CornerRadius, Stroke};
 use engine_editor::{ConsoleEntry, ConsoleLevel, ConsoleSource};
 use engine_i18n::Translations;
 
-use super::super::types::{EditorAction, InfernuxPalette, PlayModeRequest, ShellUiState};
+use super::super::types::{
+    EditorAction, EditorTransformTool, InfernuxPalette, PlayModeRequest, ShellUiState,
+};
 use super::asset_ops::{create_default_material, create_script_asset};
 use super::scene_ops::{
     add_component_to_selected, create_empty_object, create_root_object_with_component,
@@ -288,6 +290,44 @@ pub fn handle_command_shortcuts(
     }
 }
 
+/// Handle single-key editor transform tool shortcuts.
+pub fn handle_transform_tool_shortcuts(ctx: &egui::Context, ui_state: &mut ShellUiState) {
+    if ctx.egui_wants_keyboard_input() {
+        return;
+    }
+
+    let matched = ctx.input(|input| {
+        if input.modifiers.any() {
+            None
+        } else if input.key_pressed(egui::Key::Q) {
+            Some(EditorTransformTool::View)
+        } else if input.key_pressed(egui::Key::W) {
+            Some(EditorTransformTool::Move)
+        } else if input.key_pressed(egui::Key::E) {
+            Some(EditorTransformTool::Rotate)
+        } else if input.key_pressed(egui::Key::R) {
+            Some(EditorTransformTool::Scale)
+        } else {
+            None
+        }
+    });
+
+    if let Some(tool) = matched {
+        ui_state.editor_transform_tool = tool;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn transform_tool_for_shortcut_key(key: egui::Key) -> Option<EditorTransformTool> {
+    match key {
+        egui::Key::Q => Some(EditorTransformTool::View),
+        egui::Key::W => Some(EditorTransformTool::Move),
+        egui::Key::E => Some(EditorTransformTool::Rotate),
+        egui::Key::R => Some(EditorTransformTool::Scale),
+        _ => None,
+    }
+}
+
 /// Apply egui visual theme based on the palette.
 pub fn apply_visuals(ctx: &egui::Context, pal: &InfernuxPalette) {
     let mut visuals = egui::Visuals::dark();
@@ -328,4 +368,29 @@ pub fn apply_visuals(ctx: &egui::Context, pal: &InfernuxPalette) {
     visuals.error_fg_color = pal.error;
 
     ctx.set_visuals(visuals);
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn qwer_select_transform_tools() {
+        assert_eq!(
+            transform_tool_for_shortcut_key(egui::Key::Q),
+            Some(EditorTransformTool::View)
+        );
+        assert_eq!(
+            transform_tool_for_shortcut_key(egui::Key::W),
+            Some(EditorTransformTool::Move)
+        );
+        assert_eq!(
+            transform_tool_for_shortcut_key(egui::Key::E),
+            Some(EditorTransformTool::Rotate)
+        );
+        assert_eq!(
+            transform_tool_for_shortcut_key(egui::Key::R),
+            Some(EditorTransformTool::Scale)
+        );
+    }
 }

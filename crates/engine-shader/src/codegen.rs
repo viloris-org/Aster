@@ -80,10 +80,7 @@ fn generate_function_wgsl(func: &FunctionIR) -> String {
         .map(|(name, ty)| format!("{}: {}", name, ty))
         .collect::<Vec<_>>()
         .join(", ");
-    let mut out = format!(
-        "fn {}({}) -> {} {{\n",
-        func.name, params, func.return_type
-    );
+    let mut out = format!("fn {}({}) -> {} {{\n", func.name, params, func.return_type);
 
     let mut vars: Vec<String> = Vec::new();
     for op in &func.body {
@@ -98,10 +95,7 @@ fn generate_function_wgsl(func: &FunctionIR) -> String {
                 left,
                 right,
             } => {
-                out.push_str(&format!(
-                    "    let {} = {} {} {};\n",
-                    dest, left, op, right
-                ));
+                out.push_str(&format!("    let {} = {} {} {};\n", dest, left, op, right));
                 vars.push(dest.clone());
             }
             OpIR::Unary { dest, op, src } => {
@@ -111,10 +105,7 @@ fn generate_function_wgsl(func: &FunctionIR) -> String {
             OpIR::Call { dest, name, args } => {
                 let args_str = args.join(", ");
                 if let Some(d) = dest {
-                    out.push_str(&format!(
-                        "    let {} = {}({});\n",
-                        d, name, args_str
-                    ));
+                    out.push_str(&format!("    let {} = {}({});\n", d, name, args_str));
                     vars.push(d.clone());
                 } else {
                     out.push_str(&format!("    {}({});\n", name, args_str));
@@ -134,15 +125,9 @@ fn generate_function_wgsl(func: &FunctionIR) -> String {
             } => {
                 let uniform_name = format!("u{}", uniform);
                 if let Some(f) = field {
-                    out.push_str(&format!(
-                        "    let {} = {}.{};\n",
-                        dest, uniform_name, f
-                    ));
+                    out.push_str(&format!("    let {} = {}.{};\n", dest, uniform_name, f));
                 } else {
-                    out.push_str(&format!(
-                        "    let {} = {};\n",
-                        dest, uniform_name
-                    ));
+                    out.push_str(&format!("    let {} = {};\n", dest, uniform_name));
                 }
                 vars.push(dest.clone());
             }

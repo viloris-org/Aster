@@ -179,6 +179,21 @@ impl Quat {
         v + t * self.w + q.cross(t)
     }
 
+    /// Returns the normalized version of this quaternion.
+    pub fn normalized(self) -> Self {
+        let len = (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w).sqrt();
+        if len < f32::EPSILON {
+            return Self::IDENTITY;
+        }
+        let inv = 1.0 / len;
+        Self {
+            x: self.x * inv,
+            y: self.y * inv,
+            z: self.z * inv,
+            w: self.w * inv,
+        }
+    }
+
     /// Inverse of this quaternion.
     pub fn inverse(self) -> Self {
         Self {
@@ -310,7 +325,7 @@ impl Transform {
     pub fn compose(&self, child: &Self) -> Self {
         Self {
             translation: self.transform_point(child.translation),
-            rotation: self.rotation.mul(child.rotation),
+            rotation: self.rotation.mul(child.rotation).normalized(),
             scale: Vec3::new(
                 self.scale.x * child.scale.x,
                 self.scale.y * child.scale.y,

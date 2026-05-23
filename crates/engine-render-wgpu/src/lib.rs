@@ -9,7 +9,7 @@ use engine_core::{EngineError, EngineResult, Handle, HandleAllocator};
 use engine_render::{
     BufferDesc, BufferHandle, BufferUsage, GuiDrawList, GuiTextureId, ImageDesc, ImageFormat,
     ImageHandle, ImageUsage, RenderApi, RenderDevice, RenderFrame, RenderGraph, RenderLight,
-    RenderTarget, RenderTargetDesc, RenderWorld, ViewKind,
+    RenderLightKind, RenderTarget, RenderTargetDesc, RenderWorld, ViewKind,
 };
 use wgpu::util::DeviceExt;
 
@@ -20,6 +20,7 @@ const DEFAULT_WIDTH: u32 = 960;
 const DEFAULT_HEIGHT: u32 = 540;
 const CUBE_INDEX_COUNT: u32 = 36;
 const MAX_FORWARD_LIGHTS: usize = 8;
+const MAX_DIRECTIONAL_LIGHTS: usize = 2;
 const DEFAULT_AMBIENT_LIGHT: [f32; 4] = [0.16, 0.16, 0.16, 1.0];
 
 #[repr(C)]
@@ -158,6 +159,7 @@ pub struct WgpuRenderDevice {
     targets: HashMap<Handle, GpuTarget>,
     default_target: RenderTarget,
     game_target: RenderTarget,
+    preview_target: RenderTarget,
     pipeline: wgpu::RenderPipeline,
     camera_bind_group: wgpu::BindGroup,
     camera_uniform: wgpu::Buffer,
@@ -202,6 +204,7 @@ impl std::fmt::Debug for WgpuRenderDevice {
             .field("adapter", &self.adapter.get_info().name)
             .field("default_target", &self.default_target)
             .field("game_target", &self.game_target)
+            .field("preview_target", &self.preview_target)
             .field("image_count", &self.images.len())
             .field("buffer_count", &self.buffers.len())
             .field("target_count", &self.targets.len())
@@ -473,6 +476,19 @@ impl WgpuRenderDevice {
         self.game_target.size()
     }
 
+    /// Returns a reference to the preview offscreen render target's color texture view.
+    pub fn preview_target_view(&self) -> &wgpu::TextureView {
+        self.targets
+            .get(&self.preview_target.handle)
+            .map(|t| &t.color_view)
+            .expect("preview target exists")
+    }
+
+    /// Returns the pixel dimensions of the preview offscreen render target.
+    pub fn preview_target_size(&self) -> (u32, u32) {
+        self.preview_target.size()
+    }
+
     /// Prepares instance buffer from mesh batches for rendering.
     fn prepare_render_batches(&mut self, world: &RenderWorld) -> Vec<(String, u32)> {
         let batches = mesh_batches_from_world(world);
@@ -503,7 +519,9 @@ impl WgpuRenderDevice {
     /// Use this when the host composites the result into its own UI (e.g., egui).
     pub fn render_world_offscreen(&mut self, world: &RenderWorld) -> EngineResult<()> {
         let batches = self.prepare_render_batches(world);
-        let uniform = camera_uniform_from_world(world);
+        let (tw, th) = self.default_target.size();
+        let aspect = tw as f32 / th.max(1) as f32;
+        let uniform = camera_uniform_from_world(world, aspect);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
         let lighting = lighting_uniform_from_world(world);
@@ -550,7 +568,9 @@ impl WgpuRenderDevice {
     /// Use this when the host composites the game view result into its own UI (e.g., egui).
     pub fn render_world_offscreen_game(&mut self, world: &RenderWorld) -> EngineResult<()> {
         let batches = self.prepare_render_batches(world);
-        let uniform = camera_uniform_from_world(world);
+        let (tw, th) = self.game_target.size();
+        let aspect = tw as f32 / th.max(1) as f32;
+        let uniform = camera_uniform_from_world(world, aspect);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
         let lighting = lighting_uniform_from_world(world);
@@ -565,6 +585,53 @@ impl WgpuRenderDevice {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("aster game offscreen render world encoder"),
+            });
+        encode_batched_forward_pass(
+            &mut encoder,
+            &target.color_view,
+            target.depth_view.as_ref(),
+            &self.pipeline,
+            &self.camera_bind_group,
+            &self.mesh_cache,
+            &self.vertex_buffer,
+            &self.index_buffer,
+            &self.instance_buffer,
+            &batches,
+        );
+        encode_grid_pass(
+            &mut encoder,
+            &target.color_view,
+            target.depth_view.as_ref(),
+            &self.grid_pipeline,
+            &self.grid_bind_group,
+            &self.grid_vertex_buffer,
+            self.grid_vertex_count,
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+        self.submitted_worlds = self.submitted_worlds.saturating_add(1);
+        Ok(())
+    }
+
+    /// Renders a render world to the preview offscreen target.
+    pub fn render_world_offscreen_preview(&mut self, world: &RenderWorld) -> EngineResult<()> {
+        let batches = self.prepare_render_batches(world);
+        let (tw, th) = self.preview_target.size();
+        let aspect = tw as f32 / th.max(1) as f32;
+        let uniform = camera_uniform_from_world(world, aspect);
+        self.queue
+            .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
+        let lighting = lighting_uniform_from_world(world);
+        self.queue
+            .write_buffer(&self.lighting_uniform, 0, bytemuck::bytes_of(&lighting));
+
+        let target = self
+            .targets
+            .get(&self.preview_target.handle)
+            .ok_or_else(|| EngineError::invalid_handle("preview wgpu target is missing"))?;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("aster preview offscreen render world encoder"),
             });
         encode_batched_forward_pass(
             &mut encoder,
@@ -627,6 +694,19 @@ impl WgpuRenderDevice {
                 samples: 1,
                 kind: ViewKind::GameView,
                 label: Some("aster game offscreen target"),
+            },
+        )?;
+        let preview_target = create_target(
+            &device,
+            &mut target_allocator,
+            RenderTargetDesc {
+                width: 320,
+                height: 180,
+                color_format: format,
+                with_depth: true,
+                samples: 1,
+                kind: ViewKind::Preview,
+                label: Some("aster camera preview offscreen target"),
             },
         )?;
 
@@ -890,12 +970,11 @@ impl WgpuRenderDevice {
                 resource: camera_uniform.as_entire_binding(),
             }],
         });
-        let grid_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("aster grid pipeline layout"),
-                bind_group_layouts: &[Some(&grid_bind_group_layout)],
-                immediate_size: 0,
-            });
+        let grid_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("aster grid pipeline layout"),
+            bind_group_layouts: &[Some(&grid_bind_group_layout)],
+            immediate_size: 0,
+        });
         let grid_color_format = surface_state
             .as_ref()
             .map(|(_, config)| config.format)
@@ -974,6 +1053,13 @@ impl WgpuRenderDevice {
         let CreatedTarget(color, color_view, depth, depth_view, default_target) = default_target;
         let CreatedTarget(game_color, game_color_view, game_depth, game_depth_view, game_target) =
             game_target;
+        let CreatedTarget(
+            preview_color,
+            preview_color_view,
+            preview_depth,
+            preview_depth_view,
+            preview_target,
+        ) = preview_target;
         let mut targets = HashMap::new();
         targets.insert(
             default_target.handle,
@@ -995,6 +1081,16 @@ impl WgpuRenderDevice {
                 _desc: game_target.desc.clone(),
             },
         );
+        targets.insert(
+            preview_target.handle,
+            GpuTarget {
+                _color: preview_color,
+                color_view: preview_color_view,
+                _depth: preview_depth,
+                depth_view: preview_depth_view,
+                _desc: preview_target.desc.clone(),
+            },
+        );
 
         let (surface, surface_config) = surface_state
             .map(|(surface, config)| (Some(surface), Some(config)))
@@ -1013,6 +1109,7 @@ impl WgpuRenderDevice {
             targets,
             default_target,
             game_target,
+            preview_target,
             pipeline,
             camera_bind_group,
             camera_uniform,
@@ -1045,6 +1142,102 @@ impl WgpuRenderDevice {
     /// Number of render worlds submitted to this backend.
     pub fn submitted_worlds(&self) -> u64 {
         self.submitted_worlds
+    }
+
+    /// Resizes the default offscreen render target (scene view).
+    ///
+    /// No-op when the target already matches the requested dimensions.
+    pub fn resize_default_target(&mut self, width: u32, height: u32) -> EngineResult<()> {
+        let w = width.max(1);
+        let h = height.max(1);
+        if self.default_target.desc.width == w && self.default_target.desc.height == h {
+            return Ok(());
+        }
+        let old_handle = self.default_target.handle;
+        let desc = RenderTargetDesc {
+            width: w,
+            height: h,
+            ..self.default_target.desc.clone()
+        };
+        let CreatedTarget(color, color_view, depth, depth_view, new_target) =
+            create_target(&self.device, &mut self.target_allocator, desc)?;
+        self.targets.remove(&old_handle);
+        self.targets.insert(
+            new_target.handle,
+            GpuTarget {
+                _color: color,
+                color_view,
+                _depth: depth,
+                depth_view,
+                _desc: new_target.desc.clone(),
+            },
+        );
+        self.default_target = new_target;
+        Ok(())
+    }
+
+    /// Resizes the game offscreen render target.
+    ///
+    /// No-op when the target already matches the requested dimensions.
+    pub fn resize_game_target(&mut self, width: u32, height: u32) -> EngineResult<()> {
+        let w = width.max(1);
+        let h = height.max(1);
+        if self.game_target.desc.width == w && self.game_target.desc.height == h {
+            return Ok(());
+        }
+        let old_handle = self.game_target.handle;
+        let desc = RenderTargetDesc {
+            width: w,
+            height: h,
+            ..self.game_target.desc.clone()
+        };
+        let CreatedTarget(color, color_view, depth, depth_view, new_target) =
+            create_target(&self.device, &mut self.target_allocator, desc)?;
+        self.targets.remove(&old_handle);
+        self.targets.insert(
+            new_target.handle,
+            GpuTarget {
+                _color: color,
+                color_view,
+                _depth: depth,
+                depth_view,
+                _desc: new_target.desc.clone(),
+            },
+        );
+        self.game_target = new_target;
+        Ok(())
+    }
+
+    /// Resizes the preview offscreen render target.
+    ///
+    /// No-op when the target already matches the requested dimensions.
+    pub fn resize_preview_target(&mut self, width: u32, height: u32) -> EngineResult<()> {
+        let w = width.max(1);
+        let h = height.max(1);
+        if self.preview_target.desc.width == w && self.preview_target.desc.height == h {
+            return Ok(());
+        }
+        let old_handle = self.preview_target.handle;
+        let desc = RenderTargetDesc {
+            width: w,
+            height: h,
+            ..self.preview_target.desc.clone()
+        };
+        let CreatedTarget(color, color_view, depth, depth_view, new_target) =
+            create_target(&self.device, &mut self.target_allocator, desc)?;
+        self.targets.remove(&old_handle);
+        self.targets.insert(
+            new_target.handle,
+            GpuTarget {
+                _color: color,
+                color_view,
+                _depth: depth,
+                depth_view,
+                _desc: new_target.desc.clone(),
+            },
+        );
+        self.preview_target = new_target;
+        Ok(())
     }
 
     /// Resizes the configured presentation surface.
@@ -1158,7 +1351,12 @@ impl RenderDevice for WgpuRenderDevice {
         _frame: RenderFrame,
     ) -> EngineResult<()> {
         let batches = self.prepare_render_batches(world);
-        let uniform = camera_uniform_from_world(world);
+        let aspect = self
+            .surface_config
+            .as_ref()
+            .map(|cfg| cfg.width as f32 / cfg.height.max(1) as f32)
+            .unwrap_or(16.0 / 9.0);
+        let uniform = camera_uniform_from_world(world, aspect);
         self.queue
             .write_buffer(&self.camera_uniform, 0, bytemuck::bytes_of(&uniform));
         let lighting = lighting_uniform_from_world(world);
@@ -1336,7 +1534,8 @@ impl RenderDevice for WgpuRenderDevice {
         if let Some(image) = self.images.remove(&handle.raw()) {
             let _ = self.image_allocator.free(handle.raw());
             let frame = self.submitted_worlds;
-            self.destroy_queue.push((frame, DestroyResource::Texture(image._texture)));
+            self.destroy_queue
+                .push((frame, DestroyResource::Texture(image._texture)));
         }
     }
 
@@ -1356,7 +1555,8 @@ impl RenderDevice for WgpuRenderDevice {
         if let Some(buffer) = self.buffers.remove(&handle.raw()) {
             let _ = self.buffer_allocator.free(handle.raw());
             let frame = self.submitted_worlds;
-            self.destroy_queue.push((frame, DestroyResource::Buffer(buffer)));
+            self.destroy_queue
+                .push((frame, DestroyResource::Buffer(buffer)));
         }
     }
 
@@ -1427,9 +1627,8 @@ impl RenderDevice for WgpuRenderDevice {
         // current frame, ensuring GPU command buffers referencing them have
         // completed.
         let threshold = frame_index.saturating_sub(2);
-        self.destroy_queue.retain(|(idx, _resource)| {
-            *idx > threshold
-        });
+        self.destroy_queue
+            .retain(|(idx, _resource)| *idx > threshold);
     }
 }
 
@@ -1677,7 +1876,7 @@ fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffe
     })
 }
 
-fn camera_uniform_from_world(world: &RenderWorld) -> CameraUniform {
+fn camera_uniform_from_world(world: &RenderWorld, aspect: f32) -> CameraUniform {
     let eye = world
         .camera
         .as_ref()
@@ -1703,7 +1902,6 @@ fn camera_uniform_from_world(world: &RenderWorld) -> CameraUniform {
         .as_ref()
         .map(|camera| camera.far)
         .unwrap_or(100.0);
-    let aspect = 16.0 / 9.0;
     let proj = match world.camera.as_ref().map(|camera| camera.projection) {
         Some(engine_render::RenderProjection::Orthographic { vertical_size }) => {
             orthographic_rh(vertical_size.max(0.001), aspect, near, far)
@@ -1721,15 +1919,9 @@ fn lighting_uniform_from_world(world: &RenderWorld) -> LightingUniform {
     let mut uniform = LightingUniform::default();
     let mut count = 0usize;
 
-    for light in &world.lights {
-        if light.intensity <= 0.0 {
-            continue;
-        }
+    for light in select_forward_lights(world) {
         uniform.lights[count] = forward_light_uniform(light);
         count += 1;
-        if count == MAX_FORWARD_LIGHTS {
-            break;
-        }
     }
 
     if count == 0 {
@@ -1746,11 +1938,60 @@ fn lighting_uniform_from_world(world: &RenderWorld) -> LightingUniform {
     uniform
 }
 
+fn select_forward_lights(world: &RenderWorld) -> Vec<&RenderLight> {
+    let mut selected = Vec::with_capacity(MAX_FORWARD_LIGHTS);
+    let mut directional: Vec<&RenderLight> = world
+        .lights
+        .iter()
+        .filter(|light| light.kind == RenderLightKind::Directional && light.intensity > 0.0)
+        .collect();
+    directional.sort_by(|a, b| b.intensity.total_cmp(&a.intensity));
+
+    selected.extend(directional.into_iter().take(MAX_DIRECTIONAL_LIGHTS));
+
+    let remaining = MAX_FORWARD_LIGHTS.saturating_sub(selected.len());
+    if remaining == 0 {
+        return selected;
+    }
+
+    let mut local: Vec<(&RenderLight, f32)> = world
+        .lights
+        .iter()
+        .filter(|light| light.kind != RenderLightKind::Directional)
+        .filter_map(|light| local_light_score(world, light).map(|score| (light, score)))
+        .collect();
+    local.sort_by(|(_, a), (_, b)| b.total_cmp(a));
+
+    selected.extend(local.into_iter().take(remaining).map(|(light, _)| light));
+    selected
+}
+
+fn local_light_score(world: &RenderWorld, light: &RenderLight) -> Option<f32> {
+    if light.intensity <= 0.0 || light.range <= 0.0 {
+        return None;
+    }
+
+    let range = light.range.max(0.001);
+    let camera = world.camera.as_ref();
+    let Some(camera) = camera else {
+        return Some(light.intensity * range);
+    };
+
+    let to_light = light.transform.translation - camera.transform.translation;
+    let distance = to_light.length();
+    if distance - range > camera.far {
+        return None;
+    }
+
+    let distance_sq = to_light.length_squared().max(1.0);
+    Some(light.intensity * range * range / distance_sq)
+}
+
 fn forward_light_uniform(light: &RenderLight) -> ForwardLightUniform {
-    let light_type = match light.kind.as_str() {
-        "point" => 1.0,
-        "spot" => 2.0,
-        _ => 0.0,
+    let light_type = match light.kind {
+        RenderLightKind::Point => 1.0,
+        RenderLightKind::Spot => 2.0,
+        RenderLightKind::Directional => 0.0,
     };
     let direction = rotate_vec3(
         light.transform.rotation,
@@ -2427,7 +2668,7 @@ mod tests {
                 rotation: engine_core::math::Quat::IDENTITY,
                 scale: engine_core::math::Vec3::ONE,
             },
-            kind: "point".to_string(),
+            kind: RenderLightKind::Point,
             color: engine_core::math::Vec3::new(0.5, 0.75, 1.0),
             intensity: 3.0,
             range: 12.0,
@@ -2455,6 +2696,97 @@ mod tests {
         assert_eq!(uniform.params[0], 1);
         assert_eq!(uniform.lights[0].position_type[3], 0.0);
         assert_eq!(uniform.lights[0].color_intensity[3], 1.0);
+    }
+
+    #[test]
+    fn selects_directional_budget_then_highest_scored_local_lights() {
+        let camera = engine_render::RenderCamera {
+            object: engine_core::EntityId::from_u128(1),
+            transform: engine_core::math::Transform::IDENTITY,
+            projection: engine_render::RenderProjection::Perspective,
+            vertical_fov_degrees: 60.0,
+            near: 0.1,
+            far: 50.0,
+        };
+        let mut lights = vec![
+            test_light(
+                2,
+                RenderLightKind::Directional,
+                engine_core::math::Vec3::ZERO,
+                1.0,
+                1.0,
+            ),
+            test_light(
+                3,
+                RenderLightKind::Directional,
+                engine_core::math::Vec3::ZERO,
+                5.0,
+                1.0,
+            ),
+            test_light(
+                4,
+                RenderLightKind::Directional,
+                engine_core::math::Vec3::ZERO,
+                3.0,
+                1.0,
+            ),
+            test_light(
+                5,
+                RenderLightKind::Point,
+                engine_core::math::Vec3::new(100.0, 0.0, 0.0),
+                100.0,
+                4.0,
+            ),
+        ];
+        for index in 0..10 {
+            lights.push(test_light(
+                10 + index,
+                RenderLightKind::Point,
+                engine_core::math::Vec3::new(2.0 + index as f32, 0.0, 0.0),
+                1.0,
+                5.0,
+            ));
+        }
+        let world = RenderWorld {
+            camera: Some(camera),
+            objects: Vec::new(),
+            lights,
+            particles: Vec::new(),
+        };
+
+        let selected = select_forward_lights(&world);
+
+        assert_eq!(selected.len(), MAX_FORWARD_LIGHTS);
+        assert_eq!(selected[0].object, engine_core::EntityId::from_u128(3));
+        assert_eq!(selected[1].object, engine_core::EntityId::from_u128(4));
+        assert!(selected
+            .iter()
+            .all(|light| light.object != engine_core::EntityId::from_u128(5)));
+        assert!(selected
+            .iter()
+            .any(|light| light.object == engine_core::EntityId::from_u128(10)));
+    }
+
+    fn test_light(
+        id: u128,
+        kind: RenderLightKind,
+        translation: engine_core::math::Vec3,
+        intensity: f32,
+        range: f32,
+    ) -> RenderLight {
+        RenderLight {
+            object: engine_core::EntityId::from_u128(id),
+            transform: engine_core::math::Transform {
+                translation,
+                rotation: engine_core::math::Quat::IDENTITY,
+                scale: engine_core::math::Vec3::ONE,
+            },
+            kind,
+            color: engine_core::math::Vec3::ONE,
+            intensity,
+            range,
+            spot_angle: 45.0,
+        }
     }
 
     #[test]

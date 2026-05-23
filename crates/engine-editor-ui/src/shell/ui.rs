@@ -6,7 +6,9 @@
 
 use egui::{Frame, Margin};
 
-use super::operations::command::{apply_visuals, handle_command_shortcuts};
+use super::operations::command::{
+    apply_visuals, handle_command_shortcuts, handle_transform_tool_shortcuts,
+};
 use super::panels::{
     draw_bottom_dock, draw_center_dock, draw_close_project_dialog, draw_command_palette,
     draw_hierarchy, draw_inspector, draw_menu_bar, draw_project_panel, draw_script_editor,
@@ -29,6 +31,7 @@ pub fn draw_shell(
     let tr = Translations::load(shell.preferences().locale);
     apply_visuals(ctx, &pal);
     handle_command_shortcuts(ctx, shell, ui_state, &tr);
+    handle_transform_tool_shortcuts(ctx, ui_state);
 
     let close = false;
 
@@ -129,4 +132,4 @@ pub fn draw_shell(
 }
 
 // Re-export build_editor_render_world (used by other modules)
-pub use super::panels::viewport::build_editor_render_world;
+pub use super::panels::viewport::{build_camera_preview_render_world, build_editor_render_world};

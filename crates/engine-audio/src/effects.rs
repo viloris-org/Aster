@@ -162,7 +162,12 @@ fn low_shelf_coeffs(cutoff: f32, gain_db: f32, sample_rate: f32) -> (f32, f32, f
 }
 
 /// Computes peaking biquad coefficients.
-fn peaking_coeffs(center: f32, gain_db: f32, q: f32, sample_rate: f32) -> (f32, f32, f32, f32, f32) {
+fn peaking_coeffs(
+    center: f32,
+    gain_db: f32,
+    q: f32,
+    sample_rate: f32,
+) -> (f32, f32, f32, f32, f32) {
     let w0 = 2.0 * std::f32::consts::PI * center / sample_rate;
     let a = 10.0_f32.powf(gain_db / 40.0);
     let cos_w0 = w0.cos();
@@ -246,20 +251,20 @@ impl AudioEffect for EqEffect {
             let x = *sample;
 
             // Low shelf
-            let y_low = coeffs.low_b0 * x + coeffs.low_b1 * self.low_x1 + coeffs.low_b2 * self.low_x2
-                - coeffs.low_a1 * self.low_y1
-                - coeffs.low_a2 * self.low_y2;
+            let y_low =
+                coeffs.low_b0 * x + coeffs.low_b1 * self.low_x1 + coeffs.low_b2 * self.low_x2
+                    - coeffs.low_a1 * self.low_y1
+                    - coeffs.low_a2 * self.low_y2;
             self.low_x2 = self.low_x1;
             self.low_x1 = x;
             self.low_y2 = self.low_y1;
             self.low_y1 = y_low;
 
             // Peaking
-            let y_mid = coeffs.mid_b0 * y_low
-                + coeffs.mid_b1 * self.mid_x1
-                + coeffs.mid_b2 * self.mid_x2
-                - coeffs.mid_a1 * self.mid_y1
-                - coeffs.mid_a2 * self.mid_y2;
+            let y_mid =
+                coeffs.mid_b0 * y_low + coeffs.mid_b1 * self.mid_x1 + coeffs.mid_b2 * self.mid_x2
+                    - coeffs.mid_a1 * self.mid_y1
+                    - coeffs.mid_a2 * self.mid_y2;
             self.mid_x2 = self.mid_x1;
             self.mid_x1 = y_low;
             self.mid_y2 = self.mid_y1;
@@ -326,7 +331,11 @@ impl AudioEffect for CompressorEffect {
         let release_coeff = (-1.0 / (self.release * 44100.0 / samples.len() as f32)).exp();
         for sample in samples.iter_mut() {
             let abs = sample.abs();
-            let coeff = if abs > self.envelope { attack_coeff } else { release_coeff };
+            let coeff = if abs > self.envelope {
+                attack_coeff
+            } else {
+                release_coeff
+            };
             self.envelope = coeff * self.envelope + (1.0 - coeff) * abs;
             if self.envelope > self.threshold {
                 let gain = self.threshold + (self.envelope - self.threshold) / self.ratio;

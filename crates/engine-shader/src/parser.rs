@@ -270,8 +270,14 @@ impl<'a> Parser<'a> {
             Some(ShaderToken::Keyword(ShaderKeyword::Uniform))
             | Some(ShaderToken::Keyword(ShaderKeyword::Varying))
             | Some(ShaderToken::Keyword(ShaderKeyword::Const)) => {
-                let is_uniform = matches!(self.peek(), Some(ShaderToken::Keyword(ShaderKeyword::Uniform)));
-                let is_varying = matches!(self.peek(), Some(ShaderToken::Keyword(ShaderKeyword::Varying)));
+                let is_uniform = matches!(
+                    self.peek(),
+                    Some(ShaderToken::Keyword(ShaderKeyword::Uniform))
+                );
+                let is_varying = matches!(
+                    self.peek(),
+                    Some(ShaderToken::Keyword(ShaderKeyword::Varying))
+                );
                 self.advance();
                 let name = self.expect_ident()?;
                 self.expect_symbol(':')?;
@@ -456,7 +462,15 @@ impl<'a> Parser<'a> {
                 break;
             }
             self.advance();
-            if matches!(op.0, BinaryOp::Le | BinaryOp::Ge | BinaryOp::Eq | BinaryOp::Neq | BinaryOp::And | BinaryOp::Or) {
+            if matches!(
+                op.0,
+                BinaryOp::Le
+                    | BinaryOp::Ge
+                    | BinaryOp::Eq
+                    | BinaryOp::Neq
+                    | BinaryOp::And
+                    | BinaryOp::Or
+            ) {
                 self.advance();
             }
             let right = self.parse_binary(op.1 + 1)?;

@@ -19,7 +19,8 @@ pub struct TransformHierarchy {
 
 impl TransformHierarchy {
     /// Sets or replaces the local transform for an entity.
-    pub fn set_local(&mut self, entity: Entity, transform: Transform) {
+    pub fn set_local(&mut self, entity: Entity, mut transform: Transform) {
+        transform.rotation = transform.rotation.normalized();
         self.locals.insert(entity, transform);
         self.world_cache.remove(&entity);
         self.mark_dirty(entity);
@@ -90,7 +91,10 @@ impl TransformHierarchy {
 
     /// Returns a reference to the children list (zero-allocation read path).
     pub fn children_ref(&self, parent: Entity) -> &[Entity] {
-        self.children.get(&parent).map(|v| v.as_slice()).unwrap_or(&[])
+        self.children
+            .get(&parent)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Returns root entities in sibling order.

@@ -825,10 +825,8 @@ impl AssetDatabase {
 
         if !canonical.starts_with(&canonical_root) {
             return Err(AssetError::NotFound {
-                diagnostic: AssetDiagnostic::new(
-                    "resource reference escapes its root directory",
-                )
-                .with_path(&resolved),
+                diagnostic: AssetDiagnostic::new("resource reference escapes its root directory")
+                    .with_path(&resolved),
             });
         }
 

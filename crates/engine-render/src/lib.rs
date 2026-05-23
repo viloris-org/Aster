@@ -101,7 +101,7 @@ pub struct RenderLight {
     /// World transform.
     pub transform: Transform,
     /// Light kind.
-    pub kind: String,
+    pub kind: RenderLightKind,
     /// RGB light color.
     pub color: engine_core::math::Vec3,
     /// Light intensity.
@@ -110,6 +110,28 @@ pub struct RenderLight {
     pub range: f32,
     /// Spot cone angle in degrees for spot lights.
     pub spot_angle: f32,
+}
+
+/// Light category used by render backends.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderLightKind {
+    /// Directional light with no position or range attenuation.
+    Directional,
+    /// Point light attenuated by range.
+    Point,
+    /// Spot light attenuated by range and cone angle.
+    Spot,
+}
+
+impl RenderLightKind {
+    /// Converts a serialized ECS light kind into a render light kind.
+    pub fn from_component_kind(kind: &str) -> Self {
+        match kind {
+            "point" => Self::Point,
+            "spot" => Self::Spot,
+            _ => Self::Directional,
+        }
+    }
 }
 
 /// Particle draw data extracted from a scene for rendering.
@@ -201,7 +223,7 @@ impl RenderWorld {
                         world.lights.push(RenderLight {
                             object: obj.id,
                             transform,
-                            kind: light.kind.clone(),
+                            kind: RenderLightKind::from_component_kind(&light.kind),
                             color: light.color,
                             intensity: light.intensity,
                             range: light.range,
@@ -304,19 +326,12 @@ pub trait RenderDevice {
     fn flush_destroy_queue(&mut self, frame_index: u64);
 
     /// Draws a batch of 2D quads.
-    fn draw_2d_batch(
-        &mut self,
-        _vertices: &[[f32; 8]],
-        _texture: ImageHandle,
-    ) -> EngineResult<()> {
+    fn draw_2d_batch(&mut self, _vertices: &[[f32; 8]], _texture: ImageHandle) -> EngineResult<()> {
         Ok(())
     }
 
     /// Uploads bone matrices for GPU skinning.
-    fn upload_bone_matrices(
-        &mut self,
-        _matrices: &[[f32; 16]],
-    ) -> EngineResult<BufferHandle> {
+    fn upload_bone_matrices(&mut self, _matrices: &[[f32; 16]]) -> EngineResult<BufferHandle> {
         Ok(BufferHandle(engine_core::Handle::new(
             0,
             engine_core::Generation::FIRST,
@@ -565,6 +580,26 @@ mod tests {
         assert_eq!(cube.material, "debug/default");
         assert_eq!(sphere.material, "debug/default");
         assert_ne!(sphere.object.as_u128(), 0);
+    }
+
+    #[test]
+    fn maps_component_light_kind_to_render_kind() {
+        assert_eq!(
+            RenderLightKind::from_component_kind("directional"),
+            RenderLightKind::Directional
+        );
+        assert_eq!(
+            RenderLightKind::from_component_kind("point"),
+            RenderLightKind::Point
+        );
+        assert_eq!(
+            RenderLightKind::from_component_kind("spot"),
+            RenderLightKind::Spot
+        );
+        assert_eq!(
+            RenderLightKind::from_component_kind("invalid"),
+            RenderLightKind::Directional
+        );
     }
 
     #[test]

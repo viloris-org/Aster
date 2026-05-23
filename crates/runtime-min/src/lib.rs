@@ -1584,7 +1584,7 @@ pub fn extract_render_world(scene: &Scene) -> RenderWorld {
                     world.lights.push(engine_render::RenderLight {
                         object: object.id,
                         transform,
-                        kind: light.kind.clone(),
+                        kind: engine_render::RenderLightKind::from_component_kind(&light.kind),
                         color: light.color,
                         intensity: light.intensity,
                         range: light.range,

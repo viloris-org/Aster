@@ -45,21 +45,23 @@ impl SandboxedFileSystem {
     /// Returns an error if `root` does not exist or cannot be canonicalized.
     pub fn new(root: impl Into<PathBuf>) -> EngineResult<Self> {
         let root_path: PathBuf = root.into();
-        let root = root_path.canonicalize().map_err(|source| {
-            EngineError::Filesystem {
+        let root = root_path
+            .canonicalize()
+            .map_err(|source| EngineError::Filesystem {
                 path: root_path.clone(),
                 source,
-            }
-        })?;
+            })?;
         Ok(Self { root })
     }
 
     /// Validates that `path` is within the sandbox root.
     fn validate_path(&self, path: &Path) -> EngineResult<PathBuf> {
-        let canonical = path.canonicalize().map_err(|source| EngineError::Filesystem {
-            path: PathBuf::from(path),
-            source,
-        })?;
+        let canonical = path
+            .canonicalize()
+            .map_err(|source| EngineError::Filesystem {
+                path: PathBuf::from(path),
+                source,
+            })?;
         if !canonical.starts_with(&self.root) {
             return Err(EngineError::Filesystem {
                 path: PathBuf::from(path),

@@ -1,6 +1,9 @@
 //! Inspector panel for the editor shell.
 
-use egui::{DragValue, FontId, RichText, Vec2};
+use egui::{
+    Align2, Color32, CornerRadius, DragValue, FontId, Rect, RichText, Sense, Stroke, StrokeKind,
+    Vec2,
+};
 
 use super::super::operations::command::push_error;
 use super::super::operations::scene_ops::{
@@ -12,12 +15,14 @@ use super::super::widgets::component_ui::component_header;
 use super::super::widgets::icons::ui as icon;
 use super::super::widgets::layout::empty_view;
 use super::super::widgets::property_editors::*;
+use super::viewport::build_camera_preview_render_world;
 use crate::EditorShell;
 use engine_assets::{ResourceKind, ResourceMetaFormat};
 use engine_core::math::{Quat, Vec3 as EngineVec3};
 use engine_ecs::{ComponentData, ComponentFieldSchema, ComponentSchema, ComponentSchemaRegistry};
 use engine_editor::UndoCommand;
 use engine_i18n::Translations;
+use engine_render::{RenderTargetDesc, ViewKind};
 /// Renders the inspector panel with component properties.
 
 pub fn draw_inspector(
@@ -31,6 +36,13 @@ pub fn draw_inspector(
         empty_view(ui, tr.tr("inspector_select_hint"), pal);
         return;
     };
+    if selected_entity_has_camera(shell, selected_id) {
+        draw_camera_preview(ui, shell, ui_state, pal, tr, selected_id);
+        ui.add_space(8.0);
+    } else {
+        ui_state.camera_preview_target = None;
+        ui_state.camera_preview_texture = None;
+    }
     let before = ui_state
         .inspector_drag_before
         .clone()
@@ -271,6 +283,83 @@ pub fn draw_inspector(
     if let Some(command) = undo_to_push {
         shell.push_undo(command);
     }
+}
+
+fn selected_entity_has_camera(shell: &EditorShell, selected_id: engine_core::EntityId) -> bool {
+    shell
+        .project()
+        .and_then(|project| {
+            let entity = project.scene.find_by_id(selected_id)?;
+            project.scene.components(entity)
+        })
+        .map(|components| {
+            components
+                .iter()
+                .any(|component| matches!(component, ComponentData::Camera(_)))
+        })
+        .unwrap_or(false)
+}
+
+fn draw_camera_preview(
+    ui: &mut egui::Ui,
+    shell: &EditorShell,
+    ui_state: &mut ShellUiState,
+    pal: &InfernuxPalette,
+    tr: &Translations,
+    camera_id: engine_core::EntityId,
+) {
+    ui.label(
+        RichText::new(tr.tr("inspector_camera_preview"))
+            .size(12.0)
+            .strong()
+            .color(pal.text),
+    );
+    let width = ui.available_width().max(120.0);
+    let height = (width * 9.0 / 16.0).clamp(90.0, 180.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(2), pal.viewport_bg);
+    ui.painter().rect_stroke(
+        rect,
+        CornerRadius::same(2),
+        Stroke::new(1.0, pal.border),
+        StrokeKind::Inside,
+    );
+
+    let world = build_camera_preview_render_world(shell, camera_id);
+    ui_state.camera_preview_target = Some(super::super::types::ViewportTargetState {
+        desc: RenderTargetDesc::view(
+            rect.width().round().max(1.0) as u32,
+            rect.height().round().max(1.0) as u32,
+            ViewKind::Preview,
+        ),
+        world,
+    });
+
+    if let Some(target) = &ui_state.camera_preview_target {
+        if !target.world.is_visible() {
+            paint_camera_preview_hint(ui, rect, tr.tr("viewport_hint_empty"), pal);
+            return;
+        }
+    }
+
+    if let Some(texture) = &ui_state.camera_preview_texture {
+        let texture_id = egui::TextureId::User(texture.id);
+        let uv = Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+        ui.painter().image(texture_id, rect, uv, Color32::WHITE);
+    } else {
+        paint_camera_preview_hint(ui, rect, tr.tr("inspector_camera_preview_pending"), pal);
+    }
+}
+
+fn paint_camera_preview_hint(ui: &mut egui::Ui, rect: Rect, text: &str, pal: &InfernuxPalette) {
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(11.0),
+        pal.text_dim,
+    );
 }
 
 fn draw_component_editor(

@@ -135,9 +135,7 @@ impl InputState {
 
     /// Returns whether a gamepad button is currently held.
     pub fn gamepad_button_down(&self, button: GamepadButton) -> bool {
-        self.gamepad
-            .as_ref()
-            .is_some_and(|g| g.button_down(button))
+        self.gamepad.as_ref().is_some_and(|g| g.button_down(button))
     }
 
     /// Returns all keys pressed this frame.
