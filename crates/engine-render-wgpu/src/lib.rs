@@ -497,10 +497,10 @@ impl WgpuRenderDevice {
             self.instance_capacity = total_instances.next_power_of_two();
             self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
         }
-        let all_instances: Vec<Instance> = batches
-            .iter()
-            .flat_map(|(_, instances)| instances.iter().copied())
-            .collect();
+        let mut all_instances = Vec::with_capacity(total_instances);
+        for (_, instances) in &batches {
+            all_instances.extend_from_slice(instances);
+        }
         if !all_instances.is_empty() {
             self.queue.write_buffer(
                 &self.instance_buffer,
@@ -2049,14 +2049,15 @@ fn mesh_name(mesh: &DebugMesh) -> String {
 
 /// Groups render objects by mesh name for batched instanced rendering.
 fn mesh_batches_from_world(world: &RenderWorld) -> Vec<(String, Vec<Instance>)> {
-    let mut batches: HashMap<String, Vec<Instance>> = HashMap::new();
+    let batch_capacity = (world.objects.len() + usize::from(!world.particles.is_empty())).min(32);
+    let mut batches: HashMap<&str, Vec<Instance>> = HashMap::with_capacity(batch_capacity);
     for object in &world.objects {
         let color = color_for_material(&object.material);
         let t = object.transform;
         let mesh = if object.mesh.is_empty() {
-            "debug/cube".to_string()
+            "debug/cube"
         } else {
-            object.mesh.clone()
+            object.mesh.as_str()
         };
         batches.entry(mesh).or_default().push(Instance {
             offset: [t.translation.x, t.translation.y, t.translation.z],
@@ -2086,9 +2087,15 @@ fn mesh_batches_from_world(world: &RenderWorld) -> Vec<(String, Vec<Instance>)> 
                 }
             })
             .collect();
-        batches.insert("debug/plane".to_string(), particle_instances);
+        batches
+            .entry("debug/plane")
+            .or_default()
+            .extend(particle_instances);
     }
-    batches.into_iter().collect()
+    batches
+        .into_iter()
+        .map(|(mesh, instances)| (mesh.to_owned(), instances))
+        .collect()
 }
 
 fn color_for_material(material: &str) -> [f32; 4] {
@@ -2618,6 +2625,61 @@ mod tests {
         assert_eq!(uniform.lights[0].position_type, [1.0, 2.0, 3.0, 1.0]);
         assert_eq!(uniform.lights[0].color_intensity, [0.5, 0.75, 1.0, 3.0]);
         assert_eq!(uniform.lights[0].direction_range[3], 12.0);
+    }
+
+    #[test]
+    fn mesh_batches_group_objects_without_per_object_mesh_names() {
+        let world = RenderWorld {
+            camera: None,
+            objects: vec![
+                test_render_object(1, "debug/cube"),
+                test_render_object(2, "debug/cube"),
+                test_render_object(3, "debug/sphere"),
+            ],
+            lights: Vec::new(),
+            particles: Vec::new(),
+        };
+
+        let batches = mesh_batches_from_world(&world);
+
+        assert_eq!(batch_len(&batches, "debug/cube"), Some(2));
+        assert_eq!(batch_len(&batches, "debug/sphere"), Some(1));
+        assert_eq!(batches.len(), 2);
+    }
+
+    #[test]
+    fn mesh_batches_merge_particles_with_plane_objects() {
+        let world = RenderWorld {
+            camera: None,
+            objects: vec![test_render_object(1, "debug/plane")],
+            lights: Vec::new(),
+            particles: vec![engine_render::RenderParticle {
+                object: engine_core::EntityId::from_u128(2),
+                transform: engine_core::math::Transform::IDENTITY,
+                color: [1.0, 1.0, 1.0, 1.0],
+                age_fraction: 0.5,
+            }],
+        };
+
+        let batches = mesh_batches_from_world(&world);
+
+        assert_eq!(batch_len(&batches, "debug/plane"), Some(2));
+    }
+
+    fn batch_len(batches: &[(String, Vec<Instance>)], mesh: &str) -> Option<usize> {
+        batches
+            .iter()
+            .find(|(name, _)| name == mesh)
+            .map(|(_, instances)| instances.len())
+    }
+
+    fn test_render_object(id: u128, mesh: &str) -> engine_render::RenderObject {
+        engine_render::RenderObject {
+            object: engine_core::EntityId::from_u128(id),
+            transform: engine_core::math::Transform::IDENTITY,
+            mesh: mesh.to_owned(),
+            material: "debug/material".to_owned(),
+        }
     }
 
     #[test]
