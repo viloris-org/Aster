@@ -706,6 +706,49 @@ impl RhaiScriptBackend {
         self.ast_cache.clear();
     }
 
+    /// Compiles a Rhai script from an in-memory source string.
+    ///
+    /// The `logical_path` is used as a cache key and for error messages.
+    /// No filesystem access is performed. If a script with the same path
+    /// is already cached, it is replaced.
+    pub fn compile_source(
+        &mut self,
+        logical_path: &std::path::Path,
+        source: &str,
+    ) -> EngineResult<()> {
+        let ast = self.engine.compile(source).map_err(|e| {
+            engine_core::EngineError::other(format!("{}: {}", logical_path.display(), e))
+        })?;
+        self.ast_cache.insert(logical_path.to_path_buf(), ast);
+        Ok(())
+    }
+
+    /// Creates or overwrites a script file on disk and compiles it.
+    ///
+    /// Writes to `<asset_root>/<relative_path>`, creating parent directories
+    /// as needed, then compiles the source. Returns the full path to the
+    /// created file.
+    pub fn create_script(
+        &mut self,
+        asset_root: &std::path::Path,
+        relative_path: &std::path::Path,
+        source: &str,
+    ) -> EngineResult<std::path::PathBuf> {
+        let full_path = asset_root.join(relative_path);
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| engine_core::EngineError::Filesystem {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
+        }
+        std::fs::write(&full_path, source).map_err(|e| engine_core::EngineError::Filesystem {
+            path: full_path.clone(),
+            source: e,
+        })?;
+        self.load_script(&full_path)?;
+        Ok(full_path)
+    }
+
     /// Runs the `on_start()` lifecycle function for an entity's script.
     ///
     /// If the script defines an `on_start()` function, it will be called.
@@ -2315,6 +2358,100 @@ fn on_start() {
         // We just verify the entry structure is correct
         assert_eq!(entry.source.subsystem, "script");
         assert_eq!(entry.source.file, Some(script_path.clone()));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn compile_source_compiles_from_memory_string() {
+        let logical_path = std::path::PathBuf::from("memory://test.rhai");
+
+        let mut backend = RhaiScriptBackend::new();
+        backend
+            .compile_source(&logical_path, "let x = 42;")
+            .unwrap();
+
+        assert_eq!(backend.ast_cache_size(), 1);
+        assert!(backend.ast_cache.contains_key(&logical_path));
+    }
+
+    #[test]
+    fn compile_source_replaces_existing_cache_entry() {
+        let logical_path = std::path::PathBuf::from("memory://replace.rhai");
+
+        let mut backend = RhaiScriptBackend::new();
+        backend.compile_source(&logical_path, "let x = 1;").unwrap();
+        backend.compile_source(&logical_path, "let y = 2;").unwrap();
+
+        assert_eq!(backend.ast_cache_size(), 1);
+
+        // Run a lifecycle function to verify the new source is active
+        backend
+            .compile_source(
+                &logical_path,
+                r#"
+let value = 99;
+fn on_start() { value = 100; }
+"#,
+            )
+            .unwrap();
+
+        backend.run_start("entity_replace", &logical_path).unwrap();
+        let scope_key = ("entity_replace".to_string(), logical_path.clone());
+        let scope = backend.entity_scopes.get(&scope_key).unwrap();
+        let value: i64 = scope.get_value("value").unwrap();
+        assert_eq!(value, 100);
+    }
+
+    #[test]
+    fn compile_source_reports_syntax_errors() {
+        let logical_path = std::path::PathBuf::from("memory://bad.rhai");
+
+        let mut backend = RhaiScriptBackend::new();
+        let result = backend.compile_source(&logical_path, "let x = ;");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("bad.rhai"));
+    }
+
+    #[test]
+    fn create_script_writes_file_and_compiles() {
+        let dir = std::env::temp_dir().join("aster_test_create_script");
+        std::fs::create_dir_all(&dir).unwrap();
+        let relative = std::path::PathBuf::from("scripts/ai_generated.rhai");
+
+        let mut backend = RhaiScriptBackend::new();
+        let full_path = backend
+            .create_script(
+                &dir,
+                &relative,
+                r#"
+let created = true;
+fn on_start() {}
+"#,
+            )
+            .unwrap();
+
+        assert!(full_path.exists());
+        assert_eq!(backend.ast_cache_size(), 1);
+        assert!(backend.ast_cache.contains_key(&full_path));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn create_script_creates_parent_directories() {
+        let dir = std::env::temp_dir().join("aster_test_create_script_nested");
+        let relative = std::path::PathBuf::from("deep/nested/path/script.rhai");
+
+        let mut backend = RhaiScriptBackend::new();
+        let full_path = backend
+            .create_script(&dir, &relative, "fn on_start() {}")
+            .unwrap();
+
+        assert!(full_path.exists());
+        assert!(full_path.parent().unwrap().exists());
 
         std::fs::remove_dir_all(&dir).ok();
     }
