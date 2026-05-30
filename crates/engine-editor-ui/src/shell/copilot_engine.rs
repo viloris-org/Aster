@@ -59,8 +59,13 @@ pub fn process_copilot_prompt(
     let project_ctx = engine_editor::ProjectContext {
         manifest: project_ui.manifest.clone(),
         scene: scene_clone,
-        asset_db: project_ui.database.clone(),
-        project_root: project_ui.root.clone(),
+        database: project_ui.database.clone(),
+        registry: project_ui.registry.clone(),
+        assets: project_ui.assets.clone(),
+        asset_imports: project_ui.asset_imports.clone(),
+        scene_dirty: project_ui.scene_dirty,
+        root: project_ui.root.clone(),
+        scene_path: project_ui.scene_path.clone(),
     };
 
     let mut session = AgentSession::new(project_ctx)?;
@@ -152,8 +157,13 @@ pub fn apply_approved_operations(
     let project_ctx = engine_editor::ProjectContext {
         manifest: project_ui.manifest.clone(),
         scene: scene_clone,
-        asset_db: project_ui.database.clone(),
-        project_root: project_ui.root.clone(),
+        database: project_ui.database.clone(),
+        registry: project_ui.registry.clone(),
+        assets: project_ui.assets.clone(),
+        asset_imports: project_ui.asset_imports.clone(),
+        scene_dirty: project_ui.scene_dirty,
+        root: project_ui.root.clone(),
+        scene_path: project_ui.scene_path.clone(),
     };
 
     let mut session = AgentSession::new(project_ctx)?;

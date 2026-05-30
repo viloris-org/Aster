@@ -226,7 +226,7 @@ impl AgentSession {
         engine_editor::register_ai_commands(&mut commands);
 
         let mut script_backend = engine_script_rhai::RhaiScriptBackend::new();
-        let asset_root = context.project_root.join(&context.manifest.asset_root);
+        let asset_root = context.root.join(&context.manifest.asset_root);
 
         // Pre-load any existing scripts from the scene
         script_backend.load_scene_scripts(&context.scene, &asset_root)?;
@@ -468,7 +468,7 @@ impl AgentSession {
                 Ok(())
             }
             AgentOperation::ReadFile { path } => {
-                let full_path = self.context.project_root.join(path);
+                let full_path = self.context.root.join(path);
                 let content = std::fs::read_to_string(&full_path).map_err(|source| {
                     EngineError::Filesystem {
                         path: full_path,
@@ -776,14 +776,19 @@ mod tests {
         use engine_ecs::ProjectManifest;
 
         let scene = engine_ecs::Scene::new();
-        let asset_db =
+        let database =
             engine_assets::AssetDatabase::new(std::env::temp_dir(), std::env::temp_dir());
 
         ProjectContext {
             manifest: ProjectManifest::example(),
             scene,
-            asset_db,
-            project_root: std::env::temp_dir(),
+            database,
+            registry: engine_assets::AssetRegistry::default(),
+            assets: Vec::new(),
+            asset_imports: Vec::new(),
+            scene_dirty: false,
+            root: std::env::temp_dir(),
+            scene_path: std::env::temp_dir().join("main.aster_scene.json"),
         }
     }
 
@@ -838,14 +843,19 @@ mod tests {
         // Pre-populate with one object so the scene is non-trivial
         scene.create_object("Existing").unwrap();
 
-        let asset_db =
+        let database =
             engine_assets::AssetDatabase::new(std::env::temp_dir(), std::env::temp_dir());
 
         let ctx = ProjectContext {
             manifest: ProjectManifest::example(),
             scene,
-            asset_db,
-            project_root: std::env::temp_dir(),
+            database,
+            registry: engine_assets::AssetRegistry::default(),
+            assets: Vec::new(),
+            asset_imports: Vec::new(),
+            scene_dirty: false,
+            root: std::env::temp_dir(),
+            scene_path: std::env::temp_dir().join("main.aster_scene.json"),
         };
 
         let mut session = AgentSession::new(ctx).unwrap();

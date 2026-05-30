@@ -1,5 +1,5 @@
 [package]
-name = "aster"
+name = "aster-cli"
 description = "Aster editor-first native launcher and command-line tool"
 version.workspace = true
 edition.workspace = true

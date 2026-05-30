@@ -178,7 +178,7 @@ fn build_project(args: Vec<String>) -> EngineResult<()> {
     let workspace_root = std::env::current_dir()
         .map_err(|e| EngineError::config(format!("failed to get current directory: {}", e)))?;
     let mut cargo_cmd = Command::new("cargo");
-    cargo_cmd.arg("build").arg("-p").arg("aster");
+    cargo_cmd.arg("build").arg("-p").arg("aster-cli");
 
     if build_config.release {
         cargo_cmd.arg("--release");
@@ -249,9 +249,9 @@ fn build_project(args: Vec<String>) -> EngineResult<()> {
         "debug"
     };
     let binary_name = if cfg!(target_os = "windows") {
-        "aster.exe"
+        "aster-cli.exe"
     } else {
-        "aster"
+        "aster-cli"
     };
 
     let source_binary = if build_config.target == "native" {

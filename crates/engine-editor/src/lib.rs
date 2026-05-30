@@ -19,6 +19,20 @@ pub mod agent;
 pub mod native;
 pub mod physics;
 pub mod render;
+
+// UI state types extracted from engine-editor-ui (HubState, EditorShell, ProjectContext, etc.)
+pub mod ui_state;
+
+// Re-export the key UI state types for convenience
+pub use ui_state::{
+    resource_kind_label, ConfirmDeleteDialog, DesignTokens, EditorAction,
+    EditorSceneViewOrientation, EditorSceneViewProjection, EditorShell, EditorSnapSettings,
+    EditorTransformSpace, EditorTransformTool, HubAction, HubPage, HubState, NewProjectDialog,
+    PlayModeRequest, ProjectContext, ProjectDeletionDecision, ProjectDeletionMode,
+    ScriptEditorState, ScriptTemplateBackend, ViewportTargetState, ViewportTexture,
+    ViewportTransformDragMode, ViewportTransformDragState,
+};
+
 pub use native::{
     GizmoOperation, GizmoService, GizmoSpace, OutlineEntry, OutlineService, PickRequest,
     PickResult, PickingService, PreviewKind, PreviewRequest, PreviewService, PreviewState,
@@ -1267,10 +1281,7 @@ pub fn register_ai_commands(registry: &mut CommandRegistry) {
             CommandAvailability::DirtyScene,
         ),
         |ctx: &mut CommandContext<'_>| {
-            let scene_path = ctx
-                .project
-                .project_root
-                .join(&ctx.project.manifest.default_scene);
+            let scene_path = ctx.project.root.join(&ctx.project.manifest.default_scene);
             let before =
                 fs::read_to_string(&scene_path).map_err(|source| EngineError::Filesystem {
                     path: scene_path.clone(),
@@ -1334,205 +1345,6 @@ fn command(
         category: category.to_owned(),
         shortcut: shortcut.map(str::to_owned),
         availability,
-    }
-}
-
-/// Bundled project state used by the editor shell.
-///
-/// Holds the parsed manifest, active scene, scanned asset database,
-/// and the absolute project root path.
-#[derive(Debug)]
-pub struct ProjectContext {
-    /// Parsed project manifest from `aster.project.toml`.
-    pub manifest: engine_ecs::ProjectManifest,
-    /// Active scene graph loaded from the default scene file.
-    pub scene: engine_ecs::Scene,
-    /// Asset database populated by scanning the project asset root.
-    pub asset_db: engine_assets::AssetDatabase,
-    /// Absolute path to the project root directory.
-    pub project_root: PathBuf,
-}
-
-impl ProjectContext {
-    /// Opens a project from its root directory.
-    ///
-    /// Loads `aster.project.toml`, parses the default scene JSON,
-    /// and scans the configured asset root.
-    pub fn open(project_root: impl Into<PathBuf>) -> EngineResult<Self> {
-        let project_root: PathBuf = project_root.into();
-
-        let manifest = engine_ecs::ProjectManifest::load(&project_root)?;
-
-        let diagnostics = manifest.diagnostics();
-        if !diagnostics.is_empty() {
-            return Err(EngineError::config(
-                diagnostics
-                    .iter()
-                    .map(|d| d.message.clone())
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            ));
-        }
-
-        let scene_path = project_root.join(&manifest.default_scene);
-        let scene_json =
-            fs::read_to_string(&scene_path).map_err(|source| EngineError::Filesystem {
-                path: scene_path.clone(),
-                source,
-            })?;
-        let scene = engine_ecs::Scene::from_json(&scene_json)?;
-
-        let asset_root = project_root.join(&manifest.asset_root);
-        let builtin_root = project_root.join("builtin");
-        let mut asset_db = engine_assets::AssetDatabase::new(&asset_root, &builtin_root);
-        engine_assets::scan_project_assets(&asset_root, &mut asset_db)?;
-
-        Ok(Self {
-            manifest,
-            scene,
-            asset_db,
-            project_root,
-        })
-    }
-
-    /// Serializes the project state into an AI-consumable context.
-    ///
-    /// Produces a compact JSON representation of the scene graph, components,
-    /// transforms, and asset list suitable as LLM prompt context.
-    pub fn to_ai_context(&self) -> serde_json::Value {
-        serde_json::json!({
-            "project": {
-                "name": self.manifest.name,
-                "default_scene": self.manifest.default_scene,
-            },
-            "scene": self.scene_to_ai_context(),
-            "assets": self.assets_to_ai_context(),
-        })
-    }
-
-    fn scene_to_ai_context(&self) -> serde_json::Value {
-        let objects: Vec<serde_json::Value> = self
-            .scene
-            .objects()
-            .iter()
-            .map(|(entity, obj)| {
-                let transform = self.scene.transforms().local(*entity);
-                let parent = self.scene.transforms().parent(*entity);
-                serde_json::json!({
-                    "id": format!("{}:{}",
-                        entity.handle().slot(),
-                        entity.handle().generation().get()
-                    ),
-                    "name": obj.name,
-                    "tag": obj.tag,
-                    "layer": obj.layer,
-                    "active": obj.active,
-                    "parent": parent.map(|p| format!("{}:{}",
-                        p.handle().slot(),
-                        p.handle().generation().get()
-                    )),
-                    "transform": transform.map(|t| serde_json::json!({
-                        "position": [t.translation.x, t.translation.y, t.translation.z],
-                        "rotation": [t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w],
-                        "scale": [t.scale.x, t.scale.y, t.scale.z],
-                    })),
-                    "components": obj.components.iter()
-                        .map(|c| Self::component_to_ai_context(c))
-                        .collect::<Vec<_>>(),
-                })
-            })
-            .collect();
-
-        serde_json::json!({ "objects": objects })
-    }
-
-    fn component_to_ai_context(component: &engine_ecs::ComponentData) -> serde_json::Value {
-        use engine_ecs::ComponentData;
-        match component {
-            ComponentData::Camera(c) => serde_json::json!({
-                "type": "Camera",
-                "fov": c.vertical_fov_degrees,
-                "near": c.near,
-                "far": c.far,
-                "primary": c.primary,
-            }),
-            ComponentData::MeshRenderer(m) => serde_json::json!({
-                "type": "MeshRenderer",
-                "mesh": m.mesh.map(|id| id.as_u128().to_string()),
-                "builtin_mesh": m.builtin_mesh,
-                "casts_shadows": m.casts_shadows,
-                "receive_shadows": m.receive_shadows,
-            }),
-            ComponentData::Light(l) => serde_json::json!({
-                "type": "Light",
-                "kind": l.kind,
-                "color": [l.color.x, l.color.y, l.color.z],
-                "intensity": l.intensity,
-                "range": l.range,
-                "spot_angle": l.spot_angle,
-            }),
-            ComponentData::Rigidbody(r) => serde_json::json!({
-                "type": "Rigidbody",
-                "body_type": r.body_type,
-                "mass": r.mass,
-                "use_gravity": r.use_gravity,
-                "linear_damping": r.linear_damping,
-                "angular_damping": r.angular_damping,
-            }),
-            ComponentData::Collider(c) => serde_json::json!({
-                "type": "Collider",
-                "shape": c.shape,
-                "size": [c.size.x, c.size.y, c.size.z],
-                "is_trigger": c.is_trigger,
-            }),
-            ComponentData::Script(s) => serde_json::json!({
-                "type": "Script",
-                "backend": s.backend,
-                "script": s.script,
-            }),
-            ComponentData::AudioSource(a) => serde_json::json!({
-                "type": "AudioSource",
-                "clip": a.clip.map(|id| id.as_u128().to_string()),
-                "volume": a.volume,
-                "looping": a.looping,
-                "play_on_start": a.play_on_start,
-            }),
-            ComponentData::ParticleEmitter(p) => serde_json::json!({
-                "type": "ParticleEmitter",
-                "max_particles": p.max_particles,
-                "emission_rate": p.emission_rate,
-            }),
-            ComponentData::Sprite2D(s) => serde_json::json!({
-                "type": "Sprite2D",
-                "texture": s.texture.map(|id| id.as_u128().to_string()),
-            }),
-            ComponentData::Camera2D(c) => serde_json::json!({
-                "type": "Camera2D",
-                "zoom": c.zoom,
-            }),
-            ComponentData::AnimationPlayer(_a) => serde_json::json!({
-                "type": "AnimationPlayer",
-            }),
-            _ => serde_json::json!({ "type": component.type_id() }),
-        }
-    }
-
-    fn assets_to_ai_context(&self) -> serde_json::Value {
-        let items: Vec<serde_json::Value> = self
-            .asset_db
-            .iter_entries()
-            .map(|entry| {
-                serde_json::json!({
-                    "guid": entry.guid.to_string(),
-                    "path": entry.path.to_string_lossy(),
-                    "kind": format!("{:?}", entry.kind),
-                })
-            })
-            .collect();
-        serde_json::json!({
-            "count": items.len(),
-            "items": items,
-        })
     }
 }
 
@@ -1698,7 +1510,7 @@ mod tests {
 
         assert_eq!(ctx.manifest.name, "Aster Example");
         assert!(ctx.scene.object_count() > 0);
-        assert_eq!(ctx.project_root, project_root);
+        assert_eq!(ctx.root, project_root);
     }
 
     #[test]
@@ -1752,13 +1564,19 @@ mod tests {
             .upsert_component(entity, ComponentData::Light(LightComponentData::default()))
             .unwrap();
 
-        let asset_db =
+        let database =
             engine_assets::AssetDatabase::new(std::env::temp_dir(), std::env::temp_dir());
+        let registry = engine_assets::AssetRegistry::default();
         let ctx = ProjectContext {
             manifest: ProjectManifest::example(),
             scene,
-            asset_db,
-            project_root: std::env::temp_dir(),
+            database,
+            registry,
+            assets: Vec::new(),
+            asset_imports: Vec::new(),
+            scene_dirty: false,
+            root: std::env::temp_dir(),
+            scene_path: std::env::temp_dir().join("main.aster_scene.json"),
         };
 
         let ai_ctx = ctx.to_ai_context();

@@ -23,7 +23,7 @@ fn build_command_creates_output_directory() {
     let status = Command::new("cargo")
         .arg("run")
         .arg("-p")
-        .arg("aster")
+        .arg("aster-cli")
         .arg("--")
         .arg("build")
         .arg(example_project.to_str().unwrap())
@@ -48,9 +48,9 @@ fn build_command_creates_output_directory() {
 
     // Verify binary was copied
     let binary_name = if cfg!(target_os = "windows") {
-        "aster.exe"
+        "aster-cli.exe"
     } else {
-        "aster"
+        "aster-cli"
     };
     assert!(
         output_dir.join("bin").join(binary_name).exists(),
@@ -95,7 +95,7 @@ fn build_command_fails_for_nonexistent_project() {
     let output = Command::new("cargo")
         .arg("run")
         .arg("-p")
-        .arg("aster")
+        .arg("aster-cli")
         .arg("--")
         .arg("build")
         .arg("/nonexistent/project")
@@ -164,7 +164,7 @@ migration_framework = "none"
     let output = Command::new("cargo")
         .arg("run")
         .arg("-p")
-        .arg("aster")
+        .arg("aster-cli")
         .arg("--")
         .arg("build")
         .arg(project_dir.to_str().unwrap())

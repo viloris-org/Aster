@@ -162,7 +162,7 @@ fn build_profile(profile: Profile, release: bool) -> EngineResult<()> {
             let mut aster_args = vec![
                 "build",
                 "-p",
-                "aster",
+                "aster-cli",
                 "--no-default-features",
                 "--features",
                 profile.name(),
@@ -192,7 +192,7 @@ fn package(request: PackageRequest) -> EngineResult<()> {
     let mut aster_args = vec![
         "build",
         "-p",
-        "aster",
+        "aster-cli",
         "--no-default-features",
         "--features",
         profile.name(),
@@ -217,8 +217,8 @@ fn package(request: PackageRequest) -> EngineResult<()> {
     let build_profile_dir = if request.release { "release" } else { "debug" };
     let cli_source = PathBuf::from("target")
         .join(build_profile_dir)
-        .join(executable_name("aster"));
-    let cli_dest = bin_dir.join(executable_name("aster"));
+        .join(executable_name("aster-cli"));
+    let cli_dest = bin_dir.join(executable_name("aster-cli"));
     fs::copy(&cli_source, &cli_dest).map_err(|source| EngineError::Filesystem {
         path: cli_source.clone(),
         source,
@@ -323,7 +323,7 @@ fn write_manifest(package_root: &Path, profile: Profile) -> EngineResult<()> {
         "name = \"Aster\"\nprofile = \"{}\"\nplatform = \"{}\"\ncli = \"bin/{}\"\n",
         profile.name(),
         platform_tag(),
-        executable_name("aster")
+        executable_name("aster-cli")
     );
     let path = package_root.join("package.toml");
     fs::write(&path, manifest).map_err(|source| EngineError::Filesystem { path, source })

@@ -557,6 +557,88 @@ impl WgpuRenderDevice {
         )
     }
 
+    /// Read back the default offscreen target as RGBA pixels.
+    ///
+    /// Returns `(width, height, rgba_bytes)`. Uses a staging buffer and GPU readback.
+    /// This is a synchronous blocking call — it waits for the GPU to finish.
+    pub fn readback_default_target(&mut self) -> EngineResult<(u32, u32, Vec<u8>)> {
+        let (w, h) = self.default_target.size();
+        let format = self.default_target.desc.color_format;
+        let bytes_per_pixel = format.bytes_per_pixel() as u64;
+        // wgpu requires bytes_per_row to be a multiple of 256
+        let unpadded = w as u64 * bytes_per_pixel;
+        let padding = (256 - (unpadded % 256)) % 256;
+        let bytes_per_row = unpadded + padding;
+        let total_bytes = bytes_per_row * h as u64;
+
+        let target = self
+            .targets
+            .get(&self.default_target.handle)
+            .ok_or_else(|| EngineError::invalid_handle("default target missing"))?;
+
+        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("aster viewport readback staging"),
+            size: total_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("aster viewport readback encoder"),
+            });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target._color,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row as u32),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.queue.submit(Some(encoder.finish()));
+
+        // Synchronous readback: map + wait
+        let buffer_slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        self.device.poll(wgpu::PollType::wait_indefinitely()).ok();
+        receiver
+            .recv()
+            .map_err(|_| EngineError::other("viewport readback channel closed"))?
+            .map_err(|e| EngineError::other(format!("viewport readback map failed: {e}")))?;
+
+        let mapped = buffer_slice.get_mapped_range();
+        // Strip padding: copy only the actual RGBA bytes per row
+        let mut pixels = Vec::with_capacity((w * h * bytes_per_pixel as u32) as usize);
+        for row in 0..h as usize {
+            let start = row * bytes_per_row as usize;
+            let end = start + w as usize * bytes_per_pixel as usize;
+            pixels.extend_from_slice(&mapped[start..end]);
+        }
+        drop(mapped);
+        staging.unmap();
+
+        Ok((w, h, pixels))
+    }
+
     fn render_world_to_target(
         &mut self,
         world: &RenderWorld,
