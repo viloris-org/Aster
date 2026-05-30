@@ -1,0 +1,19 @@
+[package]
+name = "engine-agent-cluster"
+description = "Aster AI Editor Copilot Agent Cluster: Manager, Workers, Reviewers, task workspace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+engine-core.workspace = true
+engine-ecs.workspace = true
+engine-editor.workspace = true
+engine-policy.workspace = true
+serde.workspace = true
+serde_json.workspace = true

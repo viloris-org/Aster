@@ -1,0 +1,16 @@
+[package]
+name = "engine-policy"
+description = "Aster AI Copilot policy engine: capability grants, risk classification, trust labeling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+engine-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

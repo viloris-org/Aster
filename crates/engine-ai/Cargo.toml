@@ -1,0 +1,20 @@
+[package]
+name = "engine-ai"
+description = "Aster AI agent service for LLM-assisted game development"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+engine-assets.workspace = true
+engine-core.workspace = true
+engine-ecs.workspace = true
+engine-editor = { workspace = true, features = ["agent-tools"] }
+engine-script-rhai.workspace = true
+serde.workspace = true
+serde_json.workspace = true

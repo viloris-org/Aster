@@ -22,4 +22,5 @@ engine-i18n.workspace = true
 engine-physics.workspace = true
 engine-render.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 toml.workspace = true

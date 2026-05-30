@@ -54,6 +54,7 @@ agent-tools = [
     "engine-assets/agent-tools",
     "engine-core/agent-tools",
     "engine-ecs/agent-tools",
+    "dep:engine-ai",
     "dep:engine-editor",
     "engine-editor/agent-tools",
     "engine-platform/agent-tools",
@@ -82,6 +83,7 @@ engine-assets.workspace = true
 engine-audio = { workspace = true, optional = true }
 engine-core.workspace = true
 engine-ecs.workspace = true
+engine-ai = { workspace = true, optional = true }
 engine-editor = { workspace = true, optional = true }
 engine-editor-ui = { workspace = true, optional = true }
 engine-physics = { workspace = true, optional = true }

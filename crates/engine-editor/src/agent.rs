@@ -58,6 +58,17 @@ impl PermissionPolicy {
         }
     }
 
+    /// Creates a transactional editor write policy.
+    pub const fn transactional_write() -> Self {
+        Self {
+            write_mode: AgentWriteMode::Transactional,
+            filesystem_write: true,
+            process_execution: false,
+            network: false,
+            direct_write: false,
+        }
+    }
+
     /// Validates whether the policy allows the requested write mode.
     pub fn require_write_mode(&self, requested: AgentWriteMode) -> EngineResult<()> {
         if self.write_mode == requested {
