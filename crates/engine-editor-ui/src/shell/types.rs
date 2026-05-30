@@ -512,6 +512,9 @@ pub struct CopilotPanelState {
     pub trace_expanded: bool,
     /// Cached plan preview lines (one per planned operation).
     pub plan_preview: Vec<PlanPreviewItem>,
+    /// The parsed AgentOperation values backing the plan preview.
+    /// Indexed by the same position as `plan_preview`.
+    pub cached_operations: Vec<engine_ai::AgentOperation>,
     /// Cached trace entries from the last execution.
     pub trace_entries: Vec<String>, // serialized TraceEntry debug lines
     /// Console entry count from the last execution.
@@ -534,6 +537,7 @@ impl Default for CopilotPanelState {
             auto_accept: false,
             trace_expanded: false,
             plan_preview: Vec::new(),
+            cached_operations: Vec::new(),
             trace_entries: Vec::new(),
             console_entry_count: 0,
             console_error_count: 0,

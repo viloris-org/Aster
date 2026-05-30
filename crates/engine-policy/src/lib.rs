@@ -14,8 +14,8 @@
 //! auditable as a single compilation unit and, in a future milestone, to be
 //! extracted into a dedicated Policy Daemon process.
 
-pub mod ids;
-pub mod trust;
 pub mod context;
 pub mod grant;
+pub mod ids;
 pub mod risk;
+pub mod trust;

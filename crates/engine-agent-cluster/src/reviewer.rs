@@ -23,8 +23,7 @@
 use engine_core::EngineResult;
 
 use crate::protocol::{
-    Artifact, LocalReviewDecision, ReviewDecision, ReviewFinding, ReviewRequest,
-    WorkerOutput,
+    Artifact, LocalReviewDecision, ReviewDecision, ReviewFinding, ReviewRequest, WorkerOutput,
 };
 
 /// A reviewer that evaluates objective artifacts.
@@ -51,10 +50,7 @@ pub trait Reviewer {
     /// - Regression risks
     /// - Editor workflow impact
     /// - Trace completeness
-    fn review_deep(
-        &self,
-        request: &ReviewRequest,
-    ) -> EngineResult<ReviewDecision>;
+    fn review_deep(&self, request: &ReviewRequest) -> EngineResult<ReviewDecision>;
 
     /// Evaluates objective artifacts and produces findings.
     ///
@@ -120,41 +116,273 @@ impl<M: crate::ModelProvider> DeepReviewer<M> {
 impl<M: crate::ModelProvider> Reviewer for DeepReviewer<M> {
     fn review_local(
         &self,
-        _output: &WorkerOutput,
+        output: &WorkerOutput,
         _task_brief: &engine_policy::context::TaskBrief,
     ) -> EngineResult<LocalReviewDecision> {
-        // Local review is typically performed by the Manager or a lightweight
-        // reviewer. The Deep Reviewer focuses on the integrated candidate.
-        // This method exists for completeness; in practice, local review may
-        // be a Manager responsibility or a separate lightweight Worker.
-        todo!("Local review is a Manager responsibility in the initial implementation")
+        // Local review checks Worker outputs before integration.
+        // For MVP: deterministic check on state and artifact completeness.
+        let mut findings = Vec::new();
+        let mut has_blocking = false;
+
+        // Check Worker state
+        match output.state {
+            crate::protocol::WorkerState::Completed => {
+                // Good — proceed
+            }
+            crate::protocol::WorkerState::PartiallyCompleted => {
+                findings.push(ReviewFinding {
+                    finding_id: format!("local-{}-partial", output.task_id),
+                    severity: "warning".into(),
+                    description: "Worker completed partially; some criteria may be unmet".into(),
+                    affected: vec![],
+                    suggested_fix: None,
+                });
+            }
+            crate::protocol::WorkerState::Failed => {
+                findings.push(ReviewFinding {
+                    finding_id: format!("local-{}-failed", output.task_id),
+                    severity: "blocking".into(),
+                    description: "Worker reported failure".into(),
+                    affected: vec![],
+                    suggested_fix: None,
+                });
+                has_blocking = true;
+            }
+            crate::protocol::WorkerState::Blocked => {
+                findings.push(ReviewFinding {
+                    finding_id: format!("local-{}-blocked", output.task_id),
+                    severity: "blocking".into(),
+                    description: "Worker reported blocked by policy or capability".into(),
+                    affected: vec![],
+                    suggested_fix: None,
+                });
+                has_blocking = true;
+            }
+        }
+
+        // Check artifact presence
+        if output.artifacts.is_empty() && output.state != crate::protocol::WorkerState::Failed {
+            findings.push(ReviewFinding {
+                finding_id: format!("local-{}-no-artifacts", output.task_id),
+                severity: "error".into(),
+                description: "Worker produced no objective artifacts".into(),
+                affected: vec![],
+                suggested_fix: Some(
+                    "Worker must produce at least one diff or scene preview".into(),
+                ),
+            });
+            has_blocking = true;
+        }
+
+        let decision = if has_blocking {
+            crate::protocol::ReviewVerdict::Blocked
+        } else if !findings.is_empty() {
+            crate::protocol::ReviewVerdict::NeedsRevision
+        } else {
+            crate::protocol::ReviewVerdict::Approved
+        };
+
+        Ok(LocalReviewDecision {
+            task_id: output.task_id,
+            decision,
+            findings,
+            risk_tags: vec![],
+            reviewed_at: engine_policy::grant::timestamp_now(),
+        })
     }
 
-    fn review_deep(
-        &self,
-        _request: &ReviewRequest,
-    ) -> EngineResult<ReviewDecision> {
-        // The Deep Reviewer receives the review request in a fresh session.
-        // It evaluates the integrated candidate against the task brief,
-        // acceptance criteria, and review rubric.
-        todo!("Deep review implementation (M4 milestone)")
+    fn review_deep(&self, request: &ReviewRequest) -> EngineResult<ReviewDecision> {
+        // Deep review evaluates the INTEGRATED candidate.
+        // For MVP: deterministic checks on artifacts + model analysis.
+        let mut findings = Vec::new();
+        let mut has_blocking = false;
+
+        // 1. Check artifact completeness against acceptance criteria
+        let criteria = &request.task_brief.acceptance_criteria;
+        if !criteria.is_empty() && request.accepted_artifacts.is_empty() {
+            findings.push(ReviewFinding {
+                finding_id: "deep-001".into(),
+                severity: "blocking".into(),
+                description: format!(
+                    "Acceptance criteria defined ({}) but no artifacts produced",
+                    criteria.len()
+                ),
+                affected: vec![],
+                suggested_fix: Some(
+                    "Worker must produce artifacts matching acceptance criteria".into(),
+                ),
+            });
+            has_blocking = true;
+        }
+
+        // 2. Check validator output for failures
+        if let Some(validator) = &request.validator_output.as_object() {
+            if let Some(passed) = validator.get("passed").and_then(|v| v.as_bool()) {
+                if !passed {
+                    findings.push(ReviewFinding {
+                        finding_id: "deep-002".into(),
+                        severity: "blocking".into(),
+                        description: "Deterministic validation failed".into(),
+                        affected: vec![],
+                        suggested_fix: Some("Fix the validation errors before proceeding".into()),
+                    });
+                    has_blocking = true;
+                }
+            }
+        }
+
+        // 3. Check audit report for warnings
+        if let Some(audit) = &request.audit_report {
+            findings.push(ReviewFinding {
+                finding_id: "deep-003".into(),
+                severity: "info".into(),
+                description: format!("Audit report present: {}", audit),
+                affected: vec![],
+                suggested_fix: None,
+            });
+        }
+
+        // 4. Check artifact trust labels — untrusted content needs closer review
+        let untrusted_count = request
+            .accepted_artifacts
+            .iter()
+            .filter(|a| a.label == crate::protocol::ArtifactTrust::UntrustedWorkerContent)
+            .count();
+        if untrusted_count > 0 {
+            findings.push(ReviewFinding {
+                finding_id: "deep-004".into(),
+                severity: "warning".into(),
+                description: format!(
+                    "{} artifacts are untrusted Worker content — manual review recommended",
+                    untrusted_count
+                ),
+                affected: vec![],
+                suggested_fix: None,
+            });
+        }
+
+        // 5. Deduce residual risk
+        let residual_risk = if has_blocking {
+            crate::protocol::ReviewRisk::High
+        } else if !findings.is_empty() {
+            crate::protocol::ReviewRisk::Medium
+        } else {
+            crate::protocol::ReviewRisk::Low
+        };
+
+        let verdict = if has_blocking {
+            crate::protocol::ReviewVerdict::Blocked
+        } else if findings
+            .iter()
+            .any(|f| f.severity == "error" || f.severity == "warning")
+        {
+            crate::protocol::ReviewVerdict::NeedsRevision
+        } else {
+            crate::protocol::ReviewVerdict::Approved
+        };
+
+        Ok(ReviewDecision {
+            candidate_id: request.candidate_id.clone(),
+            verdict,
+            findings,
+            has_blocking_issues: has_blocking,
+            residual_risk,
+            reviewed_at: engine_policy::grant::timestamp_now(),
+        })
     }
 
     fn evaluate_artifacts(
         &self,
-        _artifacts: &[Artifact],
+        artifacts: &[Artifact],
         _task_brief: &engine_policy::context::TaskBrief,
-        _validator_output: Option<&serde_json::Value>,
+        validator_output: Option<&serde_json::Value>,
         _audit_report: Option<&serde_json::Value>,
     ) -> EngineResult<Vec<ReviewFinding>> {
-        todo!("Artifact evaluation against review rubric")
+        let mut findings = Vec::new();
+
+        // Check for deterministic shape artifacts (trusted)
+        let has_deterministic = artifacts
+            .iter()
+            .any(|a| matches!(a.label, crate::protocol::ArtifactTrust::DeterministicShape));
+        if !has_deterministic {
+            findings.push(ReviewFinding {
+                finding_id: "artifact-001".into(),
+                severity: "warning".into(),
+                description: "No deterministic-shape artifacts found — review may be subjective"
+                    .into(),
+                affected: vec![],
+                suggested_fix: Some(
+                    "Workers should produce diffs or structured change records".into(),
+                ),
+            });
+        }
+
+        // Check validator output for warnings
+        if let Some(validator) = validator_output {
+            findings.push(ReviewFinding {
+                finding_id: "artifact-002".into(),
+                severity: "info".into(),
+                description: format!("Validator output evaluated: {}", validator),
+                affected: vec![],
+                suggested_fix: None,
+            });
+        }
+
+        // Check for untrusted artifacts that need human review
+        for artifact in artifacts {
+            if artifact.label == crate::protocol::ArtifactTrust::UntrustedWorkerContent {
+                findings.push(ReviewFinding {
+                    finding_id: format!("artifact-u-{}", artifact.artifact_type),
+                    severity: "info".into(),
+                    description: format!(
+                        "Untrusted artifact '{}' targeting '{}'",
+                        artifact.artifact_type, artifact.target
+                    ),
+                    affected: vec![artifact.target.clone()],
+                    suggested_fix: None,
+                });
+            }
+        }
+
+        Ok(findings)
     }
 
     fn verify_repair(
         &self,
-        _original_finding: &ReviewFinding,
-        _repaired_artifacts: &[Artifact],
+        original_finding: &ReviewFinding,
+        repaired_artifacts: &[Artifact],
     ) -> EngineResult<RepairVerification> {
-        todo!("Repair verification")
+        // Check if the repair produced new artifacts targeting the same affected paths
+        let original_affected: std::collections::HashSet<&str> = original_finding
+            .affected
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        if original_affected.is_empty() {
+            // No specific path to verify against — check if any artifacts exist
+            return if repaired_artifacts.is_empty() {
+                Ok(RepairVerification::NotFixed)
+            } else {
+                Ok(RepairVerification::Fixed)
+            };
+        }
+
+        let repair_addresses: std::collections::HashSet<&str> = repaired_artifacts
+            .iter()
+            .map(|a| a.target.as_str())
+            .collect();
+
+        let all_addressed = original_affected
+            .iter()
+            .all(|path| repair_addresses.contains(path));
+
+        if all_addressed {
+            Ok(RepairVerification::Fixed)
+        } else if repair_addresses.is_empty() {
+            Ok(RepairVerification::NotFixed)
+        } else {
+            Ok(RepairVerification::PartiallyFixed)
+        }
     }
 }

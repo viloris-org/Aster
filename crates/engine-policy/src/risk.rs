@@ -10,7 +10,9 @@
 /// execution, dependency changes, and rollback quality.
 ///
 /// Full implementation in step 4.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum RiskClass {
     /// Routine operations: read files, explain scene, format code.
     Low,
@@ -21,4 +23,3 @@ pub enum RiskClass {
     /// Credential, network, process execution, or irreversible changes.
     Critical,
 }
-

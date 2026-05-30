@@ -25,9 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use engine_policy::ids::{BundleHash, SnapshotId, TaskId};
 
-use crate::protocol::{
-    ProblemReport, QuickFixAction, ReviewFinding, ReviewRisk,
-};
+use crate::protocol::{ProblemReport, QuickFixAction, ReviewFinding, ReviewRisk};
 
 // ── TransactionBundle ─────────────────────────────────────────────────────────
 

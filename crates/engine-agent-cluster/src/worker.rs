@@ -138,3 +138,37 @@ pub trait ModelProvider {
     /// Sends a prompt and receives a response.
     fn generate(&self, system: &str, user: &str) -> EngineResult<String>;
 }
+
+/// Adapts an `engine_ai::AiModel` (full request/response) to the simplified
+/// `ModelProvider` trait (string prompt → string response).
+///
+/// Any type implementing `engine_ai::AiModel` can be wrapped and used
+/// wherever `ModelProvider` is expected — Workers, the Deep Reviewer, etc.
+pub struct AiModelAdapter<M> {
+    inner: M,
+}
+
+impl<M> AiModelAdapter<M>
+where
+    M: engine_ai::AiModel,
+{
+    /// Wraps an AiModel for use as a ModelProvider.
+    pub fn new(model: M) -> Self {
+        Self { inner: model }
+    }
+}
+
+impl<M> ModelProvider for AiModelAdapter<M>
+where
+    M: engine_ai::AiModel,
+{
+    fn generate(&self, system: &str, user: &str) -> EngineResult<String> {
+        let request = engine_ai::AiRequest {
+            system: system.to_string(),
+            context: serde_json::Value::Null,
+            user: user.to_string(),
+        };
+        let response = self.inner.chat(request)?;
+        Ok(response.content)
+    }
+}

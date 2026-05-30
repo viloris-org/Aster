@@ -11,6 +11,7 @@ rust-version.workspace = true
 default = []
 
 [dependencies]
+engine-ai.workspace = true
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-editor.workspace = true

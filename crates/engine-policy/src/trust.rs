@@ -86,7 +86,10 @@ impl TrustLabel {
     /// Returns true when the label represents advisory AI output that
     /// is monotonic (can raise risk, cannot lower or grant).
     pub const fn is_advisory(self) -> bool {
-        matches!(self, Self::AdvisoryReviewerOutput | Self::AdvisoryRiskAuditOutput)
+        matches!(
+            self,
+            Self::AdvisoryReviewerOutput | Self::AdvisoryRiskAuditOutput
+        )
     }
 }
 

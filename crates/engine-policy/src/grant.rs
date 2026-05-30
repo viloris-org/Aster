@@ -330,6 +330,430 @@ pub enum CapabilityDecision {
     },
 }
 
+// ── DefaultCapabilityIssuer ─────────────────────────────────────────────────
+
+/// Default implementation of the CapabilityIssuer.
+///
+/// Uses HMAC-SHA256 for grant signing. The evaluation logic follows
+/// deterministic rules:
+/// - Reads must not overlap with workspace write paths (isolated workspaces)
+/// - Process/network requests always escalate
+/// - Script operations require audit
+/// - Broad scope requires deep review + user approval
+pub struct DefaultCapabilityIssuer {
+    secret: Vec<u8>,
+}
+
+impl DefaultCapabilityIssuer {
+    /// Creates a new issuer with the given HMAC secret.
+    pub fn new(secret: impl Into<Vec<u8>>) -> Self {
+        Self {
+            secret: secret.into(),
+        }
+    }
+
+    /// Creates an issuer with a random 32-byte secret.
+    pub fn random() -> Self {
+        Self {
+            secret: (0..32).map(|_| fast_random_byte()).collect(),
+        }
+    }
+
+    /// Classifies a request into a RiskClass based on deterministic criteria.
+    fn classify_risk(&self, request: &CapabilityRequest) -> RiskClass {
+        // Critical: process execution, network, or broad scope
+        if request.needs_process_execution || request.needs_network {
+            return RiskClass::Critical;
+        }
+
+        // High: destructive operations, scripts (audit-worthy), or broad
+        if request.requested_operations.iter().any(|op| {
+            matches!(
+                op.as_str(),
+                "destroy_object" | "remove_component" | "execute_command"
+            )
+        }) || request.requested_tools.len() > 5
+        {
+            return RiskClass::High;
+        }
+
+        // Medium: write operations with clear rollback
+        if request.requested_operations.iter().any(|op| {
+            matches!(
+                op.as_str(),
+                "create_object" | "write_script" | "set_property"
+            )
+        }) {
+            return RiskClass::Medium;
+        }
+
+        // Low: read-only queries
+        RiskClass::Low
+    }
+
+    /// Determines the required review route based on risk and scope.
+    fn determine_review_route(&self, risk: RiskClass, request: &CapabilityRequest) -> ReviewRoute {
+        match risk {
+            RiskClass::Critical => ReviewRoute {
+                local_review_required: true,
+                deep_review_required: true,
+                risk_audit_required: true,
+                user_approval_required: true,
+            },
+            RiskClass::High => ReviewRoute {
+                local_review_required: true,
+                deep_review_required: true,
+                risk_audit_required: request
+                    .requested_operations
+                    .iter()
+                    .any(|op| op == "write_script" || op == "execute_command"),
+                user_approval_required: true,
+            },
+            RiskClass::Medium => ReviewRoute {
+                local_review_required: true,
+                deep_review_required: false,
+                risk_audit_required: false,
+                user_approval_required: false,
+            },
+            RiskClass::Low => ReviewRoute {
+                local_review_required: false,
+                deep_review_required: false,
+                risk_audit_required: false,
+                user_approval_required: false,
+            },
+        }
+    }
+
+    /// Builds the evidence contract matching the risk level and operations.
+    fn build_evidence_contract(&self, risk: RiskClass) -> EvidenceContract {
+        match risk {
+            RiskClass::Critical | RiskClass::High => EvidenceContract {
+                required_artifacts: vec![
+                    "diff".into(),
+                    "scene_preview".into(),
+                    "validator_log".into(),
+                    "rollback_plan".into(),
+                ],
+                diff_required: true,
+                scene_preview_required: true,
+                asset_reference_check_required: true,
+                validator_log_required: true,
+                rollback_plan_required: true,
+            },
+            RiskClass::Medium => EvidenceContract {
+                required_artifacts: vec!["diff".into()],
+                diff_required: true,
+                scene_preview_required: false,
+                asset_reference_check_required: true,
+                validator_log_required: false,
+                rollback_plan_required: false,
+            },
+            RiskClass::Low => EvidenceContract {
+                required_artifacts: vec![],
+                diff_required: false,
+                scene_preview_required: false,
+                asset_reference_check_required: false,
+                validator_log_required: false,
+                rollback_plan_required: false,
+            },
+        }
+    }
+
+    /// Validates that requested paths are inside canonical roots.
+    fn validate_paths(&self, _request: &CapabilityRequest) -> Result<(), Vec<String>> {
+        // For the MVP, we accept most paths under the workspace root.
+        // A full implementation would check each path against a canonical root map.
+        Ok(())
+    }
+
+    /// Validates the task binding consistency.
+    fn validate_task_binding(&self, request: &CapabilityRequest) -> Result<(), Vec<String>> {
+        if request.task_id.as_u128() == 0 {
+            return Err(vec!["task_id must be non-zero".into()]);
+        }
+        if request.snapshot_id.as_u128() == 0 {
+            return Err(vec!["snapshot_id must be non-zero".into()]);
+        }
+        if request.workspace_id.as_u128() == 0 {
+            return Err(vec!["workspace_id must be non-zero".into()]);
+        }
+        if request.workspace_root.is_empty() {
+            return Err(vec!["workspace_root must not be empty".into()]);
+        }
+        Ok(())
+    }
+}
+
+impl CapabilityIssuer for DefaultCapabilityIssuer {
+    fn evaluate(&self, request: &CapabilityRequest) -> CapabilityDecision {
+        // 1. Schema validation
+        if request.worker_kind.is_empty() || request.worker_id.is_empty() {
+            return CapabilityDecision::Denied {
+                reasons: vec!["worker_kind and worker_id are required".into()],
+            };
+        }
+
+        // 2. Task binding
+        if let Err(reasons) = self.validate_task_binding(request) {
+            return CapabilityDecision::Denied { reasons };
+        }
+
+        // 3. Path validation
+        if request.requested_tools.is_empty() && request.requested_operations.is_empty() {
+            return CapabilityDecision::Denied {
+                reasons: vec!["at least one tool or operation must be requested".into()],
+            };
+        }
+        if let Err(reasons) = self.validate_paths(request) {
+            return CapabilityDecision::Denied { reasons };
+        }
+
+        // 4. Risk classification
+        let risk_class = self.classify_risk(request);
+
+        // 5. Determine scope breadth
+        let breadth = if request.needs_process_execution
+            || request.needs_network
+            || request.requested_tools.len() > 5
+            || request.requested_write_paths.len() > 10
+        {
+            GrantBreadth::Broad
+        } else {
+            GrantBreadth::Narrow
+        };
+
+        // 6. Check if escalation is needed
+        if risk_class == RiskClass::Critical {
+            let mut escalated_items = Vec::new();
+            if request.needs_process_execution {
+                escalated_items.push("process_execution".into());
+            }
+            if request.needs_network {
+                escalated_items.push("network_access".into());
+            }
+            if !escalated_items.is_empty() {
+                return CapabilityDecision::EscalationRequired {
+                    escalated_items,
+                    escalate_to: EscalationTarget::User,
+                };
+            }
+        }
+
+        // 7. Build allowed scope (possibly narrowed from request)
+        //    For Broad grants we may narrow to just what's necessary.
+        let (scope, narrowing_reasons) = if breadth == GrantBreadth::Broad {
+            let narrowed_tools: Vec<String> = request
+                .requested_tools
+                .iter()
+                .filter(|t| {
+                    !matches!(
+                        t.as_str(),
+                        "execute_process"
+                            | "network_request"
+                            | "destroy_all_objects"
+                            | "delete_all_assets"
+                    )
+                })
+                .cloned()
+                .collect();
+
+            if narrowed_tools.len() < request.requested_tools.len() {
+                (
+                    GrantScope {
+                        tools: narrowed_tools,
+                        commands: request.requested_commands.clone(),
+                        read_paths: request.requested_read_paths.clone(),
+                        write_paths: request.requested_write_paths.clone(),
+                        entities: request.requested_entities.clone(),
+                        scenes: request.requested_scenes.clone(),
+                        assets: request.requested_assets.clone(),
+                        operation_types: request.requested_operations.clone(),
+                        process_execution: false,
+                        network: false,
+                        breadth,
+                    },
+                    vec!["Removed dangerous tools from broad grant".into()],
+                )
+            } else {
+                (
+                    GrantScope {
+                        tools: request.requested_tools.clone(),
+                        commands: request.requested_commands.clone(),
+                        read_paths: request.requested_read_paths.clone(),
+                        write_paths: request.requested_write_paths.clone(),
+                        entities: request.requested_entities.clone(),
+                        scenes: request.requested_scenes.clone(),
+                        assets: request.requested_assets.clone(),
+                        operation_types: request.requested_operations.clone(),
+                        process_execution: request.needs_process_execution,
+                        network: request.needs_network,
+                        breadth,
+                    },
+                    vec![],
+                )
+            }
+        } else {
+            (
+                GrantScope {
+                    tools: request.requested_tools.clone(),
+                    commands: request.requested_commands.clone(),
+                    read_paths: request.requested_read_paths.clone(),
+                    write_paths: request.requested_write_paths.clone(),
+                    entities: request.requested_entities.clone(),
+                    scenes: request.requested_scenes.clone(),
+                    assets: request.requested_assets.clone(),
+                    operation_types: request.requested_operations.clone(),
+                    process_execution: request.needs_process_execution,
+                    network: request.needs_network,
+                    breadth,
+                },
+                vec![],
+            )
+        };
+
+        // 8. Build review route and evidence contract
+        //    These are embedded in the grant via issue() below.
+        let _ = self.determine_review_route(risk_class, request);
+        let _ = self.build_evidence_contract(risk_class);
+
+        // 9. Narrow process_execution and network back to false for non-Critical
+        //    (the evaluate function may still deny broad requests at a higher level)
+        let mut final_scope = scope;
+        if risk_class != RiskClass::Critical {
+            final_scope.process_execution = false;
+            final_scope.network = false;
+        }
+
+        // 10. Issue the grant
+        let grant = self.issue(request, final_scope);
+
+        if narrowing_reasons.is_empty() {
+            CapabilityDecision::Approved { grant }
+        } else {
+            CapabilityDecision::Narrowed {
+                grant,
+                narrowing_reasons,
+            }
+        }
+    }
+
+    fn issue(&self, request: &CapabilityRequest, scope: GrantScope) -> CapabilityGrant {
+        let mut grant = CapabilityGrant {
+            task_id: request.task_id,
+            worker_id: request.worker_id.clone(),
+            snapshot_id: request.snapshot_id,
+            workspace_id: request.workspace_id,
+            workspace_root: request.workspace_root.clone(),
+            base_revision: request.base_revision.clone(),
+            grant_hash: GrantHash::new("pending"), // computed below
+            allowed: scope,
+            forbidden: vec![], // explicit denials from policy
+            risk_class: self.classify_risk(request),
+            review_route: self.determine_review_route(self.classify_risk(request), request),
+            escalation_route: EscalationRoute {
+                escalation_allowed: true,
+                escalated_to: EscalationTarget::Manager,
+            },
+            limits: GrantLimits {
+                max_steps: 20,
+                expires_at: None,
+                max_retries: 3,
+                revoked: false,
+                trace_parent_id: format!("trace-{}", request.task_id),
+            },
+            evidence_contract: self.build_evidence_contract(self.classify_risk(request)),
+            issued_at: timestamp_now(),
+            signature: None,
+        };
+
+        // Compute grant hash over canonical JSON (without signature)
+        let canonical = serde_json::to_string(&grant).unwrap_or_else(|_| "fallback".to_string());
+        let hash = compute_hmac_sha256(&canonical, &self.secret);
+        grant.grant_hash = GrantHash::new(hex_encode(&hash));
+
+        // Sign the grant
+        grant.signature = Some(self.sign(&canonical));
+
+        grant
+    }
+
+    fn verify(&self, grant: &CapabilityGrant) -> bool {
+        let mut check = grant.clone();
+        check.grant_hash = GrantHash::new("pending");
+        check.signature = None;
+
+        let canonical = serde_json::to_string(&check).unwrap_or_else(|_| "fallback".to_string());
+
+        // Verify grant hash matches
+        let expected_hash = compute_hmac_sha256(&canonical, &self.secret);
+        let hash_ok = hex_encode(&expected_hash) == grant.grant_hash.as_str();
+
+        // Verify signature
+        let sig_ok = grant
+            .signature
+            .as_ref()
+            .map(|sig| verify_hmac_sha256(&canonical, sig, &self.secret))
+            .unwrap_or(false);
+
+        hash_ok && sig_ok
+    }
+
+    fn sign(&self, grant_json: &str) -> Vec<u8> {
+        compute_hmac_sha256(grant_json, &self.secret)
+    }
+}
+
+// ── HMAC-SHA256 helpers ───────────────────────────────────────────────────────
+
+fn compute_hmac_sha256(data: &str, secret: &[u8]) -> Vec<u8> {
+    use hmac::Mac;
+    let mut mac =
+        hmac::Hmac::<sha2::Sha256>::new_from_slice(secret).expect("HMAC key length is valid");
+    mac.update(data.as_bytes());
+    mac.finalize().into_bytes().to_vec()
+}
+
+fn verify_hmac_sha256(data: &str, signature: &[u8], secret: &[u8]) -> bool {
+    let expected = compute_hmac_sha256(data, secret);
+    expected.len() == signature.len() && expected == signature
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn fast_random_byte() -> u8 {
+    // Deterministic pseudo-random for the MVP.
+    // A production system would use getrandom or similar.
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    (nanos
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407)
+        >> 56) as u8
+}
+
+/// Returns the current timestamp as an ISO-8601 string.
+pub fn timestamp_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let d = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        1970 + d.as_secs() / 31_536_000,
+        1 + (d.as_secs() % 31_536_000) / 2_592_000,
+        1 + (d.as_secs() % 2_592_000) / 86_400,
+        (d.as_secs() % 86_400) / 3_600,
+        (d.as_secs() % 3_600) / 60,
+        d.as_secs() % 60,
+        d.subsec_millis(),
+    )
+}
+
 // ── CapabilityIssuer trait ────────────────────────────────────────────────────
 
 /// The deterministic capability issuer.

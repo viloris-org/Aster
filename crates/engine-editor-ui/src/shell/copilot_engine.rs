@@ -81,12 +81,20 @@ pub fn process_copilot_prompt(
     let stub = StubModel::new(generate_agent_json(prompt));
     let plan = session.plan(&stub, prompt, policy)?;
 
-    // Store plan preview in UI state
+    // Store plan preview in UI state — cache the raw AgentOperations so
+    // they can be replayed on apply, keyed by position in the preview list.
+    ui_state.copilot.cached_operations = plan
+        .operations
+        .iter()
+        .map(|p| p.operation.clone())
+        .collect();
+
     ui_state.copilot.plan_preview = plan
         .operations
         .iter()
-        .map(|planned| PlanPreviewItem {
-            index: planned.operation.action_name().len(),
+        .enumerate()
+        .map(|(i, planned)| PlanPreviewItem {
+            index: i,
             preview: planned.preview.clone(),
             requires_write: planned.requires_write,
             approved: !planned.requires_write,
@@ -103,22 +111,35 @@ pub fn process_copilot_prompt(
 }
 
 /// Applies the currently approved operations from the plan preview.
+///
+/// Uses `cached_operations` (stored during planning) keyed by the
+/// approved preview items' index fields — NOT Complete stubs.
 pub fn apply_approved_operations(
     shell: &mut crate::EditorShell,
     ui_state: &mut ShellUiState,
 ) -> EngineResult<String> {
-    let approved_ops: Vec<AgentOperation> = ui_state
+    // Gather accepted operations by index from the cached plan
+    let accepted_indices: Vec<usize> = ui_state
         .copilot
         .plan_preview
         .iter()
         .filter(|p| p.approved)
-        .map(|p| AgentOperation::Complete {
-            summary: Some(p.preview.clone()),
-        })
+        .map(|p| p.index)
+        .collect();
+
+    if accepted_indices.is_empty() {
+        return Err(EngineError::config("no approved operations to apply"));
+    }
+
+    let approved_ops: Vec<AgentOperation> = accepted_indices
+        .iter()
+        .filter_map(|i| ui_state.copilot.cached_operations.get(*i).cloned())
         .collect();
 
     if approved_ops.is_empty() {
-        return Err(EngineError::config("no approved operations to apply"));
+        return Err(EngineError::config(
+            "cached operations missing — re-plan the request",
+        ));
     }
 
     let project_ui = shell
@@ -154,10 +175,7 @@ pub fn apply_approved_operations(
     let outcome = session.apply_plan(&plan)?;
 
     // Sync the modified scene back to the shell
-    if let Some(outcome_summary) = &outcome.summary {
-        project_ui.scene_dirty = true;
-        return Ok(outcome_summary.clone());
-    }
+    project_ui.scene_dirty = true;
 
     // Record trace
     ui_state.copilot.trace_entries = outcome
@@ -172,10 +190,18 @@ pub fn apply_approved_operations(
         .filter(|e| e.level == engine_editor::ConsoleLevel::Error)
         .count();
 
-    Ok(format!(
-        "Applied {} operations",
-        outcome.operations_performed
-    ))
+    let summary = outcome.summary.clone().unwrap_or_else(|| {
+        format!(
+            "Applied {} operations successfully",
+            outcome.operations_performed
+        )
+    });
+
+    // Clear preview so the user sees a clean panel
+    ui_state.copilot.plan_preview.clear();
+    ui_state.copilot.cached_operations.clear();
+
+    Ok(summary)
 }
 
 /// Generates a JSON agent command string for the stub model.

@@ -15,11 +15,11 @@
 //! - Transaction bundle definition and verification
 //! - Repair loop and problem reporting
 
-pub mod protocol;
-pub mod manager;
-pub mod worker;
-pub mod reviewer;
 pub mod bundle;
+pub mod manager;
+pub mod protocol;
+pub mod reviewer;
+pub mod worker;
 
 // Re-export ModelProvider for convenience (used by Worker and Reviewer impls)
 pub use worker::ModelProvider;

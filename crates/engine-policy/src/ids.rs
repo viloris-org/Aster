@@ -10,16 +10,7 @@ macro_rules! id_type {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
         #[derive(
-            Clone,
-            Copy,
-            Debug,
-            Eq,
-            Hash,
-            Ord,
-            PartialEq,
-            PartialOrd,
-            Serialize,
-            Deserialize,
+            Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
         )]
         pub struct $name(u128);
 
