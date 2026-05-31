@@ -206,7 +206,7 @@ function Sidebar({
 
       {/* Theme Toggle */}
       <div className="hub-sidebar-footer">
-        <span className="theme-toggle-label">Theme</span>
+        <span className="theme-toggle-label">{t('sidebar_theme')}</span>
         <div className="theme-toggle-group">
           {themeOptions.map(opt => (
             <button
@@ -238,6 +238,7 @@ interface NewProjectDialogProps {
 }
 
 function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [templateIdx, setTemplateIdx] = useState(0);
@@ -251,8 +252,8 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
   ];
 
   const handleCreate = useCallback(async () => {
-    if (!name.trim()) { setError('Project name is required'); return; }
-    if (!location.trim()) { setError('Project location is required'); return; }
+    if (!name.trim()) { setError(t('error_project_name_required')); return; }
+    if (!location.trim()) { setError(t('error_project_location_required')); return; }
     setError(null);
     setCreating(true);
     try {
@@ -263,7 +264,7 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
         toolchain_version: installs[versionIdx]?.version || '0.1.0',
       });
     } catch (e: any) {
-      setError(typeof e === 'string' ? e : e.message || 'Failed to create project');
+      setError(typeof e === 'string' ? e : e.message || t('dialog_new_project'));
       setCreating(false);
     }
   }, [name, location, templateIdx, versionIdx, installs, onCreate]);
@@ -281,17 +282,17 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
     <div className="modal-overlay" onClick={handleOverlayClick} onKeyDown={handleKeyDown}>
       <div className="modal">
         <div className="modal-header">
-          <h3>New Project</h3>
+          <h3>{t('dialog_new_project')}</h3>
           <button className="modal-close-btn" onClick={onClose}><IconX /></button>
         </div>
         <div className="modal-body">
           {/* Template */}
           <div className="form-group">
-            <label className="form-label">Template</label>
+            <label className="form-label">{t('dialog_template')}</label>
             <div className="template-grid">
-              {templates.map((t, i) => (
+              {templates.map((tmpl, i) => (
                 <div
-                  key={t.id}
+                  key={tmpl.id}
                   className={`template-card ${templateIdx === i ? 'selected' : ''}`}
                   onClick={() => setTemplateIdx(i)}
                 >
@@ -310,8 +311,8 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
                       </svg>
                     )}
                   </span>
-                  <div className="template-card-title">{t.title}</div>
-                  <div className="template-card-desc">{t.desc}</div>
+                  <div className="template-card-title">{t('template_' + tmpl.id)}</div>
+                  <div className="template-card-desc">{t('template_' + tmpl.id + '_desc')}</div>
                 </div>
               ))}
             </div>
@@ -319,11 +320,11 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
 
           {/* Project Name */}
           <div className="form-group">
-            <label className="form-label">Project Name</label>
+            <label className="form-label">{t('dialog_project_name')}</label>
             <input
               className="form-input"
               type="text"
-              placeholder="My Game"
+              placeholder={t('dialog_name_hint')}
               value={name}
               onChange={e => setName(e.target.value)}
               autoFocus
@@ -332,12 +333,12 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
 
           {/* Location */}
           <div className="form-group">
-            <label className="form-label">Location</label>
+            <label className="form-label">{t('dialog_location')}</label>
             <div className="location-input-row">
               <input
                 className="form-input"
                 type="text"
-                placeholder="/home/user/projects"
+                placeholder={t('dialog_location_placeholder')}
                 value={location}
                 onChange={e => setLocation(e.target.value)}
               />
@@ -354,7 +355,7 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
                 }}
                 type="button"
               >
-                Browse…
+                {t('dialog_browse')}
               </button>
             </div>
           </div>
@@ -362,7 +363,7 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
           {/* Toolchain Version */}
           {installs.length > 0 && (
             <div className="form-group">
-              <label className="form-label">Engine Version</label>
+              <label className="form-label">{t('dialog_engine_version')}</label>
               <select
                 className="form-select"
                 value={versionIdx}
@@ -379,13 +380,13 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
           {error && <p className="form-error">{error}</p>}
         </div>
         <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('dialog_cancel')}</button>
           <button
             className="btn btn-primary"
             onClick={handleCreate}
             disabled={creating}
           >
-            {creating ? 'Creating...' : 'Create Project'}
+            {creating ? t('dialog_creating') : t('dialog_create_project')}
           </button>
         </div>
       </div>
@@ -402,6 +403,7 @@ interface ConfirmDeleteProps {
 }
 
 function ConfirmDeleteDialog({ path, onClose, onRemoveRecent }: ConfirmDeleteProps) {
+  const { t, t_fmt } = useTranslation();
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
   }, [onClose]);
@@ -410,21 +412,21 @@ function ConfirmDeleteDialog({ path, onClose, onRemoveRecent }: ConfirmDeletePro
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal" style={{ width: 440 }}>
         <div className="modal-header">
-          <h3>Delete Project</h3>
+          <h3>{t('dialog_confirm_delete')}</h3>
           <button className="modal-close-btn" onClick={onClose}><IconX /></button>
         </div>
         <div className="modal-body">
           <div className="delete-warning">
             <IconAlertTriangle />
             <div className="delete-warning-text">
-              Remove <strong>{path}</strong> from recent projects?
+              {t_fmt('dialog_confirm_message', { path })}
             </div>
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose}>{t('dialog_cancel')}</button>
           <button className="btn btn-danger" onClick={onRemoveRecent}>
-            Remove from Recent
+            {t('dialog_remove_recents')}
           </button>
         </div>
       </div>
@@ -449,6 +451,7 @@ function ProjectsPage({
   onDeleteRequest: (path: string) => void;
   onNewProject: () => void;
 }) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
 
   const filtered = projects.filter(p =>
@@ -482,10 +485,10 @@ function ProjectsPage({
     <>
       {/* Header */}
       <div className="hub-page-header">
-        <h2>Projects</h2>
+        <h2>{t('hub_projects_title')}</h2>
         <div className="hub-page-actions">
           <button className="btn btn-primary btn-sm" onClick={onNewProject}>
-            <IconPlus /> New Project
+            <IconPlus /> {t('hub_new_project')}
           </button>
         </div>
       </div>
@@ -495,7 +498,7 @@ function ProjectsPage({
         <input
           className="hub-search"
           type="text"
-          placeholder="Search projects..."
+          placeholder={t('hub_search')}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -509,10 +512,10 @@ function ProjectsPage({
               {selectedProject.name}
             </span>
             <button className="btn btn-sm btn-primary" onClick={() => onOpen(selectedProject.path)}>
-              <IconPlay /> Launch
+              <IconPlay /> {t('hub_launch')}
             </button>
             <button className="btn btn-sm btn-danger" onClick={() => onDeleteRequest(selectedProject.path)}>
-              <IconTrash /> Delete
+              <IconTrash /> {t('hub_delete')}
             </button>
           </>
         )}
@@ -525,13 +528,13 @@ function ProjectsPage({
             <div className="hub-empty-icon"><IconEmpty /></div>
             {search ? (
               <>
-                <h3>No matches</h3>
-                <p>No projects match your search. Try a different name.</p>
+                <h3>{t('hub_search_no_matches')}</h3>
+                <p>{t('hub_search_no_matches_desc')}</p>
               </>
             ) : (
               <>
-                <h3>No projects yet</h3>
-                <p>Create or open a project to get started with Aster.</p>
+                <h3>{t('hub_no_projects')}</h3>
+                <p>{t('hub_no_projects_desc')}</p>
               </>
             )}
           </div>
@@ -559,7 +562,7 @@ function ProjectsPage({
                 <button
                   className="project-folder-btn"
                   onClick={e => handleOpenFolder(e, project.path)}
-                  title="Open folder"
+                  title={t('hub_open_folder')}
                 >
                   <IconFolder />
                 </button>
@@ -575,17 +578,18 @@ function ProjectsPage({
 // ─── Installs Page ──────────────────────────────────────────────────────────
 
 function InstallsPage({ installs }: { installs: InstallInfo[] }) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="hub-page-header">
-        <h2>Installs</h2>
+        <h2>{t('hub_installs_title')}</h2>
       </div>
       <div className="hub-scroll">
         {installs.length === 0 ? (
           <div className="hub-empty">
             <div className="hub-empty-icon"><IconPackage /></div>
-            <h3>No installs found</h3>
-            <p>Install an engine version to get started. Use the CLI to install Aster toolchains.</p>
+            <h3>{t('hub_installs_empty')}</h3>
+            <p>{t('hub_installs_empty_desc')}</p>
           </div>
         ) : (
           <div className="install-list">
@@ -597,10 +601,10 @@ function InstallsPage({ installs }: { installs: InstallInfo[] }) {
                   <div className="install-path">{inst.path}</div>
                 </div>
                 <div className="install-badges">
-                  {inst.editor_available && <span className="badge badge-green">Editor</span>}
-                  {!inst.editor_available && <span className="badge badge-gray">No Editor</span>}
-                  {inst.runtime_available && <span className="badge badge-green">Runtime</span>}
-                  {!inst.runtime_available && <span className="badge badge-gray">No Runtime</span>}
+                  {inst.editor_available && <span className="badge badge-green">{t('hub_installs_badge_editor')}</span>}
+                  {!inst.editor_available && <span className="badge badge-gray">{t('hub_installs_badge_no_editor')}</span>}
+                  {inst.runtime_available && <span className="badge badge-green">{t('hub_installs_badge_runtime')}</span>}
+                  {!inst.runtime_available && <span className="badge badge-gray">{t('hub_installs_badge_no_runtime')}</span>}
                 </div>
               </div>
             ))}
@@ -624,11 +628,11 @@ function SettingsPage({
   onSetTheme: (t: string) => void;
   onSetLocale: (l: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, t_fmt } = useTranslation();
   return (
     <>
       <div className="hub-page-header">
-        <h2>Settings</h2>
+        <h2>{t('hub_settings_title')}</h2>
       </div>
       <div className="hub-scroll" style={{ maxWidth: 520 }}>
         {/* Theme */}
@@ -642,9 +646,9 @@ function SettingsPage({
             <div className="settings-control">
               <div className="theme-selector">
                 {[
-                  { id: 'dark', label: 'Dark' },
-                  { id: 'light', label: 'Light' },
-                  { id: 'system', label: 'System' },
+                  { id: 'dark', label: t('settings_theme_dark') },
+                  { id: 'light', label: t('settings_theme_light') },
+                  { id: 'system', label: t('settings_theme_system') },
                 ].map(opt => (
                   <button
                     key={opt.id}
@@ -686,11 +690,11 @@ function SettingsPage({
 
         {/* About */}
         <div className="settings-section">
-          <div className="settings-section-title">About</div>
+          <div className="settings-section-title">{t('settings_about')}</div>
           <div className="settings-row">
             <div>
-              <div className="settings-label">Aster Editor</div>
-              <div className="settings-desc">Version 0.1.0 · Game Engine Editor</div>
+              <div className="settings-label">{t('settings_about_name')}</div>
+              <div className="settings-desc">{t_fmt('settings_about_version', { version: '0.1.0' })}</div>
             </div>
           </div>
         </div>

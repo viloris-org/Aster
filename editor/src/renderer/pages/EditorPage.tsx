@@ -242,6 +242,7 @@ function HierarchyPanel({
   onDeleteObject: (id: string) => Promise<void>;
   onDuplicateObject: (id: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     id: string;
@@ -266,7 +267,7 @@ function HierarchyPanel({
           <button
             className="hierarchy-add-btn"
             onClick={() => setCreateMenuOpen(!createMenuOpen)}
-            title="Create GameObject"
+            title={t('hierarchy_create')}
           >+</button>
           {createMenuOpen && (
             <div className="context-menu" style={{ top: '100%', left: 0 }}>
@@ -274,7 +275,7 @@ function HierarchyPanel({
                 setCreateMenuOpen(false);
                 await onCreateObject(selectedId ?? undefined);
               }}>
-                Empty GameObject
+                {t('hierarchy_create_empty')}
               </button>
               <button className="context-menu-item" onClick={async () => {
                 setCreateMenuOpen(false);
@@ -285,7 +286,7 @@ function HierarchyPanel({
                 });
                 if (onCreateObject) onCreateObject();
               }}>
-                Camera
+                {t('hierarchy_create_camera')}
               </button>
               <button className="context-menu-item" onClick={async () => {
                 setCreateMenuOpen(false);
@@ -296,13 +297,13 @@ function HierarchyPanel({
                 });
                 if (onCreateObject) onCreateObject();
               }}>
-                Light
+                {t('hierarchy_create_light')}
               </button>
               <button className="context-menu-item" onClick={async () => {
                 setCreateMenuOpen(false);
                 await onCreateObject();
               }}>
-                Create Empty
+                {t('hierarchy_create_empty')}
               </button>
             </div>
           )}
@@ -311,7 +312,7 @@ function HierarchyPanel({
 
       {/* Object list */}
       {objects.length === 0 && (
-        <p className="panel-empty">No objects in scene</p>
+        <p className="panel-empty">{t('hierarchy_no_objects')}</p>
       )}
       {objects.map((obj) => (
         <div
@@ -341,14 +342,14 @@ function HierarchyPanel({
             className="context-menu-item"
             onClick={() => { onDuplicateObject(contextMenu.id); setContextMenu(null); }}
           >
-            Duplicate
+            {t('hierarchy_duplicate')}
           </button>
           <div className="context-menu-sep" />
           <button
             className="context-menu-item danger"
             onClick={() => { onDeleteObject(contextMenu.id); setContextMenu(null); }}
           >
-            Delete
+            {t('hierarchy_delete')}
           </button>
         </div>
       )}
@@ -472,38 +473,38 @@ function InspectorPanel({
 
       {/* Transform */}
       <div className="inspector-section">
-        <div className="inspector-section-title">Transform</div>
+        <div className="inspector-section-title">{t('inspector_transform')}</div>
         <div className="inspector-field">
-          <label>Position</label>
+          <label>{t('inspector_position')}</label>
           {vec3Inputs('position', details.transform.position)}
         </div>
         <div className="inspector-field">
-          <label>Rotation</label>
+          <label>{t('inspector_rotation')}</label>
           {vec3Inputs('rotation', details.transform.rotation, 2)}
         </div>
         <div className="inspector-field">
-          <label>Scale</label>
+          <label>{t('inspector_scale')}</label>
           {vec3Inputs('scale', details.transform.scale)}
         </div>
       </div>
 
       {/* Components */}
       <div className="inspector-section">
-        <div className="inspector-section-title">Components</div>
+        <div className="inspector-section-title">{t('inspector_components')}</div>
         {details.components.map((c, i) => (
           <div key={i} className="inspector-component">
             <span>{c.type}</span>
             <button
               className="inspector-remove-btn"
               onClick={() => removeComponent(c.type)}
-              title={`Remove ${c.type}`}
+              title={t('inspector_remove_component')}
             >
               ×
             </button>
           </div>
         ))}
         {details.components.length === 0 && (
-          <p className="panel-empty">No components</p>
+          <p className="panel-empty">{t('common_none')}</p>
         )}
       </div>
 
@@ -514,7 +515,7 @@ function InspectorPanel({
           onClick={() => setAddMenuOpen(!addMenuOpen)}
           disabled={addableTypes.length === 0}
         >
-          + Add Component
+          {t('inspector_add_component')}
         </button>
         {addMenuOpen && (
           <div className="inspector-add-menu">
@@ -528,7 +529,7 @@ function InspectorPanel({
               </button>
             ))}
             {addableTypes.length === 0 && (
-              <span className="panel-empty">All components added</span>
+              <span className="panel-empty">{t('inspector_all_components_added')}</span>
             )}
           </div>
         )}
@@ -540,6 +541,7 @@ function InspectorPanel({
 // ─── Console Panel ───────────────────────────────────────────────────────────
 
 function ConsolePanel({ entries }: { entries: ConsoleEntry[] }) {
+  const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (scrollRef.current) {
@@ -557,7 +559,7 @@ function ConsolePanel({ entries }: { entries: ConsoleEntry[] }) {
         </div>
       ))}
       {entries.length === 0 && (
-        <p className="panel-empty">No messages</p>
+        <p className="panel-empty">{t('console_no_messages')}</p>
       )}
     </div>
   );
@@ -566,6 +568,7 @@ function ConsolePanel({ entries }: { entries: ConsoleEntry[] }) {
 // ─── Editor Page ─────────────────────────────────────────────────────────────
 
 export default function EditorPage({ onCloseProject }: Props) {
+  const { t } = useTranslation();
   // Panel sizes
   const [leftWidth, setLeftWidth] = useState(220);
   const [rightWidth, setRightWidth] = useState(280);
@@ -702,7 +705,7 @@ export default function EditorPage({ onCloseProject }: Props) {
   }, [runEditorAction]);
 
   const handleClose = useCallback(() => {
-    if (shellState?.scene_dirty && !window.confirm('Close without saving changes?')) {
+    if (shellState?.scene_dirty && !window.confirm(t('dialog_close_unsaved'))) {
       return;
     }
     onCloseProject();
@@ -766,7 +769,7 @@ export default function EditorPage({ onCloseProject }: Props) {
   // ── Render ──
 
   if (!shellState) {
-    return <div className="loading">Loading editor...</div>;
+    return <div className="loading">{t('loading_editor')}</div>;
   }
 
   return (
@@ -776,31 +779,31 @@ export default function EditorPage({ onCloseProject }: Props) {
           className="tool-btn"
           onClick={handleUndo}
           disabled={!shellState.can_undo}
-          title="Undo"
+          title={t('command_undo')}
         >↩</button>
         <button
           className="tool-btn"
           onClick={handleRedo}
           disabled={!shellState.can_redo}
-          title="Redo"
+          title={t('command_redo')}
         >↪</button>
         <div className="toolbar-sep" />
-        <button className="tool-btn" onClick={handleOpenScene} title="Open Scene (Ctrl+O)">
-          Open
+        <button className="tool-btn" onClick={handleOpenScene} title={t('command_open_scene')}>
+          {t('command_open_scene')}
         </button>
-        <button className="tool-btn" onClick={handleSaveSceneAs} title="Save Scene As (Ctrl+Shift+S)">
-          Save As
+        <button className="tool-btn" onClick={handleSaveSceneAs} title={t('command_save_as')}>
+          {t('command_save_as')}
         </button>
-        <button className="tool-btn" onClick={handleSaveScene} disabled={!shellState.scene_dirty} title="Save Scene">
-          Save
-        </button>
-        <div className="toolbar-sep" />
-        <button className="tool-btn play-btn" onClick={openGameView} title="Play (opens Game View window)">
-          ▶ Play
+        <button className="tool-btn" onClick={handleSaveScene} disabled={!shellState.scene_dirty} title={t('command_save')}>
+          {t('command_save')}
         </button>
         <div className="toolbar-sep" />
-        <button className="tool-btn" onClick={handleClose} title="Close Project">
-          Close
+        <button className="tool-btn play-btn" onClick={openGameView} title={t('command_play')}>
+          ▶ {t('command_play')}
+        </button>
+        <div className="toolbar-sep" />
+        <button className="tool-btn" onClick={handleClose} title={t('command_close_project')}>
+          {t('command_close_project')}
         </button>
       </div>
 
@@ -813,7 +816,7 @@ export default function EditorPage({ onCloseProject }: Props) {
           onResize={setLeftWidth}
           collapsed={leftCollapsed}
           onToggle={() => setLeftCollapsed(!leftCollapsed)}
-          header="Hierarchy"
+          header={t('panel_hierarchy')}
         >
           <HierarchyPanel
             objects={sceneTree}
@@ -830,7 +833,7 @@ export default function EditorPage({ onCloseProject }: Props) {
 
         <main className="panel panel-center">
           <div className="panel-header">
-            <span>Scene View</span>
+            <span>{t('panel_scene_view')}</span>
           </div>
           <ViewportCanvas sceneVersion={sceneVersion} />
         </main>
@@ -842,7 +845,7 @@ export default function EditorPage({ onCloseProject }: Props) {
           onResize={setRightWidth}
           collapsed={rightCollapsed}
           onToggle={() => setRightCollapsed(!rightCollapsed)}
-          header="Inspector"
+          header={t('panel_inspector')}
         >
           <InspectorPanel selectedId={selectedId} onRefresh={refreshSceneTree} />
         </ResizablePanel>
@@ -854,11 +857,11 @@ export default function EditorPage({ onCloseProject }: Props) {
         style={{ height: bottomCollapsed ? 28 : bottomHeight }}
       >
         <div className="panel-header">
-          <span>Console</span>
+          <span>{t('panel_console')}</span>
           <button
             className="panel-toggle"
             onClick={() => setBottomCollapsed(!bottomCollapsed)}
-            title="Toggle console"
+            title={t('panel_console')}
           >
             {bottomCollapsed ? '\u25B2' : '\u25BC'}
           </button>
@@ -874,7 +877,7 @@ export default function EditorPage({ onCloseProject }: Props) {
       {/* Status Bar */}
       <footer className="editor-statusbar">
         <span className="status-item">
-          {shellState.project_name || 'No project'}
+          {shellState.project_name || t('status_no_project')}
         </span>
         {errorMessage && (
           <span className="status-item status-error">

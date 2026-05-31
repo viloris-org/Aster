@@ -5,6 +5,7 @@ app_subtitle = "中心"
 sidebar_projects = "项目"
 sidebar_installs = "引擎版本"
 sidebar_settings = "设置"
+sidebar_theme = "主题"
 sidebar_dark_mode = "深色模式"
 
 # Menu bar
@@ -253,17 +254,33 @@ hub_launch = "▶  启动"
 hub_delete = "删除"
 hub_new_project = "+ 新建项目"
 hub_search = "搜索项目…"
+hub_search_no_matches = "无匹配结果"
+hub_search_no_matches_desc = "没有与搜索匹配的项目，请尝试其他名称。"
+hub_no_projects = "暂无项目"
+hub_no_projects_desc = "创建或打开一个项目以开始使用 Aster。"
 hub_empty = "暂无项目。点击 '+ 新建项目' 创建一个。"
+hub_open_folder = "打开文件夹"
 
 # Hub installs page
 hub_installs_title = "引擎版本"
 hub_installs_empty = "未找到引擎安装。"
+hub_installs_empty_desc = "安装引擎版本以开始使用。使用 CLI 安装 Aster 工具链。"
+hub_installs_badge_editor = "编辑器"
+hub_installs_badge_no_editor = "无编辑器"
+hub_installs_badge_runtime = "运行时"
+hub_installs_badge_no_runtime = "无运行时"
 
 # Hub settings page
 hub_settings_title = "设置"
 hub_settings_preferences = "偏好设置"
 hub_settings_language = "语言"
 hub_settings_limited = "设置当前仅限于侧边栏中的主题切换。"
+settings_about = "关于"
+settings_about_name = "Aster 编辑器"
+settings_about_version = "版本 {version} · 游戏引擎编辑器"
+settings_theme_dark = "深色"
+settings_theme_light = "浅色"
+settings_theme_system = "跟随系统"
 
 # New project dialog
 dialog_new_project = "创建项目"
@@ -278,6 +295,10 @@ dialog_toolchain = "工具链"
 dialog_warning_no_toolchain = "警告: 未安装工具链。"
 dialog_create = "创建"
 dialog_cancel = "取消"
+dialog_engine_version = "引擎版本"
+dialog_location_placeholder = "/home/user/projects"
+dialog_creating = "创建中..."
+dialog_create_project = "创建项目"
 template_3d = "3D"
 template_3d_desc = "透视相机、光照、3D 变换默认设置。"
 template_2d = "2D"
@@ -380,6 +401,21 @@ about_message = "Aster 编辑器外壳：场景、资源和播放模式工具已
 
 # Loading
 loading = "加载中..."
+loading_editor = "编辑器加载中..."
+
+# Console panel
+console_no_messages = "暂无消息"
+
+# Inspector panel (additional)
+inspector_components = "组件"
+inspector_all_components_added = "已添加所有组件"
+
+# Hierarchy panel (additional)
+hierarchy_create = "创建 GameObject"
+hierarchy_create_empty = "空 GameObject"
+
+# Editor dialog
+dialog_close_unsaved = "不保存更改直接关闭？"
 
 # Common
 common_none = "无"

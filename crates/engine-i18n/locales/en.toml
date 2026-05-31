@@ -5,6 +5,7 @@ app_subtitle = "Hub"
 sidebar_projects = "Projects"
 sidebar_installs = "Installs"
 sidebar_settings = "Settings"
+sidebar_theme = "Theme"
 sidebar_dark_mode = "Dark Mode"
 
 # Menu bar
@@ -253,17 +254,33 @@ hub_launch = "▶  Launch"
 hub_delete = "Delete"
 hub_new_project = "+ New Project"
 hub_search = "Search projects…"
+hub_search_no_matches = "No matches"
+hub_search_no_matches_desc = "No projects match your search. Try a different name."
+hub_no_projects = "No projects yet"
+hub_no_projects_desc = "Create or open a project to get started with Aster."
 hub_empty = "No projects yet. Click '+ New Project' to create one."
+hub_open_folder = "Open folder"
 
 # Hub installs page
 hub_installs_title = "Installs"
 hub_installs_empty = "No engine installations found."
+hub_installs_empty_desc = "Install an engine version to get started. Use the CLI to install Aster toolchains."
+hub_installs_badge_editor = "Editor"
+hub_installs_badge_no_editor = "No Editor"
+hub_installs_badge_runtime = "Runtime"
+hub_installs_badge_no_runtime = "No Runtime"
 
 # Hub settings page
 hub_settings_title = "Settings"
 hub_settings_preferences = "Preferences"
 hub_settings_language = "Language"
 hub_settings_limited = "Settings are currently limited to theme toggles in the sidebar."
+settings_about = "About"
+settings_about_name = "Aster Editor"
+settings_about_version = "Version {version} · Game Engine Editor"
+settings_theme_dark = "Dark"
+settings_theme_light = "Light"
+settings_theme_system = "System"
 
 # New project dialog
 dialog_new_project = "Create Project"
@@ -278,6 +295,10 @@ dialog_toolchain = "Toolchain"
 dialog_warning_no_toolchain = "Warning: No toolchains installed."
 dialog_create = "Create"
 dialog_cancel = "Cancel"
+dialog_engine_version = "Engine Version"
+dialog_location_placeholder = "/home/user/projects"
+dialog_creating = "Creating..."
+dialog_create_project = "Create Project"
 template_3d = "3D"
 template_3d_desc = "Perspective camera, lighting, 3D transform defaults."
 template_2d = "2D"
@@ -380,6 +401,21 @@ about_message = "Aster editor shell: scene, asset, and play-mode tools are conne
 
 # Loading
 loading = "Loading..."
+loading_editor = "Loading editor..."
+
+# Console panel
+console_no_messages = "No messages"
+
+# Inspector panel (additional)
+inspector_components = "Components"
+inspector_all_components_added = "All components added"
+
+# Hierarchy panel (additional)
+hierarchy_create = "Create GameObject"
+hierarchy_create_empty = "Empty GameObject"
+
+# Editor dialog
+dialog_close_unsaved = "Close without saving changes?"
 
 # Common
 common_none = "None"
