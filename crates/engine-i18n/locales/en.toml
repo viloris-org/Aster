@@ -1,5 +1,6 @@
 app_name = "Aster"
 app_subtitle = "Hub"
+app_tagline = "Game Engine"
 
 # Sidebar
 sidebar_projects = "Projects"
@@ -275,6 +276,12 @@ hub_settings_title = "Settings"
 hub_settings_preferences = "Preferences"
 hub_settings_language = "Language"
 hub_settings_limited = "Settings are currently limited to theme toggles in the sidebar."
+settings_appearance = "Appearance"
+settings_theme = "Theme"
+settings_theme_desc = "Choose between light, dark, and system theme"
+settings_language = "Language"
+settings_editor_language = "Editor Language"
+settings_language_desc = "Select the display language for the editor"
 settings_about = "About"
 settings_about_name = "Aster Editor"
 settings_about_version = "Version {version} · Game Engine Editor"
@@ -418,6 +425,14 @@ hierarchy_create_empty = "Empty GameObject"
 
 # Editor dialog
 dialog_close_unsaved = "Close without saving changes?"
+
+# Editor status messages
+editor_status_object_created = "Object created"
+editor_status_object_deleted = "Object deleted"
+editor_status_object_duplicated = "Object duplicated"
+editor_status_scene_saved = "Scene saved"
+editor_status_opened = "Opened: {path}"
+editor_status_saved = "Saved: {path}"
 
 # Common
 common_none = "None"

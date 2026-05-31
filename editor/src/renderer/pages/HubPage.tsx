@@ -186,7 +186,7 @@ function Sidebar({
         </svg>
         <div>
           <h1>Aster</h1>
-          <span>Game Engine</span>
+          <span>{t('app_tagline')}</span>
         </div>
       </div>
 

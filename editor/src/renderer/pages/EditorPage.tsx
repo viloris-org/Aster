@@ -568,7 +568,7 @@ function ConsolePanel({ entries }: { entries: ConsoleEntry[] }) {
 // ─── Editor Page ─────────────────────────────────────────────────────────────
 
 export default function EditorPage({ onCloseProject }: Props) {
-  const { t } = useTranslation();
+  const { t, t_fmt } = useTranslation();
   // Panel sizes
   const [leftWidth, setLeftWidth] = useState(220);
   const [rightWidth, setRightWidth] = useState(280);
@@ -668,7 +668,7 @@ export default function EditorPage({ onCloseProject }: Props) {
       const params: Record<string, unknown> = {};
       if (parentId) params.parent_id = parentId;
       await rpc('shell/create_object', params);
-    }, 'Object created');
+    }, t('editor_status_object_created'));
   }, [runEditorAction]);
 
   const handleDeleteObject = useCallback(async (id: string) => {
@@ -677,19 +677,19 @@ export default function EditorPage({ onCloseProject }: Props) {
       if (selectedId === id) {
         setSelectedId(null);
       }
-    }, 'Object deleted');
+    }, t('editor_status_object_deleted'));
   }, [runEditorAction, selectedId]);
 
   const handleDuplicateObject = useCallback(async (id: string) => {
     await runEditorAction(async () => {
       await rpc('shell/duplicate_object', { id });
-    }, 'Object duplicated');
+    }, t('editor_status_object_duplicated'));
   }, [runEditorAction]);
 
   const handleSaveScene = useCallback(async () => {
     await runEditorAction(async () => {
       await rpc('shell/save_scene');
-    }, 'Scene saved');
+    }, t('editor_status_scene_saved'));
   }, [runEditorAction]);
 
   const handleUndo = useCallback(async () => {
@@ -716,14 +716,14 @@ export default function EditorPage({ onCloseProject }: Props) {
   const handleOpenScene = useCallback(async () => {
     await runEditorAction(async () => {
       const result = await openScene();
-      if (result) setStatusMessage(`Opened: ${result}`);
+      if (result) setStatusMessage(t_fmt('editor_status_opened', { path: result }));
     });
   }, [runEditorAction]);
 
   const handleSaveSceneAs = useCallback(async () => {
     await runEditorAction(async () => {
       const result = await saveSceneAs();
-      if (result) setStatusMessage(`Saved: ${result}`);
+      if (result) setStatusMessage(t_fmt('editor_status_saved', { path: result }));
     });
   }, [runEditorAction]);
 

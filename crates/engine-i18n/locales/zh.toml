@@ -1,5 +1,6 @@
 app_name = "Aster"
 app_subtitle = "中心"
+app_tagline = "游戏引擎"
 
 # Sidebar
 sidebar_projects = "项目"
@@ -275,6 +276,12 @@ hub_settings_title = "设置"
 hub_settings_preferences = "偏好设置"
 hub_settings_language = "语言"
 hub_settings_limited = "设置当前仅限于侧边栏中的主题切换。"
+settings_appearance = "外观"
+settings_theme = "主题"
+settings_theme_desc = "选择浅色、深色或跟随系统主题"
+settings_language = "语言"
+settings_editor_language = "编辑器语言"
+settings_language_desc = "选择编辑器的显示语言"
 settings_about = "关于"
 settings_about_name = "Aster 编辑器"
 settings_about_version = "版本 {version} · 游戏引擎编辑器"
@@ -418,6 +425,14 @@ hierarchy_create_empty = "空 GameObject"
 
 # Editor dialog
 dialog_close_unsaved = "不保存更改直接关闭？"
+
+# Editor status messages
+editor_status_object_created = "对象已创建"
+editor_status_object_deleted = "对象已删除"
+editor_status_object_duplicated = "对象已复制"
+editor_status_scene_saved = "场景已保存"
+editor_status_opened = "已打开：{path}"
+editor_status_saved = "已保存：{path}"
 
 # Common
 common_none = "无"
