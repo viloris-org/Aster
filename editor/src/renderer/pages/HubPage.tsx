@@ -673,8 +673,8 @@ function SettingsPage({
             </div>
             <div className="settings-control" style={{ display: 'flex', gap: 4 }}>
               {[
-                { id: 'en', label: 'English' },
-                { id: 'zh', label: '中文' },
+                { id: 'en', label: t('settings_language_en') },
+                { id: 'zh', label: t('settings_language_zh') },
               ].map(opt => (
                 <button
                   key={opt.id}

@@ -281,6 +281,8 @@ settings_about_version = "版本 {version} · 游戏引擎编辑器"
 settings_theme_dark = "深色"
 settings_theme_light = "浅色"
 settings_theme_system = "跟随系统"
+settings_language_en = "English"
+settings_language_zh = "中文"
 
 # New project dialog
 dialog_new_project = "创建项目"

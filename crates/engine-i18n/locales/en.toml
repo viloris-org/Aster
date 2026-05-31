@@ -281,6 +281,8 @@ settings_about_version = "Version {version} · Game Engine Editor"
 settings_theme_dark = "Dark"
 settings_theme_light = "Light"
 settings_theme_system = "System"
+settings_language_en = "English"
+settings_language_zh = "中文"
 
 # New project dialog
 dialog_new_project = "Create Project"
