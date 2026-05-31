@@ -35,11 +35,11 @@ jobs:
         run: cargo clippy --workspace
       - name: Test workspace
         run: cargo test --workspace
-      - name: Build runtime-min
+      - name: Build runtime-min (minimal profile)
         run: cargo build -p runtime-min --no-default-features --features runtime-min
-      - name: Build editor profile
+      - name: Build runtime-min (editor profile)
         run: cargo xtask build-editor
-      - name: Build agent-tools profile
-        run: cargo build -p runtime-min --no-default-features --features agent-tools
+      - name: Check Tauri editor backend compiles
+        run: cargo check -p aster-editor-tauri --features "editor,wgpu"
       - name: Agent sandbox and worktree smoke tests
         run: cargo xtask agent-smoke

@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Aster is a Rust workspace. Core engine code lives under `crates/`, with each subsystem in its own crate: `engine-core`, `engine-ecs`, `engine-platform`, `engine-assets`, `engine-render`, `engine-render-vulkan`, `engine-physics`, `engine-audio`, `engine-editor`, `engine-editor-ui`, `engine-i18n`, `engine-cli`, and `runtime-min`. Repository automation is in `xtask/`. Integration tests currently live in crate-level `tests/` directories, for example `crates/runtime-min/tests/`. Example project assets and configs are in `examples/project/`, including scenes, prefabs, and `*.toml` runtime/editor configuration. Design and planning notes belong in `docs/`.
+Aster is a Rust workspace. Core engine code lives under `crates/`, with each subsystem in its own crate: `engine-core`, `engine-ecs`, `engine-platform`, `engine-assets`, `engine-render`, `engine-render-vulkan`, `engine-physics`, `engine-audio`, `engine-editor`, `engine-editor-ui`, `engine-i18n`, and `runtime-min`. The Tauri-based editor GUI lives in `editor/`. Repository automation is in `xtask/`. Integration tests currently live in crate-level `tests/` directories, for example `crates/runtime-min/tests/`. Example project assets and configs are in `examples/project/`, including scenes, prefabs, and `*.toml` runtime/editor configuration. Design and planning notes belong in `docs/`.
 
 ## Build, Test, and Development Commands
 

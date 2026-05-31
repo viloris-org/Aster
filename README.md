@@ -1,198 +1,138 @@
 # Aster
 
+[![CI](https://github.com/viloris-org/Aster/actions/workflows/core.yml/badge.svg)](https://github.com/viloris-org/Aster/actions/workflows/core.yml)
+[![Nightly](https://github.com/viloris-org/Aster/actions/workflows/nightly.yml/badge.svg)](https://github.com/viloris-org/Aster/actions/workflows/nightly.yml)
+[![License: MPL-2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/Rust-1.78+-orange.svg)
+
 English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-Aster is an early-stage Rust game engine workspace focused on a small native
-runtime, explicit subsystem boundaries, editor-ready data formats, and
-feature-gated engine composition.
+Aster is a Rust game engine with a native editor — make scenes, tweak physics, write
+scripts, and see results in real time.
 
-The project is not a production engine yet. It is a workspace for building and
-testing the runtime, asset pipeline, rendering abstractions, editor shell, and
-packaging flow that will make up the engine.
+![Aster Editor](docs/screenshots/editor.png)
 
-## Goals
+> **Screenshot placeholder** — replace `docs/screenshots/editor.png` with an actual
+> editor screenshot once the UI stabilises.
 
-- Keep the minimal runtime small and measurable.
-- Make engine subsystems explicit, testable, and independently feature-gated.
-- Use data formats that are suitable for editor workflows, automation, and
-  future migration.
-- Provide repository automation through `xtask` instead of ad-hoc scripts.
-- Keep example project configuration generic and reproducible.
+## Getting Started
 
-## Workspace
+```sh
+git clone https://github.com/viloris-org/Aster
+cd Aster
 
-Core engine code lives in `crates/`:
+# Launch the editor
+cd editor
+bun install
+bun tauri dev
+```
 
-- `engine-core`: shared IDs, handles, errors, logging, math, time, and runtime
-  configuration.
-- `engine-ecs`: scene, entity, transform, world, schema, physics, and audio
-  primitives.
-- `engine-platform`: platform boundaries for windows, input, filesystem,
-  dynamic libraries, and callbacks.
-- `engine-assets`: asset database, resource registry, manifests, dependency
-  graph, import queues, hot reload tracking, and resource data formats.
-- `engine-render`: renderer-facing abstractions, render graph, targets,
-  resources, pipelines, and the headless render device.
-- `engine-render-wgpu`: WGPU-backed rendering integration.
-- `engine-render-vulkan`: Vulkan-facing rendering integration scaffolding.
-- `engine-physics`: physics integration surface.
-- `engine-audio`: audio integration surface.
-- `engine-editor`: editor workflows, native editor services, render hooks,
-  physics hooks, and agent tooling.
-- `engine-editor-ui`: egui-based editor shell, panels, widgets, fonts, and UI
-  state.
-- `engine-i18n`: localization loading and bundled locale files.
-- `engine-script-rhai`: Rhai scripting integration.
-- `engine-cli` / package `aster`: editor-first launcher and command-line tool.
-- `runtime-min`: minimal runtime profile and feature-composed runtime entry
-  point.
-- `xtask`: repository automation entry points.
+> **Prerequisites:** [Rust ≥ 1.78](https://rustup.rs/), [Bun ≥ 1.0](https://bun.sh/),
+> [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/).
+> Linux users: `sudo apt install libwebkit2gtk-4.1-dev build-essential libssl-dev
+> libayatana-appindicator3-dev librsvg2-dev`
 
-Example project data lives in `examples/project/`, including:
+## Features
 
-- `aster.project.toml`: project manifest.
-- `build.runtime-min.toml`: sample runtime build configuration.
-- `editor.preferences.toml`: sample editor preferences.
-- `assets/`: example material assets and metadata.
-- `scenes/`: example scene data.
-- `prefabs/`: example prefab data.
+- **Scene editor** — place objects, tweak transforms, add components, all through a
+  visual interface. No hand-editing JSON.
+- **Live play mode** — hit Play, see physics and scripts run, hit Stop with zero
+  cleanup. Your edit scene is never touched.
+- **AI-assisted editing** — describe what you want in natural language; the agent
+  plans and executes scene changes under a sandboxed review workflow.
+- **Asset pipeline** — drop glTF/PNG into the project panel. File watcher triggers
+  import, hot reload pushes updates live.
+- **Pluggable rendering** — swap backends without touching engine code. Ships with
+  WGPU; Vulkan in progress.
+- **Headless runtime** — the same engine runs servers, CI tests, or automated
+  builds. No window required.
+- **No unsafe code** — every crate uses `#![forbid(unsafe_code)]`.
 
-Design and planning notes belong in `docs/`.
+## Project Structure
+
+```
+Aster/
+├── editor/                  # Tauri desktop app (React + Rust)
+├── crates/
+│   ├── engine-editor/       # Editor workflow, services, agent tooling
+│   ├── engine-editor-ui/    # egui panels, widgets, viewport rendering
+│   ├── engine-ecs/          # Scene, entity, transform, world
+│   ├── engine-assets/       # Database, importers, hot reload
+│   ├── engine-render/       # Render graph, device trait
+│   ├── engine-render-wgpu/  # WGPU backend
+│   ├── engine-render-vulkan/# Vulkan backend (WIP)
+│   ├── engine-physics/      # Physics (rapier3d)
+│   ├── engine-audio/        # Audio pipeline
+│   ├── engine-core/         # IDs, errors, math, config
+│   ├── engine-platform/     # Window, input, filesystem
+│   ├── engine-script-rhai/  # Rhai scripting
+│   ├── engine-animation/    # Animation system
+│   ├── engine-ai/           # AI planner & system prompts
+│   ├── engine-agent-cluster/# Agent orchestration
+│   ├── runtime-min/         # Composition root
+│   └── …                    # i18n, shader, policy, skeleton, etc.
+├── xtask/                   # Build & automation tasks
+├── examples/                # Sample project & scenes
+└── docs/                    # Design notes
+```
+
+## Editing a Scene
+
+1. Launch the editor → **Hub** screen
+2. Create or open a project
+3. **Hierarchy** panel lists every object in the scene
+4. **Inspector** shows the selected object's transform and components
+5. **Scene View** renders the 3D viewport — orbit, pan, zoom
+6. Click **Play** to run physics and scripts in **Game View**
+7. Add components (Camera, Light, MeshRenderer, Rigidbody, Collider, …) or write a
+   Rhai script
 
 ## Build Profiles
 
-Runtime composition is driven through Cargo features:
+Profiles select which subsystems are linked at compile time:
 
-- `runtime-min`: minimal native runtime without editor, scripting, heavy
-  importers, physics, audio, or concrete rendering.
-- `runtime-game`: game runtime surface on top of the minimal profile.
-- `wgpu`: WGPU rendering backend for runtime builds that need it.
-- `physics`: optional physics support.
-- `audio`: optional audio support.
-- `editor`: editor-facing workflows and data.
-- `agent-tools`: automation and agent integration surface.
-- `script-python`: Python scripting backend integration surface.
-- `dev-full`: full local development profile.
-
-Heavy asset importers are feature-gated in `engine-assets` with
-`fbx-importer`, `assimp-importer`, and `heavy-importers`, so disabling them
-keeps their dependencies out of minimal runtime builds.
-
-## Requirements
-
-- Rust 1.78 or newer.
-- Cargo with the Rust 2021 edition toolchain.
-- Platform graphics dependencies required by `winit`, `egui`, `wgpu`, or
-  Vulkan when building editor or rendering features.
-
-## Development
-
-Run the full workspace tests:
+| Profile | What you get |
+|---|---|
+| `editor` | Full editor with egui panels, wgpu viewports, agent tools |
+| `runtime-min` | Headless — CI smoke tests, servers, automated builds |
+| `runtime-game` | Headless + windowing |
+| `dev-full` | Everything: editor, physics, audio, script, agent, render |
 
 ```sh
-cargo test --workspace
+cargo build -p runtime-min --no-default-features --features editor
+cargo build -p runtime-min --no-default-features --features runtime-min
 ```
 
-Type-check every crate with all feature gates enabled:
+## Building the Editor
 
 ```sh
-cargo check --workspace --all-features
+cd editor
+bun install
+
+# Development (hot-reload frontend + Rust backend)
+bun tauri dev
+
+# Distribution bundle
+bun tauri build
+# → editor/src-tauri/target/release/bundle/
 ```
-
-Check the minimal runtime feature path:
-
-```sh
-cargo test -p runtime-min --no-default-features --features runtime-min
-```
-
-Run the same common tasks through repository automation:
-
-```sh
-cargo run -p xtask -- test
-cargo run -p xtask -- check
-```
-
-Build the minimal runtime profile:
-
-```sh
-cargo run -p xtask -- runtime-min
-```
-
-Build the editor profile:
-
-```sh
-cargo run -p xtask -- build-editor
-```
-
-Run the agent tooling smoke path:
-
-```sh
-cargo run -p xtask -- agent-smoke
-```
-
-## CLI
-
-The `aster` package provides the editor-first launcher and command-line tool.
-
-Show available CLI commands:
-
-```sh
-cargo run -p aster
-```
-
-Common commands:
-
-```sh
-cargo run -p aster -- profiles
-cargo run -p aster -- smoke runtime-min
-cargo run -p aster -- run examples/project
-cargo run -p aster -- build examples/project
-```
-
-## Packaging
-
-Package the example project with the editor profile:
-
-```sh
-cargo run -p xtask -- package --profile editor --project examples/project
-```
-
-Package output is written under:
-
-```text
-target/aster-packages/<platform>/<profile>/
-```
-
-Native packaging currently supports the `runtime-game` and `editor` profiles.
-If no profile is passed, `xtask package` reads the example project's runtime
-build configuration.
 
 ## Testing
 
-Use Rust's built-in test framework. Put crate integration tests in
-`crates/<crate>/tests/` and unit tests near the code they cover. When changing
-feature-gated code, run the targeted feature command as well as the full
-workspace tests.
-
-Useful targeted checks:
-
 ```sh
+# Full engine test suite
+cargo test --workspace
+
+# Headless runtime only (fast)
 cargo test -p runtime-min --no-default-features --features runtime-min
+
+# Editor services
 cargo test -p engine-editor --no-default-features --features agent-tools
+
+# WGPU backend
 cargo test -p engine-render-wgpu
 ```
 
-## Repository Practices
-
-- Format Rust code with `cargo fmt --workspace`.
-- Prefer workspace dependencies from the root `Cargo.toml`.
-- Keep crate names in kebab case and Rust modules, files, functions, and
-  variables in snake case.
-- Do not commit generated `target/` output or machine-local secrets.
-- Keep example configuration generic under `examples/project/`.
-- Avoid enabling heavy importers in minimal runtime changes unless the change
-  explicitly requires them.
-
 ## License
 
-Aster is licensed under the Mozilla Public License 2.0. See `LICENSE`.
+Mozilla Public License 2.0. See [LICENSE](LICENSE).

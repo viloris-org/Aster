@@ -123,7 +123,7 @@ pub struct EditorHost {
 }
 
 impl EditorHost {
-    fn new(store: FileEditorStore) -> EngineResult<Self> {
+    pub fn new(store: FileEditorStore) -> EngineResult<Self> {
         let durable_state = store.load().unwrap_or_default();
         let hub = HubState::from_durable_state(durable_state.clone());
         Ok(Self {
@@ -138,7 +138,7 @@ impl EditorHost {
     }
 
     /// Dispatch an RPC method call.
-    fn handle(&mut self, method: &str, params: &Value) -> EngineResult<Value> {
+    pub fn handle(&mut self, method: &str, params: &Value) -> EngineResult<Value> {
         match method {
             // ── Hub ──
             "app/get_desktop_integration" => self.app_get_desktop_integration(params),
