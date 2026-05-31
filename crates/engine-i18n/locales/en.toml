@@ -320,6 +320,66 @@ dialog_cancel = "Cancel"
 command_save_as = "Save As"
 command_close_project = "Close Project"
 command_open_scene = "Open Scene"
+command_save = "Save"
+command_build = "Build"
+command_play = "Play"
+command_pause = "Pause"
+command_step = "Step"
+command_stop = "Stop"
+command_reload_assets = "Reload Assets"
+command_create_material = "Create Material"
+command_create_script = "Create Script"
+command_create_empty = "Create Empty"
+command_create_camera = "Create Camera"
+command_create_light = "Create Light"
+command_add_camera = "Add Camera"
+command_add_mesh_renderer = "Add Mesh Renderer"
+command_add_light = "Add Light"
+command_add_rigidbody = "Add Rigidbody"
+command_add_collider = "Add Collider"
+command_add_audio_source = "Add Audio Source"
+command_add_particle_emitter = "Add Particle Emitter"
+command_add_script = "Add Script"
+command_reset_layout = "Reset Layout"
+command_palette = "Command Palette"
+command_about_aster = "About Aster"
+
+# Command categories
+category_file = "File"
+category_edit = "Edit"
+category_play = "Play"
+category_assets = "Assets"
+category_gameobject = "GameObject"
+category_component = "Component"
+category_window = "Window"
+category_help = "Help"
+
+# Panel titles
+panel_assets = "Assets"
+panel_performance = "Performance"
+
+# Project validation errors
+error_project_name_required = "Project name is required"
+error_project_name_separators = "Project name cannot contain path separators"
+error_project_location_required = "Project location is required"
+error_project_template_required = "Project template is required"
+error_toolchain_version_required = "Engine/toolchain version is required"
+
+# Scene ops errors
+error_select_before_component = "Select a GameObject before adding a component"
+error_selection_no_longer_exists = "Selected GameObject no longer exists"
+
+# File operation errors
+error_failed_open_script = "Failed to open script {}: {}"
+error_failed_delete_asset = "Failed to delete asset: {}"
+error_failed_save_script = "Failed to save script {}: {}"
+error_failed_reload_script = "Failed to reload script {}: {}"
+
+# About
+about_message = "Aster editor shell: scene, asset, and play-mode tools are connected."
+
+# Loading
+loading = "Loading..."
 
 # Common
 common_none = "None"

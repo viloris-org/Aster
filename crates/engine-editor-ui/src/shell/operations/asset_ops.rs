@@ -19,7 +19,7 @@ pub fn open_asset(
     _guid: AssetGuid,
     kind: ResourceKind,
     relative_path: &Path,
-    _tr: &Translations,
+    tr: &Translations,
 ) {
     let Some(project) = shell.project() else {
         return;
@@ -35,7 +35,7 @@ pub fn open_asset(
             }
         }
         ResourceKind::Script => {
-            open_script_editor(shell, ui_state, relative_path, &abs_path);
+            open_script_editor(shell, ui_state, tr, relative_path, &abs_path);
         }
         _ => {
             open_path(&abs_path);
@@ -46,6 +46,7 @@ pub fn open_asset(
 fn open_script_editor(
     shell: &mut EditorShell,
     ui_state: &mut ShellUiState,
+    tr: &Translations,
     relative_path: &Path,
     abs_path: &Path,
 ) {
@@ -60,7 +61,10 @@ fn open_script_editor(
         }
         Err(source) => push_error(
             shell,
-            format!("Failed to open script {}: {source}", abs_path.display()),
+            tr.tr_fmt(
+                "error_failed_open_script",
+                &[&abs_path.display().to_string(), &source.to_string()],
+            ),
         ),
     }
 }
@@ -88,7 +92,10 @@ pub fn delete_asset(
     } else {
         push_error(
             shell,
-            format!("Failed to delete asset: {}", abs_path.display()),
+            tr.tr_fmt(
+                "error_failed_delete_asset",
+                &[&abs_path.display().to_string()],
+            ),
         );
     }
 }

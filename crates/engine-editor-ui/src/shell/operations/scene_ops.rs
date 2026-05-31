@@ -9,6 +9,7 @@ use engine_ecs::{
     RigidbodyComponentData, ScriptComponentProxy,
 };
 use engine_editor::UndoCommand;
+use engine_i18n::Translations;
 
 use super::command::push_error;
 
@@ -250,12 +251,14 @@ pub fn create_object_with_component(
 }
 
 /// Add or replace a component on the selected object.
-pub fn add_component_to_selected(shell: &mut EditorShell, label: &str, component: ComponentData) {
+pub fn add_component_to_selected(
+    shell: &mut EditorShell,
+    tr: &Translations,
+    label: &str,
+    component: ComponentData,
+) {
     let Some(id) = shell.selected_entity_id() else {
-        push_error(
-            shell,
-            "Select a GameObject before adding a component".to_owned(),
-        );
+        push_error(shell, tr.tr("error_select_before_component").to_owned());
         return;
     };
     let before = scene_snapshot(shell);
@@ -277,7 +280,7 @@ pub fn add_component_to_selected(shell: &mut EditorShell, label: &str, component
             before,
         ),
         Some(Err(error)) => push_error(shell, error.to_string()),
-        None => push_error(shell, "Selected GameObject no longer exists".to_owned()),
+        None => push_error(shell, tr.tr("error_selection_no_longer_exists").to_owned()),
     }
 }
 

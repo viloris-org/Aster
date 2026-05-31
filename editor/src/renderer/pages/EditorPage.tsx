@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  rpc, openGameView,
+  openGameView, openScene, rpc, saveSceneAs, viewportReadback,
 } from '../api';
+import { useTranslation } from '../i18n';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -11,6 +12,7 @@ interface ShellState {
   scene_dirty: boolean;
   can_undo: boolean;
   can_redo: boolean;
+  scene_version?: number;
   desktop_integration?: {
     desktop_environment: string;
     prefers_native_chrome: boolean;
@@ -33,12 +35,6 @@ interface ConsoleEntry {
   message: string;
   file?: string;
   line?: number;
-}
-
-interface ViewportFrame {
-  width: number;
-  height: number;
-  png_base64: string;
 }
 
 interface EntityDetails {
@@ -149,43 +145,56 @@ function ResizablePanel({
 
 // ─── Viewport ────────────────────────────────────────────────────────────────
 
-function ViewportCanvas() {
+function ViewportCanvas({ sceneVersion = 0 }: { sceneVersion?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef({ width: 640, height: 480 });
+  const isActiveRef = useRef(true);
+  const versionRef = useRef(sceneVersion);
+  const lastRenderedVersionRef = useRef<number | null>(null);
 
-  // Poll for frames
+  // Keep version ref in sync
+  versionRef.current = sceneVersion;
+
+  // Poll for frames via binary IPC with lazy rendering
   useEffect(() => {
-    let active = true;
-    let frameId = 0;
+    isActiveRef.current = true;
 
     const poll = async () => {
-      if (!active) return;
+      if (!isActiveRef.current) return;
       const { width, height } = sizeRef.current;
       try {
-        const result = await rpc<ViewportFrame>('viewport/readback', {
+        const buffer = await viewportReadback({
           width, height,
-          yaw: -0.5, pitch: 0.3, distance: 6.0,
+          lastVersion: lastRenderedVersionRef.current ?? undefined,
         });
+        if (!isActiveRef.current || !canvasRef.current) return;
 
-        if (!active || !canvasRef.current) return;
+        // Parse header: [width: u32 LE][height: u32 LE][RGBA pixels...]
+        const header = new Uint32Array(buffer, 0, 2);
+        const w = header[0];
+        const h = header[1];
 
-        const img = new Image();
-        img.onload = () => {
-          if (!active || !canvasRef.current) return;
+        // w === 0 means "no change" (lazy rendering skip)
+        if (w > 0 && h > 0) {
+          lastRenderedVersionRef.current = versionRef.current;
           const ctx = canvasRef.current.getContext('2d');
-          if (ctx) ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(img.src);
-        };
-        img.src = `data:image/png;base64,${result.png_base64}`;
+          if (ctx) {
+            const imageData = new ImageData(
+              new Uint8ClampedArray(buffer, 8, w * h * 4),
+              w, h,
+            );
+            ctx.putImageData(imageData, 0, 0);
+          }
+        }
       } catch {
-        // viewport not ready
+        // viewport not ready yet
       }
-      frameId = window.setTimeout(poll, 100);
+      setTimeout(poll, 100);
     };
 
     poll();
-    return () => { active = false; clearTimeout(frameId); };
+    return () => { isActiveRef.current = false; };
   }, []);
 
   // Resize observer
@@ -199,6 +208,7 @@ function ViewportCanvas() {
           const w = Math.round(width);
           const h = Math.round(height);
           sizeRef.current = { width: w, height: h };
+          lastRenderedVersionRef.current = null;
           const canvas = canvasRef.current;
           if (canvas) { canvas.width = w; canvas.height = h; }
         }
@@ -221,13 +231,85 @@ function HierarchyPanel({
   objects,
   selectedId,
   onSelect,
+  onCreateObject,
+  onDeleteObject,
+  onDuplicateObject,
 }: {
   objects: SceneObject[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onCreateObject: (parentId?: string) => Promise<void>;
+  onDeleteObject: (id: string) => Promise<void>;
+  onDuplicateObject: (id: string) => Promise<void>;
 }) {
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [contextMenu]);
+
   return (
     <>
+      {/* Toolbar row */}
+      <div className="hierarchy-toolbar">
+        <span className="hierarchy-count">{objects.length}</span>
+        <div style={{ position: 'relative' }}>
+          <button
+            className="hierarchy-add-btn"
+            onClick={() => setCreateMenuOpen(!createMenuOpen)}
+            title="Create GameObject"
+          >+</button>
+          {createMenuOpen && (
+            <div className="context-menu" style={{ top: '100%', left: 0 }}>
+              <button className="context-menu-item" onClick={async () => {
+                setCreateMenuOpen(false);
+                await onCreateObject(selectedId ?? undefined);
+              }}>
+                Empty GameObject
+              </button>
+              <button className="context-menu-item" onClick={async () => {
+                setCreateMenuOpen(false);
+                // Create with Camera component
+                await rpc('shell/add_component', {
+                  id: (await rpc<{ id: string }>('shell/create_object', {})).id,
+                  component_type: 'Camera',
+                });
+                if (onCreateObject) onCreateObject();
+              }}>
+                Camera
+              </button>
+              <button className="context-menu-item" onClick={async () => {
+                setCreateMenuOpen(false);
+                // Create with Light component
+                await rpc('shell/add_component', {
+                  id: (await rpc<{ id: string }>('shell/create_object', {})).id,
+                  component_type: 'Light',
+                });
+                if (onCreateObject) onCreateObject();
+              }}>
+                Light
+              </button>
+              <button className="context-menu-item" onClick={async () => {
+                setCreateMenuOpen(false);
+                await onCreateObject();
+              }}>
+                Create Empty
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Object list */}
       {objects.length === 0 && (
         <p className="panel-empty">No objects in scene</p>
       )}
@@ -236,6 +318,10 @@ function HierarchyPanel({
           key={obj.id}
           className={`hierarchy-item ${selectedId === obj.id ? 'selected' : ''}`}
           onClick={() => onSelect(obj.id)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setContextMenu({ id: obj.id, x: e.clientX, y: e.clientY });
+          }}
           title={`Tag: ${obj.tag}\nPosition: ${obj.position.map((v) => v.toFixed(2)).join(', ')}`}
         >
           <span className={`entity-icon entity-icon-${obj.tag.toLowerCase()}`} />
@@ -243,6 +329,29 @@ function HierarchyPanel({
           <span className="entity-tag">{obj.tag}</span>
         </div>
       ))}
+
+      {/* Context menu */}
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 1000 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="context-menu-item"
+            onClick={() => { onDuplicateObject(contextMenu.id); setContextMenu(null); }}
+          >
+            Duplicate
+          </button>
+          <div className="context-menu-sep" />
+          <button
+            className="context-menu-item danger"
+            onClick={() => { onDeleteObject(contextMenu.id); setContextMenu(null); }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
     </>
   );
 }
@@ -258,6 +367,7 @@ function InspectorPanel({
   selectedId: string | null;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const [details, setDetails] = useState<EntityDetails | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
@@ -282,8 +392,8 @@ function InspectorPanel({
       arr[axis] = num;
       const newTransform = { ...details.transform, [key]: arr };
       setDetails({ ...details, transform: newTransform });
-      // Debounced save: fire and forget
-      rpc('shell/update_transform', { id: selectedId, [key]: arr });
+      // Debounced save
+      rpc('shell/update_transform', { id: selectedId, [key]: arr }).catch(console.error);
     },
     [selectedId, details],
   );
@@ -314,11 +424,11 @@ function InspectorPanel({
   // ── Render ──
 
   if (!selectedId) {
-    return <p className="panel-empty">Nothing selected</p>;
+    return <p className="panel-empty">{t('inspector_select_hint')}</p>;
   }
 
   if (!details) {
-    return <p className="panel-empty">Loading...</p>;
+    return <p className="panel-empty">{t('loading')}</p>;
   }
 
   const labelAxis = (label: string) => ['X', 'Y', 'Z', 'W'].map((a) => `${label}${a}`);
@@ -330,14 +440,16 @@ function InspectorPanel({
   ) => (
     <div className="inspector-vec3">
       {values.map((v, i) => (
-        <input
-          key={i}
-          type="text"
-          value={v.toFixed(decimals)}
-          onChange={(e) => updateTransform(key, i, e.target.value)}
-          onBlur={() => loadDetails()}
-          title={labelAxis(key)[i] || String(i)}
-        />
+        <span key={i} className="inspector-vec3-input-wrap">
+          <span className="inspector-vec3-label">{['X', 'Y', 'Z', 'W'][i]}</span>
+          <input
+            type="text"
+            value={v.toFixed(decimals)}
+            onChange={(e) => updateTransform(key, i, e.target.value)}
+            onBlur={() => loadDetails()}
+            title={labelAxis(key)[i] || String(i)}
+          />
+        </span>
       ))}
     </div>
   );
@@ -381,15 +493,13 @@ function InspectorPanel({
         {details.components.map((c, i) => (
           <div key={i} className="inspector-component">
             <span>{c.type}</span>
-            {c.type !== 'Camera' && ( // keep at least Camera
-              <button
-                className="inspector-remove-btn"
-                onClick={() => removeComponent(c.type)}
-                title={`Remove ${c.type}`}
-              >
-                ×
-              </button>
-            )}
+            <button
+              className="inspector-remove-btn"
+              onClick={() => removeComponent(c.type)}
+              title={`Remove ${c.type}`}
+            >
+              ×
+            </button>
           </div>
         ))}
         {details.components.length === 0 && (
@@ -469,28 +579,181 @@ export default function EditorPage({ onCloseProject }: Props) {
   const [sceneTree, setSceneTree] = useState<SceneObject[]>([]);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sceneVersion, setSceneVersion] = useState(0);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const prevSceneVersionRef = useRef(0);
 
-  // Refresh data
-  const refresh = useCallback(async () => {
+  // Periodic lightweight state poll (every 2s)
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const state = await rpc<ShellState>('shell/get_state');
+        setShellState(state);
+
+        const newVer = state.scene_version ?? 0;
+        if (newVer !== prevSceneVersionRef.current) {
+          prevSceneVersionRef.current = newVer;
+          setSceneVersion(newVer);
+
+          // Scene changed — fetch updated scene tree
+          const { objects } = await rpc<{ objects: SceneObject[] }>('shell/get_scene_tree');
+          setSceneTree(objects);
+        }
+      } catch {
+        // not ready
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Fetch console entries only when the panel is visible
+  const consoleVisible = !bottomCollapsed;
+  useEffect(() => {
+    if (!consoleVisible) return;
+    let active = true;
+    const poll = async () => {
+      if (!active) return;
+      try {
+        const { entries } = await rpc<{ entries: ConsoleEntry[] }>('console/get_entries');
+        if (active) setConsoleEntries(entries);
+      } catch { /* ignore */ }
+      setTimeout(poll, 2000);
+    };
+    poll();
+    return () => { active = false; };
+  }, [consoleVisible]);
+
+  // Immediate scene tree refresh (called after add/remove component)
+  const refreshSceneTree = useCallback(async () => {
     try {
-      const [state, { objects }, { entries }] = await Promise.all([
-        rpc<ShellState>('shell/get_state'),
-        rpc<{ objects: SceneObject[] }>('shell/get_scene_tree'),
-        rpc<{ entries: ConsoleEntry[] }>('console/get_entries'),
-      ]);
+      // Fetch fresh state to get the new scene_version
+      const state = await rpc<ShellState>('shell/get_state');
       setShellState(state);
+      const newVer = state.scene_version ?? 0;
+      prevSceneVersionRef.current = newVer;
+      setSceneVersion(newVer);
+      // Fetch the updated tree
+      const { objects } = await rpc<{ objects: SceneObject[] }>('shell/get_scene_tree');
       setSceneTree(objects);
-      setConsoleEntries(entries);
-    } catch {
-      // not ready
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   }, []);
 
+  const runEditorAction = useCallback(async (
+    action: () => Promise<void>,
+    success?: string,
+  ) => {
+    setErrorMessage(null);
+    try {
+      await action();
+      await refreshSceneTree();
+      if (success) setStatusMessage(success);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [refreshSceneTree]);
+
+  // ── Scene CRUD handlers ──
+
+  const handleCreateObject = useCallback(async (parentId?: string) => {
+    await runEditorAction(async () => {
+      const params: Record<string, unknown> = {};
+      if (parentId) params.parent_id = parentId;
+      await rpc('shell/create_object', params);
+    }, 'Object created');
+  }, [runEditorAction]);
+
+  const handleDeleteObject = useCallback(async (id: string) => {
+    await runEditorAction(async () => {
+      await rpc('shell/delete_object', { id });
+      if (selectedId === id) {
+        setSelectedId(null);
+      }
+    }, 'Object deleted');
+  }, [runEditorAction, selectedId]);
+
+  const handleDuplicateObject = useCallback(async (id: string) => {
+    await runEditorAction(async () => {
+      await rpc('shell/duplicate_object', { id });
+    }, 'Object duplicated');
+  }, [runEditorAction]);
+
+  const handleSaveScene = useCallback(async () => {
+    await runEditorAction(async () => {
+      await rpc('shell/save_scene');
+    }, 'Scene saved');
+  }, [runEditorAction]);
+
+  const handleUndo = useCallback(async () => {
+    await runEditorAction(async () => {
+      await rpc('shell/undo');
+    });
+  }, [runEditorAction]);
+
+  const handleRedo = useCallback(async () => {
+    await runEditorAction(async () => {
+      await rpc('shell/redo');
+    });
+  }, [runEditorAction]);
+
+  const handleClose = useCallback(() => {
+    if (shellState?.scene_dirty && !window.confirm('Close without saving changes?')) {
+      return;
+    }
+    onCloseProject();
+  }, [onCloseProject, shellState?.scene_dirty]);
+
+  // ── File handlers ──
+
+  const handleOpenScene = useCallback(async () => {
+    await runEditorAction(async () => {
+      const result = await openScene();
+      if (result) setStatusMessage(`Opened: ${result}`);
+    });
+  }, [runEditorAction]);
+
+  const handleSaveSceneAs = useCallback(async () => {
+    await runEditorAction(async () => {
+      const result = await saveSceneAs();
+      if (result) setStatusMessage(`Saved: ${result}`);
+    });
+  }, [runEditorAction]);
+
+  // Keyboard shortcuts
   useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, 2000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    const handler = (e: KeyboardEvent) => {
+      // Ignore if typing in an input/textarea
+      if (e.target instanceof HTMLElement && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      // Ctrl+O → Open Scene
+      if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
+        e.preventDefault();
+        handleOpenScene();
+        return;
+      }
+
+      // Ctrl+Shift+S → Save As
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 's') {
+        e.preventDefault();
+        handleSaveSceneAs();
+        return;
+      }
+
+      // Delete/Backspace → remove selected object
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        handleDeleteObject(selectedId);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedId, handleDeleteObject, handleOpenScene, handleSaveSceneAs]);
 
   // Bottom resize handle
   const bottomHandleDown = useDragHandle('vertical', (delta) => {
@@ -508,45 +771,38 @@ export default function EditorPage({ onCloseProject }: Props) {
 
   return (
     <div className="editor">
-      {/* Custom Title Bar */}
-      <header className="editor-titlebar">
-        {/* Left: app icon + title */}
-        <div className="titlebar-left">
-          <svg className="titlebar-icon" width="16" height="16" viewBox="0 0 16 16">
-            <polygon points="8,1 15,5 15,11 8,15 1,11 1,5" fill="var(--accent)" opacity="0.8" />
-          </svg>
-          <span className="titlebar-label">
-            {shellState.project_name || 'Aster Editor'}
-            {shellState.scene_dirty ? ' \u25CF' : ''}
-          </span>
-        </div>
-
-        {/* Center: toolbar */}
-        <div className="titlebar-center">
-          <button
-            className="tool-btn"
-            onClick={() => rpc('shell/undo')}
-            disabled={!shellState.can_undo}
-            title="Undo"
-          >↩</button>
-          <button
-            className="tool-btn"
-            onClick={() => rpc('shell/redo')}
-            disabled={!shellState.can_redo}
-            title="Redo"
-          >↪</button>
-          <div className="titlebar-sep" />
-          <button className="tool-btn play-btn" onClick={openGameView} title="Play (opens Game View window)">
-            ▶ Play
-          </button>
-          <div className="titlebar-sep" />
-          <button className="tool-btn" onClick={onCloseProject} title="Close Project">
-            Close
-          </button>
-        </div>
-
-
-      </header>
+      <div className="editor-toolbar">
+        <button
+          className="tool-btn"
+          onClick={handleUndo}
+          disabled={!shellState.can_undo}
+          title="Undo"
+        >↩</button>
+        <button
+          className="tool-btn"
+          onClick={handleRedo}
+          disabled={!shellState.can_redo}
+          title="Redo"
+        >↪</button>
+        <div className="toolbar-sep" />
+        <button className="tool-btn" onClick={handleOpenScene} title="Open Scene (Ctrl+O)">
+          Open
+        </button>
+        <button className="tool-btn" onClick={handleSaveSceneAs} title="Save Scene As (Ctrl+Shift+S)">
+          Save As
+        </button>
+        <button className="tool-btn" onClick={handleSaveScene} disabled={!shellState.scene_dirty} title="Save Scene">
+          Save
+        </button>
+        <div className="toolbar-sep" />
+        <button className="tool-btn play-btn" onClick={openGameView} title="Play (opens Game View window)">
+          ▶ Play
+        </button>
+        <div className="toolbar-sep" />
+        <button className="tool-btn" onClick={handleClose} title="Close Project">
+          Close
+        </button>
+      </div>
 
       {/* Main Editor Body (hierarchy | scene view | inspector) */}
       <div className="editor-body">
@@ -566,6 +822,9 @@ export default function EditorPage({ onCloseProject }: Props) {
               setSelectedId(id);
               rpc('shell/select_entity', { id });
             }}
+            onCreateObject={handleCreateObject}
+            onDeleteObject={handleDeleteObject}
+            onDuplicateObject={handleDuplicateObject}
           />
         </ResizablePanel>
 
@@ -573,7 +832,7 @@ export default function EditorPage({ onCloseProject }: Props) {
           <div className="panel-header">
             <span>Scene View</span>
           </div>
-          <ViewportCanvas />
+          <ViewportCanvas sceneVersion={sceneVersion} />
         </main>
 
         <ResizablePanel
@@ -585,7 +844,7 @@ export default function EditorPage({ onCloseProject }: Props) {
           onToggle={() => setRightCollapsed(!rightCollapsed)}
           header="Inspector"
         >
-          <InspectorPanel selectedId={selectedId} onRefresh={refresh} />
+          <InspectorPanel selectedId={selectedId} onRefresh={refreshSceneTree} />
         </ResizablePanel>
       </div>
 
@@ -617,6 +876,16 @@ export default function EditorPage({ onCloseProject }: Props) {
         <span className="status-item">
           {shellState.project_name || 'No project'}
         </span>
+        {errorMessage && (
+          <span className="status-item status-error">
+            {errorMessage}
+          </span>
+        )}
+        {!errorMessage && statusMessage && (
+          <span className="status-item">
+            {statusMessage}
+          </span>
+        )}
         <span className="status-item" style={{ color: 'var(--accent)' }}>
           v0.1.0
         </span>

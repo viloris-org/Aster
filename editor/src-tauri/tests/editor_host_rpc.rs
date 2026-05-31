@@ -15,6 +15,31 @@ fn create_host() -> EditorHost {
     EditorHost::new(store).expect("create editor host")
 }
 
+fn create_project(host: &mut EditorHost) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    host.handle(
+        "hub/create_project",
+        &serde_json::json!({
+            "name": "TestProject",
+            "location": tmp.path().to_str().unwrap(),
+            "template_id": "three_d",
+            "toolchain_version": "0.1.0",
+        }),
+    )
+    .expect("create project");
+    tmp
+}
+
+fn open_project(host: &mut EditorHost, tmp: &tempfile::TempDir) -> String {
+    let path = tmp.path().join("TestProject");
+    host.handle(
+        "hub/open_project",
+        &serde_json::json!({ "path": path.to_str().unwrap() }),
+    )
+    .expect("open project");
+    path.to_string_lossy().to_string()
+}
+
 #[test]
 fn host_initializes_with_empty_hub() {
     let mut host = create_host();
@@ -125,6 +150,104 @@ fn hub_create_project_returns_plan() {
     );
 
     // TempDir drops here, cleaning up automatically
+}
+
+#[test]
+fn shell_mutations_are_dirty_and_undoable() {
+    let mut host = create_host();
+    let tmp = create_project(&mut host);
+    open_project(&mut host, &tmp);
+
+    let before = host
+        .handle("shell/get_scene_tree", &serde_json::json!({}))
+        .expect("scene tree");
+    let before_len = before["objects"].as_array().unwrap().len();
+
+    host.handle("shell/create_object", &serde_json::json!({}))
+        .expect("create object");
+
+    let state = host
+        .handle("shell/get_state", &serde_json::json!({}))
+        .expect("shell state");
+    assert!(state["scene_dirty"].as_bool().unwrap());
+    assert!(state["can_undo"].as_bool().unwrap());
+
+    let after = host
+        .handle("shell/get_scene_tree", &serde_json::json!({}))
+        .expect("scene tree");
+    assert_eq!(after["objects"].as_array().unwrap().len(), before_len + 1);
+
+    host.handle("shell/undo", &serde_json::json!({}))
+        .expect("undo");
+    let undone = host
+        .handle("shell/get_scene_tree", &serde_json::json!({}))
+        .expect("scene tree");
+    assert_eq!(undone["objects"].as_array().unwrap().len(), before_len);
+}
+
+#[test]
+fn shell_save_clears_dirty_state() {
+    let mut host = create_host();
+    let tmp = create_project(&mut host);
+    open_project(&mut host, &tmp);
+
+    host.handle("shell/create_object", &serde_json::json!({}))
+        .expect("create object");
+    host.handle("shell/save_scene", &serde_json::json!({}))
+        .expect("save scene");
+
+    let state = host
+        .handle("shell/get_state", &serde_json::json!({}))
+        .expect("shell state");
+    assert!(!state["scene_dirty"].as_bool().unwrap());
+}
+
+#[test]
+fn shell_delete_object_removes_it_from_scene_tree() {
+    let mut host = create_host();
+    let tmp = create_project(&mut host);
+    open_project(&mut host, &tmp);
+
+    let created = host
+        .handle("shell/create_object", &serde_json::json!({}))
+        .expect("create object");
+    let id = created["id"].as_str().unwrap();
+
+    host.handle("shell/delete_object", &serde_json::json!({ "id": id }))
+        .expect("delete object");
+
+    let tree = host
+        .handle("shell/get_scene_tree", &serde_json::json!({}))
+        .expect("scene tree");
+    let objects = tree["objects"].as_array().unwrap();
+    assert!(
+        objects.iter().all(|object| object["id"] != id),
+        "deleted object should not remain in scene tree"
+    );
+}
+
+#[test]
+fn play_mode_starts_from_open_project_snapshot() {
+    let mut host = create_host();
+    let tmp = create_project(&mut host);
+    open_project(&mut host, &tmp);
+
+    let started = host
+        .handle("play/start", &serde_json::json!({}))
+        .expect("start play mode");
+    assert!(started["playing"].as_bool().unwrap());
+
+    let state = host
+        .handle("play/get_state", &serde_json::json!({}))
+        .expect("play state");
+    assert!(state["playing"].as_bool().unwrap());
+
+    host.handle("play/stop", &serde_json::json!({}))
+        .expect("stop play mode");
+    let stopped = host
+        .handle("play/get_state", &serde_json::json!({}))
+        .expect("play state");
+    assert!(!stopped["playing"].as_bool().unwrap());
 }
 
 #[test]

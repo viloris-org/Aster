@@ -3,6 +3,7 @@ import HubPage from './pages/HubPage';
 import EditorPage from './pages/EditorPage';
 import GameView from './pages/GameView';
 import { rpc } from './api';
+import { I18nProvider } from './i18n';
 
 interface DesktopIntegration {
   desktop_environment: string;
@@ -32,6 +33,14 @@ interface HubState {
 }
 
 type Screen = 'loading' | 'hub' | 'editor' | 'game-view';
+
+function AppFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="app-frame">
+      <div className="app-frame-content">{children}</div>
+    </div>
+  );
+}
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('loading');
@@ -73,6 +82,13 @@ export default function App() {
       rpc<HubState>('hub/get_state'),
     ]).then(([integration, state]) => {
       applyDesktopIntegration(integration);
+      // Apply theme from saved state
+      if (state.theme === 'system') {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light';
+      } else {
+        document.documentElement.dataset.theme = state.theme;
+      }
       setHubState(state);
       setScreen(state.open_project ? 'editor' : 'hub');
     }).catch((err) => {
@@ -103,6 +119,13 @@ export default function App() {
 
   const handleSetTheme = useCallback(async (theme: string) => {
     await rpc('hub/set_theme', { theme });
+    // Apply theme to DOM immediately so CSS reacts
+    if (theme === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light';
+    } else {
+      document.documentElement.dataset.theme = theme;
+    }
     setHubState(prev => prev ? { ...prev, theme } : prev);
   }, []);
 
@@ -113,30 +136,45 @@ export default function App() {
 
   // ── Render ──
 
+  const locale = hubState?.locale ?? 'en';
+
   if (screen === 'game-view') {
     return <GameView />;
   }
 
   if (screen === 'loading') {
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-        <span>Loading...</span>
-      </div>
+      <I18nProvider locale={locale}>
+        <AppFrame>
+          <div className="loading-screen">
+            <div className="spinner" />
+            <span>Loading...</span>
+          </div>
+        </AppFrame>
+      </I18nProvider>
     );
   }
 
   if (screen === 'hub' && hubState) {
     return (
-      <HubPage
-        state={hubState}
-        onOpenProject={handleOpenProject}
-        onNavigate={handleNavigate}
-        onSetTheme={handleSetTheme}
-        onSetLocale={handleSetLocale}
-      />
+      <I18nProvider locale={locale}>
+        <AppFrame>
+          <HubPage
+            state={hubState}
+            onOpenProject={handleOpenProject}
+            onNavigate={handleNavigate}
+            onSetTheme={handleSetTheme}
+            onSetLocale={handleSetLocale}
+            onRefresh={async () => { await refreshHubState(); }}
+          />
+        </AppFrame>
+      </I18nProvider>
     );
   }
 
-  return <EditorPage onCloseProject={handleCloseProject} />;
+  return (
+    <I18nProvider locale={locale}>
+      <EditorPage onCloseProject={handleCloseProject} />
+    </I18nProvider>
+  );
 }

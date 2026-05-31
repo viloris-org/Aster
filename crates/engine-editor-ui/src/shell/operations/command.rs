@@ -17,6 +17,58 @@ use engine_ecs::{
     LightComponentData, MeshRendererComponentData, ParticleEmitterComponentData,
     RigidbodyComponentData, ScriptComponentProxy,
 };
+use engine_editor::EditorCommand;
+
+/// Get the localized display label for a command.
+pub fn command_localized_label<'a>(tr: &'a Translations, cmd: &'a EditorCommand) -> &'a str {
+    match cmd.id.as_str() {
+        "project.open" => tr.tr("command_open_project"),
+        "scene.open" => tr.tr("command_open_scene"),
+        "scene.save" => tr.tr("command_save"),
+        "scene.save_as" => tr.tr("command_save_as"),
+        "project.close" => tr.tr("command_close_project"),
+        "project.build" => tr.tr("command_build"),
+        "edit.undo" => tr.tr("command_undo"),
+        "edit.redo" => tr.tr("command_redo"),
+        "play.toggle" => tr.tr("command_play"),
+        "play.pause" => tr.tr("command_pause"),
+        "play.step" => tr.tr("command_step"),
+        "play.stop" => tr.tr("command_stop"),
+        "assets.reload" => tr.tr("command_reload_assets"),
+        "assets.create_material" => tr.tr("command_create_material"),
+        "assets.create_script" => tr.tr("command_create_script"),
+        "gameobject.create_empty" => tr.tr("command_create_empty"),
+        "gameobject.create_camera" => tr.tr("command_create_camera"),
+        "gameobject.create_light" => tr.tr("command_create_light"),
+        "component.add_camera" => tr.tr("command_add_camera"),
+        "component.add_mesh_renderer" => tr.tr("command_add_mesh_renderer"),
+        "component.add_light" => tr.tr("command_add_light"),
+        "component.add_rigidbody" => tr.tr("command_add_rigidbody"),
+        "component.add_collider" => tr.tr("command_add_collider"),
+        "component.add_audio_source" => tr.tr("command_add_audio_source"),
+        "component.add_particle_emitter" => tr.tr("command_add_particle_emitter"),
+        "component.add_script" => tr.tr("command_add_script"),
+        "layout.reset" => tr.tr("command_reset_layout"),
+        "command.palette" => tr.tr("command_palette"),
+        "help.about" => tr.tr("command_about_aster"),
+        _ => &cmd.label,
+    }
+}
+
+/// Get the localized display name for a command category.
+pub fn command_localized_category<'a>(tr: &'a Translations, category: &'a str) -> &'a str {
+    match category {
+        "File" => tr.tr("category_file"),
+        "Edit" => tr.tr("category_edit"),
+        "Play" => tr.tr("category_play"),
+        "Assets" => tr.tr("category_assets"),
+        "GameObject" => tr.tr("category_gameobject"),
+        "Component" => tr.tr("category_component"),
+        "Window" => tr.tr("category_window"),
+        "Help" => tr.tr("category_help"),
+        _ => category,
+    }
+}
 
 /// Check if a command is currently enabled based on availability rules.
 pub fn command_enabled(
@@ -50,8 +102,8 @@ pub fn execute_shell_command(
         return;
     };
     if !command_enabled(shell, ui_state, &command) {
-        ui_state.command_status =
-            Some(tr.tr_fmt("command_status_not_available", &[&command.label]));
+        let label = command_localized_label(tr, &command);
+        ui_state.command_status = Some(tr.tr_fmt("command_status_not_available", &[label]));
         return;
     }
 
@@ -138,41 +190,49 @@ pub fn execute_shell_command(
         ),
         "component.add_camera" => add_component_to_selected(
             shell,
+            tr,
             "Camera",
             ComponentData::Camera(CameraComponentData::default()),
         ),
         "component.add_mesh_renderer" => add_component_to_selected(
             shell,
+            tr,
             "Mesh Renderer",
             ComponentData::MeshRenderer(MeshRendererComponentData::default()),
         ),
         "component.add_light" => add_component_to_selected(
             shell,
+            tr,
             "Light",
             ComponentData::Light(LightComponentData::default()),
         ),
         "component.add_rigidbody" => add_component_to_selected(
             shell,
+            tr,
             "Rigidbody",
             ComponentData::Rigidbody(RigidbodyComponentData::default()),
         ),
         "component.add_collider" => add_component_to_selected(
             shell,
+            tr,
             "Collider",
             ComponentData::Collider(ColliderComponentData::default()),
         ),
         "component.add_audio_source" => add_component_to_selected(
             shell,
+            tr,
             "Audio Source",
             ComponentData::AudioSource(AudioSourceComponentData::default()),
         ),
         "component.add_particle_emitter" => add_component_to_selected(
             shell,
+            tr,
             "Particle Emitter",
             ComponentData::ParticleEmitter(ParticleEmitterComponentData::default()),
         ),
         "component.add_script" => add_component_to_selected(
             shell,
+            tr,
             "Script",
             ComponentData::Script(ScriptComponentProxy {
                 backend: "rhai".to_owned(),
@@ -188,14 +248,12 @@ pub fn execute_shell_command(
             ui_state.command_palette_open = true;
         }
         "help.about" => {
-            push_info(
-                shell,
-                "Aster editor shell: scene, asset, and play-mode tools are connected.",
-            );
+            push_info(shell, tr.tr("about_message"));
         }
         _ => {}
     }
-    ui_state.command_status = Some(tr.tr_fmt("command_status_ran", &[&command.label]));
+    let localized_label = command_localized_label(tr, &command);
+    ui_state.command_status = Some(tr.tr_fmt("command_status_ran", &[localized_label]));
 }
 
 /// Apply undo operation and handle errors.

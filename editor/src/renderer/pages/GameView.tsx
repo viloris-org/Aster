@@ -1,53 +1,58 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { rpc } from '../api';
-
-interface ViewportFrame {
-  width: number;
-  height: number;
-  png_base64: string;
-}
+import React, { useEffect, useRef } from 'react';
+import { startPlayMode, stopPlayMode, viewportReadback } from '../api';
 
 /**
  * Game View — standalone fullscreen render target launched from the editor.
- * Runs its own viewport polling loop independent of the editor Scene View.
+ * Renders via binary IPC (raw RGBA, no PNG/base64 overhead).
  */
 export default function GameView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef({ width: 1280, height: 720 });
+  const isActiveRef = useRef(true);
 
-  // Poll for frames
+  // Poll for frames via binary IPC with lazy rendering at ~60fps
   useEffect(() => {
-    let active = true;
-    let frameId = 0;
+    isActiveRef.current = true;
+    startPlayMode().catch(() => {});
 
     const poll = async () => {
-      if (!active) return;
+      if (!isActiveRef.current) return;
       const { width, height } = sizeRef.current;
       try {
-        const result = await rpc<ViewportFrame>('viewport/readback', {
+        const buffer = await viewportReadback({
           width, height,
-          yaw: -0.5, pitch: 0.3, distance: 6.0,
+          playMode: true,
         });
+        if (!isActiveRef.current || !canvasRef.current) return;
 
-        if (!active || !canvasRef.current) return;
+        // Parse header: [width: u32 LE][height: u32 LE][RGBA pixels...]
+        const header = new Uint32Array(buffer, 0, 2);
+        const w = header[0];
+        const h = header[1];
 
-        const img = new Image();
-        img.onload = () => {
-          if (!active || !canvasRef.current) return;
+        // w === 0 means "no change" (GPU render skipped on backend)
+        if (w > 0 && h > 0) {
           const ctx = canvasRef.current.getContext('2d');
-          if (ctx) ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(img.src);
-        };
-        img.src = `data:image/png;base64,${result.png_base64}`;
+          if (ctx) {
+            const imageData = new ImageData(
+              new Uint8ClampedArray(buffer, 8, w * h * 4),
+              w, h,
+            );
+            ctx.putImageData(imageData, 0, 0);
+          }
+        }
       } catch {
-        // viewport not ready
+        // viewport not ready yet
       }
-      frameId = window.setTimeout(poll, 16); // ~60fps target
+      setTimeout(poll, 16); // ~60fps target
     };
 
     poll();
-    return () => { active = false; clearTimeout(frameId); };
+    return () => {
+      isActiveRef.current = false;
+      stopPlayMode().catch(() => {});
+    };
   }, []);
 
   // Fill the window

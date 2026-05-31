@@ -8,6 +8,9 @@ use super::super::widgets::buttons::ghost_button;
 use crate::EditorShell;
 use engine_editor::EditorCommand;
 use engine_i18n::Translations;
+
+use super::super::operations::command::command_localized_label;
+
 /// Renders the main menu bar.
 
 pub fn draw_menu_bar(
@@ -145,9 +148,10 @@ pub fn command_menu_item(
     tr: &Translations,
 ) {
     let enabled = command_enabled(shell, ui_state, command);
+    let label = command_localized_label(tr, command);
     let text = match command.shortcut.as_deref() {
-        Some(shortcut) => format!("{}\t{}", command.label, shortcut),
-        None => command.label.clone(),
+        Some(shortcut) => format!("{label}\t{shortcut}"),
+        None => label.to_owned(),
     };
     if ui
         .add_enabled(enabled, egui::Button::new(text).frame(false))

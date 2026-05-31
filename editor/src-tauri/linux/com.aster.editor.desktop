@@ -1,0 +1,8 @@
+[Desktop Entry]
+Categories=Development;
+Exec=aster-editor-tauri
+StartupWMClass=aster-editor-tauri
+Icon=com.aster.editor
+Name=Aster Editor
+Terminal=false
+Type=Application

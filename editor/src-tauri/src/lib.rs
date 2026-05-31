@@ -3,16 +3,23 @@
 //! Single `rpc` command that dispatches to EditorHost methods,
 //! mirroring the original stdin/stdout JSON-RPC protocol.
 
-use std::{cell::UnsafeCell, path::PathBuf, sync::Mutex};
+use std::{
+    cell::UnsafeCell,
+    path::PathBuf,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
-use engine_core::{EngineError, EngineResult};
+use engine_core::{EngineConfig, EngineError, EngineResult, RuntimeProfile};
 use engine_editor::{
     ConsoleEntry, ConsoleLevel, ConsoleService, DurableEditorState, EditorPreferences,
-    FileEditorStore, ProjectMetadata, ThemePreference,
+    FileEditorStore, ProjectMetadata, ThemePreference, UndoCommand,
 };
 use engine_editor::{EditorShell, HubState, ProjectDeletionDecision, ProjectDeletionMode};
+use engine_i18n::{Locale, Translations};
 use engine_render::ImageFormat;
 use engine_render_wgpu::{WgpuOffscreenConfig, WgpuRenderDevice};
+use runtime_min::{headless_services_from_scene, RuntimeServices};
 use serde_json::Value;
 use tauri::{utils::config::Color, Manager, State};
 
@@ -73,7 +80,13 @@ impl DesktopEnvironment {
     }
 
     fn prefers_native_chrome(&self) -> bool {
-        matches!(self, Self::Kde | Self::Xfce | Self::Cinnamon | Self::Mate)
+        true
+    }
+
+    #[cfg(test)]
+    fn prefers_native_chrome_for_backend(&self, native_wayland_preferred: bool) -> bool {
+        let _ = native_wayland_preferred;
+        true
     }
 }
 
@@ -120,13 +133,25 @@ pub struct EditorHost {
     render_device: Option<WgpuRenderDevice>,
     /// Desktop/window integration policy detected on the Rust side.
     desktop_integration: DesktopIntegration,
+    /// Cached translations for the current locale.
+    translations: Translations,
+    /// Monotonic version counter incremented on every scene mutation.
+    /// Used by the frontend to skip viewport re-renders when nothing changed.
+    scene_version: u64,
+    /// Runtime snapshot used by Game View play mode.
+    play_runtime: Option<RuntimeServices>,
+    /// Last wall-clock frame timestamp for play mode deltas.
+    play_last_frame: Option<Instant>,
+    /// Monotonic version counter for simulated play frames.
+    play_version: u64,
 }
 
 impl EditorHost {
     pub fn new(store: FileEditorStore) -> EngineResult<Self> {
         let durable_state = store.load().unwrap_or_default();
         let hub = HubState::from_durable_state(durable_state.clone());
-        Ok(Self {
+        let locale = hub.preferences().locale;
+        let mut host = Self {
             hub,
             shell: EditorShell::with_core_services(EditorPreferences::default()),
             durable_state,
@@ -134,7 +159,15 @@ impl EditorHost {
             console: ConsoleService::default(),
             render_device: None,
             desktop_integration: DesktopIntegration::detect(),
-        })
+            translations: Translations::load(locale),
+            scene_version: 1,
+            play_runtime: None,
+            play_last_frame: None,
+            play_version: 1,
+        };
+
+        host.reopen_last_project_if_needed();
+        Ok(host)
     }
 
     /// Dispatch an RPC method call.
@@ -142,7 +175,9 @@ impl EditorHost {
         match method {
             // ── Hub ──
             "app/get_desktop_integration" => self.app_get_desktop_integration(params),
+            "app/open_folder" => self.app_open_folder(params),
             "hub/get_state" => self.hub_get_state(params),
+            "hub/get_translations" => self.hub_get_translations(params),
             "hub/list_projects" => self.hub_list_projects(params),
             "hub/open_project" => self.hub_open_project(params),
             "hub/create_project" => self.hub_create_project(params),
@@ -159,17 +194,27 @@ impl EditorHost {
             // ── Viewport ──
             "viewport/readback" => self.viewport_readback(params),
 
+            // ── Play mode ──
+            "play/start" => self.play_start(params),
+            "play/stop" => self.play_stop(params),
+            "play/get_state" => self.play_get_state(params),
+
             // ── Shell ──
             "shell/get_state" => self.shell_get_state(params),
             "shell/get_scene_tree" => self.shell_get_scene_tree(params),
             "shell/get_entity" => self.shell_get_entity(params),
             "shell/select_entity" => self.shell_select_entity(params),
             "shell/save_scene" => self.shell_save_scene(params),
+            "shell/open_scene" => self.shell_open_scene(params),
+            "shell/save_scene_as" => self.shell_save_scene_as(params),
             "shell/update_transform" => self.shell_update_transform(params),
             "shell/add_component" => self.shell_add_component(params),
             "shell/remove_component" => self.shell_remove_component(params),
             "shell/undo" => self.shell_undo(params),
             "shell/redo" => self.shell_redo(params),
+            "shell/create_object" => self.shell_create_object(params),
+            "shell/delete_object" => self.shell_delete_object(params),
+            "shell/duplicate_object" => self.shell_duplicate_object(params),
             "shell/close_project" => self.shell_close_project(params),
 
             _ => Err(EngineError::config(format!("unknown method: {method}"))),
@@ -178,6 +223,39 @@ impl EditorHost {
 
     fn app_get_desktop_integration(&mut self, _params: &Value) -> EngineResult<Value> {
         Ok(self.desktop_integration.as_json())
+    }
+
+    fn app_open_folder(&mut self, params: &Value) -> EngineResult<Value> {
+        use std::process::Command;
+
+        let path = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'path'"))?;
+
+        #[cfg(target_os = "linux")]
+        {
+            Command::new("xdg-open")
+                .arg(path)
+                .spawn()
+                .map_err(|e| EngineError::other(format!("failed to open folder: {e}")))?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open")
+                .arg(path)
+                .spawn()
+                .map_err(|e| EngineError::other(format!("failed to open folder: {e}")))?;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("explorer")
+                .arg(path)
+                .spawn()
+                .map_err(|e| EngineError::other(format!("failed to open folder: {e}")))?;
+        }
+
+        Ok(serde_json::json!({ "opened": true }))
     }
 
     // ── Hub handlers ──
@@ -257,8 +335,8 @@ impl EditorHost {
         self.hub.upsert_project(metadata);
 
         // Persist state
-        self.durable_state.last_open_project = Some(project_path.clone());
-        self.persist_state();
+        self.hub.mark_project_open(project_path.clone());
+        self.sync_durable_state();
 
         // Forward console entries from shell open
         self.drain_shell_console();
@@ -302,6 +380,7 @@ impl EditorHost {
             &plan.toolchain_version,
         );
         self.hub.upsert_project(metadata);
+        self.sync_durable_state();
 
         Ok(serde_json::json!({
             "name": plan.name,
@@ -328,6 +407,7 @@ impl EditorHost {
 
         match decision {
             ProjectDeletionDecision::RemovedFromRecent { .. } => {
+                self.sync_durable_state();
                 Ok(serde_json::json!({ "status": "removed" }))
             }
             ProjectDeletionDecision::NeedsConfirmation { .. } => {
@@ -353,6 +433,7 @@ impl EditorHost {
             _ => ThemePreference::System,
         };
         self.hub.set_theme(pref);
+        self.sync_durable_state();
         Ok(serde_json::json!({ "theme": theme }))
     }
 
@@ -368,7 +449,24 @@ impl EditorHost {
             _ => HubPage::Projects,
         };
         self.hub.set_page(p);
+        self.sync_durable_state();
         Ok(serde_json::json!({ "page": page }))
+    }
+
+    fn hub_get_translations(&mut self, _params: &Value) -> EngineResult<Value> {
+        let entries: Vec<serde_json::Value> = self
+            .translations
+            .entries()
+            .into_iter()
+            .map(|(k, v)| serde_json::json!({ "key": k, "value": v }))
+            .collect();
+        Ok(serde_json::json!({
+            "locale": match self.translations.locale() {
+                Locale::En => "en",
+                Locale::Zh => "zh",
+            },
+            "entries": entries,
+        }))
     }
 
     fn hub_set_locale(&mut self, params: &Value) -> EngineResult<Value> {
@@ -376,12 +474,14 @@ impl EditorHost {
             .get("locale")
             .and_then(|v| v.as_str())
             .ok_or_else(|| EngineError::config("missing 'locale' parameter"))?;
-        use engine_i18n::Locale;
         let locale = match locale_str {
             "zh" => Locale::Zh,
             _ => Locale::En,
         };
         self.hub.set_locale(locale);
+        // Reload translations for the new locale
+        self.translations = Translations::load(locale);
+        self.sync_durable_state();
         Ok(serde_json::json!({ "locale": locale_str }))
     }
 
@@ -431,7 +531,7 @@ impl EditorHost {
         let subsystem = params
             .get("subsystem")
             .and_then(|v| v.as_str())
-            .unwrap_or("electron")
+            .unwrap_or("editor")
             .to_owned();
         self.console.push(ConsoleEntry {
             timestamp: timestamp_now(),
@@ -452,15 +552,38 @@ impl EditorHost {
         Ok(serde_json::json!({}))
     }
 
+    /// Increment the scene version counter so the frontend can skip redundant renders.
+    fn bump_scene_version(&mut self) {
+        self.scene_version = self.scene_version.wrapping_add(1);
+    }
+
     // ── Viewport handlers ──
 
-    fn viewport_readback(&mut self, params: &Value) -> EngineResult<Value> {
+    /// Render the current scene to an offscreen buffer and return raw RGBA pixels.
+    /// Returns `(width, height, rgba_bytes)`.
+    /// If `last_version` param matches the current `scene_version`, skips rendering
+    /// and returns `(0, 0, empty_vec)` as a no-change signal.
+    fn render_viewport(&mut self, params: &Value) -> EngineResult<(u32, u32, Vec<u8>)> {
         use engine_core::math::Vec3;
         use runtime_min::extract_render_world;
 
-        let Some(project) = self.shell.project() else {
-            return Err(EngineError::config("no project open"));
-        };
+        let play_mode = params
+            .get("play_mode")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Lazy rendering: if the scene version hasn't changed, skip the full pipeline
+        if !play_mode {
+            if let Some(last_ver) = params.get("last_version").and_then(|v| v.as_u64()) {
+                if last_ver == self.scene_version {
+                    return Ok((0, 0, Vec::new()));
+                }
+            }
+        } else if let Some(last_ver) = params.get("last_version").and_then(|v| v.as_u64()) {
+            if last_ver == self.play_version {
+                return Ok((0, 0, Vec::new()));
+            }
+        }
 
         let (width, height) = (
             params.get("width").and_then(|v| v.as_u64()).unwrap_or(640) as u32,
@@ -468,7 +591,18 @@ impl EditorHost {
         );
 
         // Extract render world from the scene
-        let mut world = extract_render_world(&project.scene);
+        let mut world = if play_mode {
+            self.tick_play_runtime()?;
+            let Some(runtime) = self.play_runtime.as_ref() else {
+                return Err(EngineError::config("play mode is not running"));
+            };
+            extract_render_world(&runtime.scene)
+        } else {
+            let Some(project) = self.shell.project() else {
+                return Err(EngineError::config("no project open"));
+            };
+            extract_render_world(&project.scene)
+        };
 
         // Set up editor camera if we have one
         if let Some(ref mut camera) = world.camera {
@@ -498,29 +632,40 @@ impl EditorHost {
             camera.transform.translation = Vec3::new(eye_x, eye_y, eye_z);
         }
 
-        // Lazily create the wgpu render device
-        let device = self.render_device.get_or_insert_with(|| {
+        // Lazily create the wgpu render device (with proper error handling)
+        if self.render_device.is_none() {
             let config = WgpuOffscreenConfig {
                 width: width.max(1),
                 height: height.max(1),
                 format: ImageFormat::Rgba8Srgb,
             };
-            WgpuRenderDevice::new_offscreen(config).expect("create wgpu render device")
-        });
+            self.render_device =
+                Some(WgpuRenderDevice::new_offscreen(config).map_err(|e| {
+                    EngineError::other(format!("failed to create wgpu device: {e}"))
+                })?);
+        }
+        let device = self.render_device.as_mut().unwrap();
 
         // Resize if needed
         let (cur_w, cur_h) = device.default_target_size();
         if cur_w != width || cur_h != height {
             device
                 .resize_default_target(width.max(1), height.max(1))
-                .ok();
+                .map_err(|e| EngineError::other(format!("resize failed: {e}")))?;
         }
 
         // Render
         device.render_world_offscreen(&world)?;
 
-        // Readback
-        let (_w, _h, rgba) = device.readback_default_target()?;
+        // Readback raw RGBA
+        let (w, h, rgba) = device.readback_default_target()?;
+        Ok((w, h, rgba))
+    }
+
+    /// Legacy JSON viewport readback — encodes as PNG + base64.
+    /// Prefer `viewport_readback_raw` for performance.
+    fn viewport_readback(&mut self, params: &Value) -> EngineResult<Value> {
+        let (width, height, rgba) = self.render_viewport(params)?;
 
         // Encode as PNG
         use image::EncodableLayout;
@@ -549,6 +694,20 @@ impl EditorHost {
         }))
     }
 
+    /// Binary viewport readback — returns raw RGBA bytes with
+    /// [width: u32 LE][height: u32 LE][pixels...] layout.
+    /// Frontend receives this as ArrayBuffer via Tauri binary IPC.
+    fn viewport_readback_raw(&mut self, params: &Value) -> EngineResult<Vec<u8>> {
+        let (width, height, rgba) = self.render_viewport(params)?;
+
+        // Prepend dimensions as u32 LE headers, then raw RGBA pixels
+        let mut result = Vec::with_capacity(8 + rgba.len());
+        result.extend_from_slice(&(width as u32).to_le_bytes());
+        result.extend_from_slice(&(height as u32).to_le_bytes());
+        result.extend_from_slice(&rgba);
+        Ok(result)
+    }
+
     // ── Shell handlers ──
 
     fn shell_get_state(&mut self, _params: &Value) -> EngineResult<Value> {
@@ -558,6 +717,7 @@ impl EditorHost {
             "scene_dirty": self.shell.is_scene_dirty(),
             "can_undo": self.shell.undo_stack().can_undo(),
             "can_redo": self.shell.undo_stack().can_redo(),
+            "scene_version": self.scene_version,
             "desktop_integration": self.desktop_integration.as_json(),
         }))
     }
@@ -654,24 +814,220 @@ impl EditorHost {
 
     fn shell_save_scene(&mut self, _params: &Value) -> EngineResult<Value> {
         let path = self.shell.save_scene()?;
+        self.drain_shell_console();
         Ok(serde_json::json!({ "path": path }))
+    }
+
+    /// Open a scene from an arbitrary JSON file path.
+    /// Reads the file, parses it as a scene, and replaces the current project's scene.
+    fn shell_open_scene(&mut self, params: &Value) -> EngineResult<Value> {
+        let path_str = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'path'"))?;
+        let path = std::path::PathBuf::from(path_str);
+
+        let text = std::fs::read_to_string(&path).map_err(|e| EngineError::Filesystem {
+            path: path.clone(),
+            source: e,
+        })?;
+        let new_scene = engine_ecs::Scene::from_json(&text)?;
+
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+        project.scene = new_scene;
+        project.scene_path = path.clone();
+        project.scene_dirty = false;
+        self.bump_scene_version();
+
+        self.console.push(engine_editor::ConsoleEntry {
+            timestamp: timestamp_now(),
+            level: engine_editor::ConsoleLevel::Info,
+            source: engine_editor::ConsoleSource {
+                subsystem: "editor".to_string(),
+                file: None,
+                line: None,
+            },
+            message: format!("opened scene {}", path.display()),
+        });
+
+        Ok(serde_json::json!({
+            "path": path.to_string_lossy(),
+        }))
+    }
+
+    /// Save the scene to a specified path (Save As).
+    fn shell_save_scene_as(&mut self, params: &Value) -> EngineResult<Value> {
+        let path_str = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'path'"))?;
+        let path = std::path::PathBuf::from(path_str);
+
+        let display_path = self.shell.save_scene_as(&path)?;
+        self.drain_shell_console();
+        self.bump_scene_version();
+
+        Ok(serde_json::json!({ "path": display_path }))
     }
 
     fn shell_undo(&mut self, _params: &Value) -> EngineResult<Value> {
         let ok = self.shell.undo_scene_command()?;
         self.drain_shell_console();
+        self.bump_scene_version();
         Ok(serde_json::json!({ "applied": ok }))
     }
 
     fn shell_redo(&mut self, _params: &Value) -> EngineResult<Value> {
         let ok = self.shell.redo_scene_command()?;
         self.drain_shell_console();
+        self.bump_scene_version();
         Ok(serde_json::json!({ "applied": ok }))
     }
 
     fn shell_close_project(&mut self, _params: &Value) -> EngineResult<Value> {
+        self.stop_play_runtime();
         self.shell.close_project();
+        self.durable_state = self.hub.durable_state();
+        self.durable_state.last_open_project = None;
+        self.hub = HubState::from_durable_state(self.durable_state.clone());
+        self.persist_state();
         Ok(serde_json::json!({}))
+    }
+
+    // ── Scene CRUD ──
+
+    fn shell_create_object(&mut self, params: &Value) -> EngineResult<Value> {
+        let before = self.scene_snapshot()?;
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        // Optional parent lookup
+        let parent_entity = params
+            .get("parent_id")
+            .and_then(|v| v.as_str())
+            .map(|id_str| {
+                let pid = engine_core::EntityId::from_u128(
+                    u128::from_str_radix(id_str, 16)
+                        .map_err(|_| EngineError::config("invalid parent id"))?,
+                );
+                project
+                    .scene
+                    .find_by_id(pid)
+                    .ok_or_else(|| EngineError::config("parent entity not found"))
+            })
+            .transpose()?;
+
+        let name = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("New Object");
+
+        let entity = project.scene.create_object(name)?;
+
+        if let Some(parent) = parent_entity {
+            project.scene.set_parent(entity, Some(parent))?;
+        }
+
+        project.scene_dirty = true;
+        let after = self.scene_snapshot()?;
+        self.shell
+            .push_undo(UndoCommand::new("Create Object", "", before, after));
+        self.bump_scene_version();
+
+        let project = self.shell.project().unwrap();
+        let obj = project.scene.object(entity).unwrap();
+        let transform = project.scene.transforms().world(entity).unwrap_or_default();
+
+        Ok(serde_json::json!({
+            "id": format!("{:032x}", obj.id.as_u128()),
+            "name": obj.name,
+            "tag": obj.tag,
+            "position": [
+                transform.translation.x,
+                transform.translation.y,
+                transform.translation.z,
+            ],
+        }))
+    }
+
+    fn shell_delete_object(&mut self, params: &Value) -> EngineResult<Value> {
+        let id_str = params
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'id'"))?;
+        let entity_id = engine_core::EntityId::from_u128(
+            u128::from_str_radix(id_str, 16)
+                .map_err(|_| EngineError::config("invalid entity id"))?,
+        );
+
+        let before = self.scene_snapshot()?;
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        let entity = project
+            .scene
+            .find_by_id(entity_id)
+            .ok_or_else(|| EngineError::config("entity not found"))?;
+
+        project.scene.destroy_deferred(entity)?;
+        project.scene.process_deferred_destroy()?;
+        project.scene_dirty = true;
+        let after = self.scene_snapshot()?;
+        self.shell
+            .push_undo(UndoCommand::new("Delete Object", id_str, before, after));
+        self.bump_scene_version();
+        Ok(serde_json::json!({ "deleted": true }))
+    }
+
+    fn shell_duplicate_object(&mut self, params: &Value) -> EngineResult<Value> {
+        let id_str = params
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'id'"))?;
+        let entity_id = engine_core::EntityId::from_u128(
+            u128::from_str_radix(id_str, 16)
+                .map_err(|_| EngineError::config("invalid entity id"))?,
+        );
+
+        let before = self.scene_snapshot()?;
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        let entity = project
+            .scene
+            .find_by_id(entity_id)
+            .ok_or_else(|| EngineError::config("entity not found"))?;
+
+        let new_entity = project.scene.clone_object(entity)?;
+        project.scene_dirty = true;
+        let after = self.scene_snapshot()?;
+        self.shell
+            .push_undo(UndoCommand::new("Duplicate Object", id_str, before, after));
+        self.bump_scene_version();
+
+        let project = self.shell.project().unwrap();
+        let obj = project.scene.object(new_entity).unwrap();
+        let transform = project
+            .scene
+            .transforms()
+            .world(new_entity)
+            .unwrap_or_default();
+
+        Ok(serde_json::json!({
+            "id": format!("{:032x}", obj.id.as_u128()),
+            "name": obj.name,
+            "tag": obj.tag,
+            "position": [
+                transform.translation.x,
+                transform.translation.y,
+                transform.translation.z,
+            ],
+        }))
     }
 
     fn shell_update_transform(&mut self, params: &Value) -> EngineResult<Value> {
@@ -686,6 +1042,7 @@ impl EditorHost {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
+        let before = self.scene_snapshot()?;
         let Some(project) = self.shell.project_mut() else {
             return Err(EngineError::config("no project open"));
         };
@@ -755,6 +1112,12 @@ impl EditorHost {
 
         project.scene.transforms_mut().set_local(entity, t);
         project.scene_dirty = true;
+        let after = self.scene_snapshot()?;
+        if before != after {
+            self.shell
+                .push_undo(UndoCommand::new("Update Transform", id_str, before, after));
+        }
+        self.bump_scene_version();
         Ok(serde_json::json!({ "updated": true }))
     }
 
@@ -774,6 +1137,7 @@ impl EditorHost {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
+        let before = self.scene_snapshot()?;
         let Some(project) = self.shell.project_mut() else {
             return Err(EngineError::config("no project open"));
         };
@@ -804,6 +1168,10 @@ impl EditorHost {
 
         project.scene.upsert_component(entity, component)?;
         project.scene_dirty = true;
+        let after = self.scene_snapshot()?;
+        self.shell
+            .push_undo(UndoCommand::new("Add Component", id_str, before, after));
+        self.bump_scene_version();
         Ok(serde_json::json!({ "added": comp_type }))
     }
 
@@ -821,6 +1189,7 @@ impl EditorHost {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
+        let before = self.scene_snapshot()?;
         let Some(project) = self.shell.project_mut() else {
             return Err(EngineError::config("no project open"));
         };
@@ -831,13 +1200,108 @@ impl EditorHost {
 
         project.scene.remove_component(entity, comp_type)?;
         project.scene_dirty = true;
+        let after = self.scene_snapshot()?;
+        self.shell
+            .push_undo(UndoCommand::new("Remove Component", id_str, before, after));
+        self.bump_scene_version();
         Ok(serde_json::json!({ "removed": comp_type }))
+    }
+
+    // ── Play handlers ──
+
+    fn play_start(&mut self, _params: &Value) -> EngineResult<Value> {
+        self.start_play_runtime()?;
+        Ok(serde_json::json!({
+            "playing": true,
+            "play_version": self.play_version,
+        }))
+    }
+
+    fn play_stop(&mut self, _params: &Value) -> EngineResult<Value> {
+        self.stop_play_runtime();
+        Ok(serde_json::json!({ "playing": false }))
+    }
+
+    fn play_get_state(&mut self, _params: &Value) -> EngineResult<Value> {
+        Ok(serde_json::json!({
+            "playing": self.play_runtime.is_some(),
+            "play_version": self.play_version,
+        }))
     }
 
     // ── Helpers ──
 
+    fn sync_durable_state(&mut self) {
+        self.durable_state = self.hub.durable_state();
+        if let Some(project) = self.shell.project() {
+            self.durable_state.last_open_project = Some(project.root.clone());
+        }
+        self.persist_state();
+    }
+
     fn persist_state(&self) {
         self.store.save(&self.durable_state).ok();
+    }
+
+    fn reopen_last_project_if_needed(&mut self) {
+        if !self.hub.preferences().reopen_last_project {
+            return;
+        }
+        let Some(path) = self.durable_state.last_open_project.clone() else {
+            return;
+        };
+        if self.shell.open_project(&path).is_ok() {
+            self.hub.mark_project_open(path);
+            self.drain_shell_console();
+        }
+    }
+
+    fn scene_snapshot(&self) -> EngineResult<String> {
+        let Some(project) = self.shell.project() else {
+            return Err(EngineError::config("no project open"));
+        };
+        project.scene.to_json(project.name())
+    }
+
+    fn start_play_runtime(&mut self) -> EngineResult<()> {
+        let Some(project) = self.shell.project() else {
+            return Err(EngineError::config("no project open"));
+        };
+        let config = EngineConfig::new(
+            project.name().to_owned(),
+            project.root.clone(),
+            RuntimeProfile::RuntimeGame,
+        );
+        let mut runtime =
+            headless_services_from_scene(config, project.root.clone(), &project.scene)?;
+        runtime.load_project_assets(project.root.join(&project.manifest.asset_root))?;
+        self.play_runtime = Some(runtime);
+        self.play_last_frame = Some(Instant::now());
+        self.play_version = self.play_version.wrapping_add(1);
+        Ok(())
+    }
+
+    fn stop_play_runtime(&mut self) {
+        self.play_runtime = None;
+        self.play_last_frame = None;
+        self.play_version = self.play_version.wrapping_add(1);
+    }
+
+    fn tick_play_runtime(&mut self) -> EngineResult<()> {
+        if self.play_runtime.is_none() {
+            self.start_play_runtime()?;
+        }
+        let now = Instant::now();
+        let delta = self
+            .play_last_frame
+            .map(|last| now.saturating_duration_since(last))
+            .unwrap_or_else(|| Duration::from_secs_f32(1.0 / 60.0));
+        self.play_last_frame = Some(now);
+        if let Some(runtime) = self.play_runtime.as_mut() {
+            runtime.tick_game_frame(delta.min(Duration::from_millis(100)), false)?;
+            self.play_version = self.play_version.wrapping_add(1);
+        }
+        Ok(())
     }
 
     /// Forward console entries from the shell's console service to our shared one.
@@ -883,11 +1347,45 @@ impl EditorHostState {
     }
 }
 
-// ─── Tauri command ───────────────────────────────────────────────────────────
+// ─── Tauri commands ─────────────────────────────────────────────────────────
 
 #[tauri::command]
 fn rpc(state: State<'_, EditorHostState>, method: String, params: Value) -> Result<Value, String> {
     state.with_host(|host| host.handle(&method, &params).map_err(|e| e.to_string()))
+}
+
+/// Binary viewport readback — returns raw RGBA pixels as ArrayBuffer.
+/// Response layout: [width: u32 LE][height: u32 LE][RGBA pixels...]
+#[tauri::command]
+fn viewport_readback_raw(
+    state: State<'_, EditorHostState>,
+    width: u32,
+    height: u32,
+    yaw: f64,
+    pitch: f64,
+    distance: f64,
+    target_x: f64,
+    target_y: f64,
+    target_z: f64,
+    last_version: Option<u64>,
+    play_mode: bool,
+) -> Result<Vec<u8>, String> {
+    state.with_host(|host| {
+        let params = serde_json::json!({
+            "width": width,
+            "height": height,
+            "yaw": yaw,
+            "pitch": pitch,
+            "distance": distance,
+            "target_x": target_x,
+            "target_y": target_y,
+            "target_z": target_z,
+            "last_version": last_version,
+            "play_mode": play_mode,
+        });
+        host.viewport_readback_raw(&params)
+            .map_err(|e| e.to_string())
+    })
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -975,41 +1473,80 @@ fn open_game_view(app: tauri::AppHandle) -> Result<(), String> {
     .inner_size(1280.0, 720.0)
     .min_inner_size(640.0, 360.0)
     .background_color(Color(24, 24, 24, 255))
-    .decorations(DesktopIntegration::detect().prefers_native_chrome())
+    .decorations(true)
     .build()
     .map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn is_cancelled_portal_request(error: &ashpd::Error) -> bool {
+    matches!(
+        error,
+        ashpd::Error::Response(ashpd::desktop::ResponseError::Cancelled)
+    )
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+async fn select_project_location() -> Result<Option<String>, String> {
+    use ashpd::desktop::file_chooser::SelectedFiles;
+
+    let request = match SelectedFiles::open_file()
+        .title("Select Project Location")
+        .accept_label("Open")
+        .modal(true)
+        .multiple(false)
+        .directory(true)
+        .send()
+        .await
+    {
+        Ok(request) => request,
+        Err(error) if is_cancelled_portal_request(&error) => return Ok(None),
+        Err(error) => return Err(format!("failed to start portal file chooser: {error}")),
+    };
+
+    let files = match request.response() {
+        Ok(files) => files,
+        Err(error) if is_cancelled_portal_request(&error) => return Ok(None),
+        Err(error) => return Err(format!("portal file chooser failed: {error}")),
+    };
+
+    let Some(uri) = files.uris().first() else {
+        return Ok(None);
+    };
+    let path = uri
+        .to_file_path()
+        .map_err(|_| format!("portal returned a non-file URI: {uri}"))?;
+
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+async fn select_project_location() -> Result<Option<String>, String> {
+    Err("XDG Desktop Portal file chooser is only available on Linux".to_owned())
+}
+
 fn apply_desktop_window_adaptations(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let desktop = DesktopIntegration::detect();
     if let Some(window) = app.get_webview_window("main") {
         window.set_background_color(Some(Color(24, 24, 24, 255)))?;
-        if desktop.prefers_native_chrome() {
-            window.set_decorations(true)?;
-        }
+        window.set_decorations(desktop.prefers_native_chrome())?;
     }
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn apply_pre_gtk_desktop_environment() {
-    let desktop = DesktopIntegration::detect();
-    let session_type = std::env::var("XDG_SESSION_TYPE")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let has_x11_display = std::env::var("DISPLAY").is_ok();
+    let has_wayland_display = std::env::var("WAYLAND_DISPLAY").is_ok();
     let backend_already_selected = std::env::var("GDK_BACKEND").is_ok();
 
-    if desktop.desktop == DesktopEnvironment::Kde
-        && session_type == "wayland"
-        && has_x11_display
-        && !backend_already_selected
-    {
-        // Tao installs a GTK HeaderBar on Wayland before app setup runs. On KDE
-        // this looks non-native, so prefer XWayland and let KWin draw chrome.
-        std::env::set_var("GDK_BACKEND", "x11");
+    if has_wayland_display && !backend_already_selected {
+        // Ask GTK/WebKit/Tao to try native Wayland first, while keeping X11 as a
+        // fallback for systems where the Wayland backend is unavailable at runtime.
+        std::env::set_var("GDK_BACKEND", "wayland,x11");
     }
 }
 
@@ -1032,12 +1569,33 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(EditorHostState::new(host))
-        .invoke_handler(tauri::generate_handler![rpc, open_game_view])
+        .invoke_handler(tauri::generate_handler![
+            rpc,
+            open_game_view,
+            select_project_location,
+            viewport_readback_raw
+        ])
         .setup(|app| {
             apply_desktop_window_adaptations(app)?;
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DesktopEnvironment;
+
+    #[test]
+    fn kde_uses_native_chrome_when_native_wayland_is_preferred() {
+        assert!(DesktopEnvironment::Kde.prefers_native_chrome_for_backend(true));
+    }
+
+    #[test]
+    fn kde_keeps_native_chrome_when_using_x11_backend() {
+        assert!(DesktopEnvironment::Kde.prefers_native_chrome_for_backend(false));
+    }
 }

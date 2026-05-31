@@ -3,7 +3,9 @@
 use egui::{Color32, RichText, Vec2};
 use std::fs;
 
-use super::super::operations::command::{execute_shell_command, push_error};
+use super::super::operations::command::{
+    command_localized_category, command_localized_label, execute_shell_command, push_error,
+};
 use super::super::types::{EditorAction, InfernuxPalette, ShellUiState};
 use crate::EditorShell;
 use engine_i18n::Translations;
@@ -135,13 +137,12 @@ pub fn draw_command_palette(
                     for command in &commands {
                         let enabled = command_enabled(shell, ui_state, command);
                         let shortcut = command.shortcut.as_deref().unwrap_or("");
+                        let cmd_label = command_localized_label(tr, command);
+                        let cat_label = command_localized_category(tr, &command.category);
                         let text = if shortcut.is_empty() {
-                            format!("{}  /  {}", command.label, command.category)
+                            format!("{cmd_label}  /  {cat_label}")
                         } else {
-                            format!(
-                                "{}  /  {}  /  {}",
-                                command.label, command.category, shortcut
-                            )
+                            format!("{cmd_label}  /  {cat_label}  /  {shortcut}")
                         };
                         if ui
                             .add_enabled(
@@ -269,7 +270,10 @@ fn save_script_editor(shell: &mut EditorShell, ui_state: &mut ShellUiState, tr: 
         },
         Err(source) => push_error(
             shell,
-            format!("Failed to save script {}: {source}", path.display()),
+            tr.tr_fmt(
+                "error_failed_save_script",
+                &[&path.display().to_string(), &source.to_string()],
+            ),
         ),
     }
 }
@@ -293,7 +297,10 @@ fn reload_script_editor(shell: &mut EditorShell, ui_state: &mut ShellUiState, tr
         }
         Err(source) => push_error(
             shell,
-            format!("Failed to reload script {}: {source}", path.display()),
+            tr.tr_fmt(
+                "error_failed_reload_script",
+                &[&path.display().to_string(), &source.to_string()],
+            ),
         ),
     }
 }

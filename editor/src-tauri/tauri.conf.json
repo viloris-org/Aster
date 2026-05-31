@@ -10,6 +10,7 @@
     "beforeBuildCommand": "bun run build"
   },
   "app": {
+    "enableGTKAppId": true,
     "windows": [
       {
         "title": "Aster Editor",
@@ -30,6 +31,26 @@
     "targets": ["deb", "rpm", "appimage", "msi", "nsis", "dmg"],
     "icon": [
       "icons/icon.png"
-    ]
+    ],
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/applications/com.aster.editor.desktop": "linux/com.aster.editor.desktop",
+          "/usr/share/icons/hicolor/512x512/apps/com.aster.editor.png": "icons/icon.png"
+        }
+      },
+      "deb": {
+        "files": {
+          "/usr/share/applications/com.aster.editor.desktop": "linux/com.aster.editor.desktop",
+          "/usr/share/icons/hicolor/512x512/apps/com.aster.editor.png": "icons/icon.png"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/applications/com.aster.editor.desktop": "linux/com.aster.editor.desktop",
+          "/usr/share/icons/hicolor/512x512/apps/com.aster.editor.png": "icons/icon.png"
+        }
+      }
+    }
   }
 }

@@ -75,6 +75,11 @@ impl Translations {
             .unwrap_or_else(|| panic!("missing i18n key `{key}` for locale {:?}", self.locale))
     }
 
+    /// Export all translation key-value pairs for the current locale.
+    pub fn entries(&self) -> Vec<(&str, &str)> {
+        self.map.iter().map(|(&k, &v)| (k, v)).collect()
+    }
+
     /// Look up a translation key and format with positional arguments (`{}`).
     pub fn tr_fmt(&self, key: &str, args: &[&str]) -> String {
         let template = self.tr(key);

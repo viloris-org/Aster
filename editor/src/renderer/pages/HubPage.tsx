@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { rpc } from '../api';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { rpc, selectProjectLocation } from '../api';
+import { useTranslation } from '../i18n';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ interface Props {
   onNavigate: (page: string) => void;
   onSetTheme: (theme: string) => void;
   onSetLocale: (locale: string) => void;
+  onRefresh: () => Promise<void>;
 }
 
 // ─── Avatar helper ──────────────────────────────────────────────────────────
@@ -162,10 +164,11 @@ function Sidebar({
   onNavigate: (p: string) => void;
   onSetTheme: (t: string) => void;
 }) {
+  const { t } = useTranslation();
   const navItems = [
-    { id: 'projects', label: 'Projects', icon: <IconProjects /> },
-    { id: 'installs', label: 'Installs', icon: <IconInstalls /> },
-    { id: 'settings', label: 'Settings', icon: <IconSettings /> },
+    { id: 'projects', label: t('sidebar_projects'), icon: <IconProjects /> },
+    { id: 'installs', label: t('sidebar_installs'), icon: <IconInstalls /> },
+    { id: 'settings', label: t('sidebar_settings'), icon: <IconSettings /> },
   ];
 
   const themeOptions = [
@@ -292,7 +295,21 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
                   className={`template-card ${templateIdx === i ? 'selected' : ''}`}
                   onClick={() => setTemplateIdx(i)}
                 >
-                  <span className="template-card-icon">{i === 0 ? '🧊' : '🖼️'}</span>
+                  <span className="template-card-icon">
+                    {i === 0 ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                        <line x1="12" y1="22.08" x2="12" y2="12" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="24" height="24">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                      </svg>
+                    )}
+                  </span>
                   <div className="template-card-title">{t.title}</div>
                   <div className="template-card-desc">{t.desc}</div>
                 </div>
@@ -316,13 +333,30 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
           {/* Location */}
           <div className="form-group">
             <label className="form-label">Location</label>
-            <input
-              className="form-input"
-              type="text"
-              placeholder="/home/user/projects"
-              value={location}
-              onChange={e => setLocation(e.target.value)}
-            />
+            <div className="location-input-row">
+              <input
+                className="form-input"
+                type="text"
+                placeholder="/home/user/projects"
+                value={location}
+                onChange={e => setLocation(e.target.value)}
+              />
+              <button
+                className="btn btn-secondary btn-sm btn-browse"
+                onClick={async () => {
+                  setError(null);
+                  try {
+                    const selected = await selectProjectLocation();
+                    if (selected) setLocation(selected);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err));
+                  }
+                }}
+                type="button"
+              >
+                Browse…
+              </button>
+            </div>
           </div>
 
           {/* Toolchain Version */}
@@ -365,17 +399,9 @@ interface ConfirmDeleteProps {
   path: string;
   onClose: () => void;
   onRemoveRecent: () => void;
-  onDeleteFiles: () => Promise<void>;
 }
 
-function ConfirmDeleteDialog({ path, onClose, onRemoveRecent, onDeleteFiles }: ConfirmDeleteProps) {
-  const [deleting, setDeleting] = useState(false);
-
-  const handleDeleteFiles = useCallback(async () => {
-    setDeleting(true);
-    try { await onDeleteFiles(); } catch { setDeleting(false); }
-  }, [onDeleteFiles]);
-
+function ConfirmDeleteDialog({ path, onClose, onRemoveRecent }: ConfirmDeleteProps) {
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClose();
   }, [onClose]);
@@ -391,21 +417,14 @@ function ConfirmDeleteDialog({ path, onClose, onRemoveRecent, onDeleteFiles }: C
           <div className="delete-warning">
             <IconAlertTriangle />
             <div className="delete-warning-text">
-              Are you sure you want to delete <strong>{path}</strong>?
+              Remove <strong>{path}</strong> from recent projects?
             </div>
           </div>
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-secondary btn-sm" onClick={onRemoveRecent}>
+          <button className="btn btn-danger" onClick={onRemoveRecent}>
             Remove from Recent
-          </button>
-          <button
-            className="btn btn-danger"
-            onClick={handleDeleteFiles}
-            disabled={deleting}
-          >
-            {deleting ? 'Deleting...' : 'Delete Files'}
           </button>
         </div>
       </div>
@@ -450,8 +469,11 @@ function ProjectsPage({
 
   const handleOpenFolder = useCallback(async (e: React.MouseEvent, path: string) => {
     e.stopPropagation();
-    // Open folder is a frontend convenience — we could add a Tauri shell-open command later
-    // For now, it's a visual placeholder
+    try {
+      await rpc('app/open_folder', { path });
+    } catch {
+      // folder open not supported on this platform
+    }
   }, []);
 
   const selectedProject = projects.find(p => p.path === selectedPath);
@@ -602,6 +624,7 @@ function SettingsPage({
   onSetTheme: (t: string) => void;
   onSetLocale: (l: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="hub-page-header">
@@ -610,11 +633,11 @@ function SettingsPage({
       <div className="hub-scroll" style={{ maxWidth: 520 }}>
         {/* Theme */}
         <div className="settings-section">
-          <div className="settings-section-title">Appearance</div>
+          <div className="settings-section-title">{t('settings_appearance')}</div>
           <div className="settings-row">
             <div>
-              <div className="settings-label">Theme</div>
-              <div className="settings-desc">Choose the editor color scheme</div>
+              <div className="settings-label">{t('settings_theme')}</div>
+              <div className="settings-desc">{t('settings_theme_desc')}</div>
             </div>
             <div className="settings-control">
               <div className="theme-selector">
@@ -638,11 +661,11 @@ function SettingsPage({
 
         {/* Language */}
         <div className="settings-section">
-          <div className="settings-section-title">Language</div>
+          <div className="settings-section-title">{t('settings_language')}</div>
           <div className="settings-row">
             <div>
-              <div className="settings-label">Editor Language</div>
-              <div className="settings-desc">Change the UI display language</div>
+              <div className="settings-label">{t('settings_editor_language')}</div>
+              <div className="settings-desc">{t('settings_language_desc')}</div>
             </div>
             <div className="settings-control" style={{ display: 'flex', gap: 4 }}>
               {[
@@ -678,7 +701,7 @@ function SettingsPage({
 
 // ─── HubPage (Root) ─────────────────────────────────────────────────────────
 
-export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, onSetLocale }: Props) {
+export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, onSetLocale, onRefresh }: Props) {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -713,21 +736,12 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
     if (!deleteTarget) return;
     try {
       await rpc('hub/delete_project', { path: deleteTarget, confirmed: true });
+      await onRefresh();
     } catch {
       // Backend may refuse if project is open — silent
     }
     setDeleteTarget(null);
-  }, [deleteTarget]);
-
-  const handleDeleteFiles = useCallback(async () => {
-    if (!deleteTarget) return;
-    try {
-      await rpc('hub/delete_project', { path: deleteTarget, confirmed: true });
-    } catch {
-      // Backend may refuse — silent
-    }
-    setDeleteTarget(null);
-  }, [deleteTarget]);
+  }, [deleteTarget, onRefresh]);
 
   // Render the active page
   const renderPage = () => {
@@ -785,7 +799,6 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
           path={deleteTarget}
           onClose={() => setDeleteTarget(null)}
           onRemoveRecent={handleDeleteRecent}
-          onDeleteFiles={handleDeleteFiles}
         />
       )}
     </div>
