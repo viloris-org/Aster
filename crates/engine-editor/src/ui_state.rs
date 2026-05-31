@@ -8,13 +8,12 @@
 //! for managing projects, scenes, selections, undo history, and asset browsing.
 
 use std::{
-    collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
 };
 
 use engine_assets::{
-    import_builtin_asset, scan_project_assets, AssetDatabase, AssetGuid, AssetRegistry, ImportTask,
+    import_builtin_asset, scan_project_assets, AssetDatabase, AssetRegistry, ImportTask,
     ResourceKind, ResourceMetaFormat,
 };
 use engine_core::{

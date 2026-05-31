@@ -1065,6 +1065,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 looping: audio_source.looping,
                 position: Some(transform.translation),
                 auto_play: audio_source.play_on_start,
+                bus: "Master".to_string(),
             })?;
             self.audio_bindings.push(AudioBinding {
                 object: object.id,

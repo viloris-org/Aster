@@ -92,3 +92,6 @@ prompts.local.md
 /.turbo/
 /.vite/
 /.wrangler/
+
+# Generated bundle files
+/usr/

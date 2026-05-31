@@ -227,7 +227,7 @@ impl Default for CopilotPanelState {
 ///
 /// Lives in engine-editor-ui because it contains `copilot: CopilotPanelState`
 /// which references `engine_ai::AgentOperation`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ShellUiState {
     /// Whether the Hierarchy panel is visible.
     pub show_hierarchy: bool,
@@ -355,6 +355,79 @@ pub struct ShellUiState {
     pub drag_dirty: bool,
     /// Text label shown near the gizmo during drag.
     pub drag_delta_label: Option<String>,
+}
+
+impl Default for ShellUiState {
+    fn default() -> Self {
+        Self {
+            show_hierarchy: false,
+            show_inspector: false,
+            show_project: false,
+            show_console: false,
+            show_scene_view: false,
+            show_game_view: false,
+            playing: false,
+            paused: false,
+            hierarchy_filter: String::new(),
+            project_filter: String::new(),
+            console_filter: String::new(),
+            console_collapse: false,
+            project_import_path: String::new(),
+            project_new_script_name: "player_controller".to_owned(),
+            project_new_script_backend: ScriptTemplateBackend::Python,
+            project_import_status: None,
+            hierarchy_selection: Vec::new(),
+            hierarchy_dragging: None,
+            hierarchy_rename: None,
+            dragged_asset: None,
+            scene_view_target: None,
+            game_view_target: None,
+            camera_preview_target: None,
+            copilot: CopilotPanelState {
+                visible: true,
+                ..CopilotPanelState::default()
+            },
+            scene_view_texture: None,
+            game_view_texture: None,
+            camera_preview_texture: None,
+            runtime_game_world: None,
+            command_palette_open: false,
+            command_filter: String::new(),
+            command_status: None,
+            editor_camera_yaw: 0.0,
+            editor_camera_pitch: 0.3,
+            editor_camera_distance: 6.0,
+            editor_camera_target_distance: 6.0,
+            editor_camera_target: [0.0, 1.0, 0.0],
+            pending_action: None,
+            pending_action_after_close: None,
+            scene_guide_drag_before: None,
+            viewport_transform_drag: None,
+            inspector_drag_before: None,
+            show_close_dialog: false,
+            close_dialog_exit_app: false,
+            viewport_transform_drag_before: None,
+            play_mode_request: None,
+            editor_scene_view_projection: EditorSceneViewProjection::Perspective,
+            editor_scene_view_auto_orthographic: true,
+            editor_scene_view_orientation: EditorSceneViewOrientation::Free,
+            editor_transform_space: EditorTransformSpace::Global,
+            editor_transform_tool: EditorTransformTool::Move,
+            status_toast: None,
+            status_toast_frames: 0,
+            inspector_collapsed: Vec::new(),
+            add_component_filter: String::new(),
+            remove_confirm: None,
+            editor_snap_settings: EditorSnapSettings::default(),
+            expanded_folders: BTreeSet::new(),
+            asset_rename: None,
+            asset_delete_confirm: None,
+            script_editor: None,
+            snap_toggle: false,
+            drag_dirty: false,
+            drag_delta_label: None,
+        }
+    }
 }
 
 impl ShellUiState {

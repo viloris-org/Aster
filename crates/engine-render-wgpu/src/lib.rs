@@ -23,9 +23,10 @@ const MAX_FORWARD_LIGHTS: usize = 8;
 const MAX_DIRECTIONAL_LIGHTS: usize = 2;
 const DEFAULT_AMBIENT_LIGHT: [f32; 4] = [0.16, 0.16, 0.16, 1.0];
 
+/// GPU vertex layout: position (3×f32), normal (3×f32), UV (2×f32).
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct Vertex {
+pub struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
     uv: [f32; 2],
