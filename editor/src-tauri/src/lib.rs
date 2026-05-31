@@ -10,7 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use engine_ai::{AgentPlan, AgentSession};
 use engine_core::{EngineConfig, EngineError, EngineResult, RuntimeProfile};
+use engine_editor::agent::PermissionPolicy;
 use engine_editor::{
     ConsoleEntry, ConsoleLevel, ConsoleService, DurableEditorState, EditorPreferences,
     FileEditorStore, ProjectMetadata, ThemePreference, UndoCommand,
@@ -21,7 +23,9 @@ use engine_render::ImageFormat;
 use engine_render_wgpu::{WgpuOffscreenConfig, WgpuRenderDevice};
 use runtime_min::{headless_services_from_scene, RuntimeServices};
 use serde_json::Value;
-use tauri::{utils::config::Color, Manager, State};
+use tauri::{image::Image, utils::config::Color, Manager, State};
+
+const APP_WINDOW_ICON: Image<'static> = tauri::include_image!("./icons/128x128.png");
 
 const WINDOW_BACKGROUND: &str = "#181818";
 
@@ -116,6 +120,60 @@ impl DesktopIntegration {
     }
 }
 
+/// Stub AI model for development — maps keywords to canned JSON responses.
+struct StubAiModel;
+
+impl engine_ai::AiModel for StubAiModel {
+    fn chat(
+        &self,
+        request: engine_ai::AiRequest,
+    ) -> engine_core::EngineResult<engine_ai::AiResponse> {
+        let prompt = request.user.to_lowercase();
+
+        let json = if prompt.contains("create")
+            && (prompt.contains("player") || prompt.contains("cube"))
+        {
+            let name = if prompt.contains("player") {
+                "Player"
+            } else {
+                "Cube"
+            };
+            format!(
+                r#"[[
+                    {{"action":"create_object","name":"{name}","components":[{{"type":"MeshRenderer"}}],"position":[0,0,0]}},
+                    {{"action":"complete","summary":"Created {name}"}}
+                ]]
+            "#
+            )
+        } else if prompt.contains("create") && prompt.contains("camera") {
+            r#"[[
+                {"action":"create_object","name":"Camera","components":[{"type":"Camera"}],"position":[0,2,5]},
+                {"action":"complete","summary":"Created Camera"}
+            ]]
+            "#.to_owned()
+        } else if prompt.contains("add") && prompt.contains("light") {
+            r#"[[
+                {"action":"create_object","name":"Point Light","components":[{"type":"Light"}],"position":[2,3,0]},
+                {"action":"set_property","entity":"1:1","component":"Light","field":"intensity","value":2.0},
+                {"action":"complete","summary":"Added Point Light"}
+            ]]
+            "#.to_owned()
+        } else if prompt.contains("help") || prompt.contains("what") || prompt.contains("list") {
+            r#"[[
+                {"action":"complete","summary":"I can create objects (player, cube, camera), add components (light, rigidbody), and modify scene properties. Try \"create a player\" or \"add a light\"."}
+            ]]
+            "#.to_owned()
+        } else {
+            r#"[[
+                {"action":"complete","summary":"I'm not sure what you want to do. Try \"create a player\", \"add a light\", or \"help\"."}
+            ]]
+            "#.to_owned()
+        };
+
+        Ok(engine_ai::AiResponse { content: json })
+    }
+}
+
 // ─── Editor host state ───────────────────────────────────────────────────────
 
 pub struct EditorHost {
@@ -144,6 +202,8 @@ pub struct EditorHost {
     play_last_frame: Option<Instant>,
     /// Monotonic version counter for simulated play frames.
     play_version: u64,
+    /// Cached copilot plan awaiting user approval.
+    last_copilot_plan: Option<AgentPlan>,
 }
 
 impl EditorHost {
@@ -164,6 +224,7 @@ impl EditorHost {
             play_runtime: None,
             play_last_frame: None,
             play_version: 1,
+            last_copilot_plan: None,
         };
 
         host.reopen_last_project_if_needed();
@@ -186,6 +247,11 @@ impl EditorHost {
             "hub/set_page" => self.hub_set_page(params),
             "hub/set_locale" => self.hub_set_locale(params),
 
+            // ── Project ──
+            "project/list_assets" => self.project_list_assets(params),
+            "project/import_file" => self.project_import_file(params),
+            "project/create_script" => self.project_create_script(params),
+
             // ── Console ──
             "console/get_entries" => self.console_get_entries(params),
             "console/clear" => self.console_clear(params),
@@ -199,6 +265,10 @@ impl EditorHost {
             "play/stop" => self.play_stop(params),
             "play/get_state" => self.play_get_state(params),
 
+            // ── Copilot ──
+            "copilot/plan" => self.copilot_plan(params),
+            "copilot/apply" => self.copilot_apply(params),
+
             // ── Shell ──
             "shell/get_state" => self.shell_get_state(params),
             "shell/get_scene_tree" => self.shell_get_scene_tree(params),
@@ -209,11 +279,13 @@ impl EditorHost {
             "shell/save_scene_as" => self.shell_save_scene_as(params),
             "shell/update_transform" => self.shell_update_transform(params),
             "shell/add_component" => self.shell_add_component(params),
+            "shell/update_component" => self.shell_update_component(params),
             "shell/remove_component" => self.shell_remove_component(params),
             "shell/undo" => self.shell_undo(params),
             "shell/redo" => self.shell_redo(params),
             "shell/create_object" => self.shell_create_object(params),
             "shell/delete_object" => self.shell_delete_object(params),
+            "shell/rename_object" => self.shell_rename_object(params),
             "shell/duplicate_object" => self.shell_duplicate_object(params),
             "shell/close_project" => self.shell_close_project(params),
 
@@ -485,6 +557,152 @@ impl EditorHost {
         Ok(serde_json::json!({ "locale": locale_str }))
     }
 
+    // ── Project handlers ──
+
+    fn project_list_assets(&mut self, _params: &Value) -> EngineResult<Value> {
+        let Some(project) = self.shell.project() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        let entries: Vec<Value> = project
+            .database
+            .iter_entries()
+            .map(|entry| {
+                serde_json::json!({
+                    "guid": entry.guid.to_string(),
+                    "path": entry.path.to_string_lossy(),
+                    "kind": format!("{:?}", entry.kind),
+                })
+            })
+            .collect();
+
+        // Also get assets from ProjectContext.sorted_assets() for richer metadata
+        let assets: Vec<Value> = project
+            .sorted_assets()
+            .iter()
+            .map(|meta| {
+                serde_json::json!({
+                    "guid": meta.guid.to_string(),
+                    "source_path": meta.source_path.to_string_lossy(),
+                    "kind": format!("{:?}", meta.kind),
+                    "importer": meta.importer,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::json!({
+            "entries": entries,
+            "assets": assets,
+        }))
+    }
+
+    fn project_import_file(&mut self, params: &Value) -> EngineResult<Value> {
+        let path = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'path'"))?;
+
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        project.import_file(std::path::PathBuf::from(path))?;
+        self.console.push(engine_editor::ConsoleEntry {
+            timestamp: "now".into(),
+            level: engine_editor::ConsoleLevel::Info,
+            source: engine_editor::ConsoleSource {
+                subsystem: "editor".into(),
+                file: None,
+                line: None,
+            },
+            message: format!("Imported file: {path}"),
+        });
+
+        Ok(serde_json::json!({"imported": path}))
+    }
+
+    fn project_create_script(&mut self, params: &Value) -> EngineResult<Value> {
+        let name = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'name'"))?;
+        let backend = params
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("rhai");
+
+        let Some(project) = self.shell.project() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        // Use the asset root relative to project root
+        let asset_root = project.root.join(&project.manifest.asset_root);
+        std::fs::create_dir_all(&asset_root).map_err(|source| EngineError::Filesystem {
+            path: asset_root.clone(),
+            source,
+        })?;
+
+        let ext = if backend == "python" { "py" } else { "rhai" };
+        let script_path = format!("scripts/{name}.{ext}");
+        let full_path = asset_root.join(&script_path);
+
+        let template = match backend {
+            "python" => {
+                r#"# Auto-generated script
+# Use this file to implement custom game logic
+
+def on_start(entity):
+    pass
+
+def on_update(entity, dt):
+    pass
+"#
+            }
+            _ => {
+                r#"// Auto-generated script
+// Use this file to implement custom game logic
+
+fn on_start(entity) {
+    // Called when the entity is first activated
+}
+
+fn on_update(entity, dt) {
+    // Called every frame with delta time
+}
+"#
+            }
+        };
+
+        // Check if parent directory exists
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| EngineError::Filesystem {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+
+        std::fs::write(&full_path, template).map_err(|source| EngineError::Filesystem {
+            path: full_path.clone(),
+            source,
+        })?;
+
+        self.console.push(engine_editor::ConsoleEntry {
+            timestamp: "now".into(),
+            level: engine_editor::ConsoleLevel::Info,
+            source: engine_editor::ConsoleSource {
+                subsystem: "editor".into(),
+                file: Some(full_path.clone()),
+                line: None,
+            },
+            message: format!("Created script: {}", full_path.display()),
+        });
+
+        Ok(serde_json::json!({
+            "path": script_path,
+            "full_path": full_path.to_string_lossy(),
+        }))
+    }
+
     // ── Console handlers ──
 
     fn console_get_entries(&mut self, _params: &Value) -> EngineResult<Value> {
@@ -710,6 +928,183 @@ impl EditorHost {
 
     // ── Shell handlers ──
 
+    // ── Copilot handlers ──
+
+    fn build_agent_context(
+        &self,
+        scene: engine_ecs::Scene,
+    ) -> EngineResult<engine_editor::ProjectContext> {
+        use engine_assets::AssetDatabase;
+
+        let project = self
+            .shell
+            .project()
+            .ok_or_else(|| EngineError::config("no project open"))?;
+
+        let manifest = project.manifest.clone();
+        let asset_root = project.root.join(&project.manifest.asset_root);
+        let builtin_root = project.root.join("builtin");
+        let database = AssetDatabase::new(asset_root, builtin_root);
+
+        Ok(engine_editor::ProjectContext {
+            scene,
+            manifest,
+            database,
+            registry: engine_assets::AssetRegistry::default(),
+            assets: Vec::new(),
+            asset_imports: Vec::new(),
+            scene_dirty: false,
+            root: project.root.clone(),
+            scene_path: project.scene_path.clone(),
+        })
+    }
+
+    fn scene_clone_for_agent(&self) -> EngineResult<engine_ecs::Scene> {
+        let Some(project) = self.shell.project() else {
+            return Err(EngineError::config("no project open"));
+        };
+        // Round-trip clone via JSON
+        let scene_json = project.scene.to_json(project.name())?;
+        engine_ecs::Scene::from_json(&scene_json)
+    }
+
+    fn copilot_plan(&mut self, params: &Value) -> EngineResult<Value> {
+        let prompt = params
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'prompt'"))?;
+
+        let scene = self.scene_clone_for_agent()?;
+        let ctx = self.build_agent_context(scene)?;
+
+        let mut session = AgentSession::new(ctx)?;
+        let model = StubAiModel;
+        let policy = PermissionPolicy::transactional_write();
+
+        match session.plan(&model, prompt, policy) {
+            Ok(plan) => {
+                let operations: Vec<serde_json::Value> = plan
+                    .operations
+                    .iter()
+                    .enumerate()
+                    .map(|(i, op)| {
+                        serde_json::json!({
+                            "index": i,
+                            "preview": op.preview,
+                            "requires_write": op.requires_write,
+                        })
+                    })
+                    .collect();
+
+                self.last_copilot_plan = Some(plan);
+
+                Ok(serde_json::json!({
+                    "operations": operations,
+                    "read_only": operations.iter().all(|o| !o["requires_write"].as_bool().unwrap_or(true)),
+                    "requires_write": operations.iter().any(|o| o["requires_write"].as_bool().unwrap_or(false)),
+                }))
+            }
+            Err(e) => {
+                self.last_copilot_plan = None;
+                Err(e)
+            }
+        }
+    }
+
+    fn copilot_apply(&mut self, params: &Value) -> EngineResult<Value> {
+        let approved_indices: Vec<usize> = params
+            .get("approved_indices")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_u64())
+                    .map(|i| i as usize)
+                    .collect()
+            })
+            .ok_or_else(|| EngineError::config("missing 'approved_indices' array"))?;
+
+        let plan = self.last_copilot_plan.take().ok_or_else(|| {
+            EngineError::config("no pending copilot plan — call copilot/plan first")
+        })?;
+
+        // Filter the plan to only approved operations
+        let filtered_ops: Vec<_> = plan
+            .operations
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| approved_indices.contains(i))
+            .map(|(_, op)| op)
+            .collect();
+
+        if filtered_ops.is_empty() {
+            return Ok(serde_json::json!({
+                "operations_performed": 0,
+                "completed": false,
+                "trace_entries": [],
+                "console_entries": [],
+                "summary": null
+            }));
+        }
+
+        let scene = self.scene_clone_for_agent()?;
+        let ctx = self.build_agent_context(scene)?;
+
+        let mut session = AgentSession::new(ctx)?;
+
+        let apply_plan = AgentPlan {
+            operations: filtered_ops,
+            read_only: false,
+            requires_write: true,
+            policy: PermissionPolicy::transactional_write(),
+        };
+
+        let outcome = session.apply_plan(&apply_plan)?;
+
+        // Write the modified scene back to the real project
+        if let Some(project) = self.shell.project_mut() {
+            project.scene = session.context.scene;
+            project.scene_dirty = true;
+            project.asset_imports.extend(session.context.asset_imports);
+            for entry in session.console.entries().iter() {
+                self.console.push(entry.clone());
+            }
+        }
+
+        self.bump_scene_version();
+
+        let trace_entries: Vec<serde_json::Value> = outcome
+            .trace_entries
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "tool": t.tool,
+                    "result": t.result,
+                    "recovery_hint": t.recovery_hint,
+                })
+            })
+            .collect();
+
+        let console_entries: Vec<serde_json::Value> = outcome
+            .console_entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "level": format!("{:?}", e.level).to_lowercase(),
+                    "message": e.message,
+                    "subsystem": e.source.subsystem,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::json!({
+            "operations_performed": outcome.operations_performed,
+            "completed": outcome.completed,
+            "summary": outcome.summary,
+            "trace_entries": trace_entries,
+            "console_entries": console_entries,
+        }))
+    }
+
     fn shell_get_state(&mut self, _params: &Value) -> EngineResult<Value> {
         Ok(serde_json::json!({
             "has_project": self.shell.project().is_some(),
@@ -736,10 +1131,15 @@ impl EditorHost {
                     .transforms()
                     .world(*entity)
                     .unwrap_or_default();
+                let parent = project.scene.transforms().parent(*entity);
+                let parent_id = parent
+                    .and_then(|p| project.scene.object(p))
+                    .map(|o| format!("{:032x}", o.id.as_u128()));
                 serde_json::json!({
                     "id": format!("{:032x}", obj.id.as_u128()),
                     "name": obj.name,
                     "tag": obj.tag,
+                    "parent_id": parent_id,
                     "position": [
                         transform.translation.x,
                         transform.translation.y,
@@ -774,9 +1174,18 @@ impl EditorHost {
         let components: Vec<Value> = obj
             .components
             .iter()
-            .map(|c| {
-                serde_json::json!({
-                    "type": format!("{:?}", c),
+            .filter_map(|c| {
+                serde_json::to_value(c).ok().map(|val| {
+                    let comp_type = val
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("")
+                        .to_owned();
+                    let data = val.get("data").cloned().unwrap_or(serde_json::Value::Null);
+                    serde_json::json!({
+                        "type": comp_type,
+                        "data": data,
+                    })
                 })
             })
             .collect();
@@ -951,6 +1360,37 @@ impl EditorHost {
                 transform.translation.z,
             ],
         }))
+    }
+
+    fn shell_rename_object(&mut self, params: &Value) -> EngineResult<Value> {
+        let id_str = params
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'id'"))?;
+        let new_name = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'name'"))?;
+        let entity_id = engine_core::EntityId::from_u128(
+            u128::from_str_radix(id_str, 16)
+                .map_err(|_| EngineError::config("invalid entity id"))?,
+        );
+
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+        let entity = project
+            .scene
+            .find_by_id(entity_id)
+            .ok_or_else(|| EngineError::config("entity not found"))?;
+
+        if let Some(obj) = project.scene.object_mut(entity) {
+            obj.name = new_name.to_owned();
+            project.scene_dirty = true;
+        }
+
+        self.bump_scene_version();
+        Ok(serde_json::json!({ "renamed": id_str, "name": new_name }))
     }
 
     fn shell_delete_object(&mut self, params: &Value) -> EngineResult<Value> {
@@ -1173,6 +1613,73 @@ impl EditorHost {
             .push_undo(UndoCommand::new("Add Component", id_str, before, after));
         self.bump_scene_version();
         Ok(serde_json::json!({ "added": comp_type }))
+    }
+
+    fn shell_update_component(&mut self, params: &Value) -> EngineResult<Value> {
+        use engine_ecs::ComponentData;
+
+        let id_str = params
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'id'"))?;
+        let comp_type = params
+            .get("component_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'component_type'"))?;
+        let field_data = params
+            .get("data")
+            .ok_or_else(|| EngineError::config("missing 'data'"))?;
+
+        let entity_id = engine_core::EntityId::from_u128(
+            u128::from_str_radix(id_str, 16)
+                .map_err(|_| EngineError::config("invalid entity id"))?,
+        );
+
+        let before = self.scene_snapshot()?;
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+        let entity = project
+            .scene
+            .find_by_id(entity_id)
+            .ok_or_else(|| EngineError::config("entity not found"))?;
+
+        // Get the current component, merge with new data, and upsert
+        let components = project
+            .scene
+            .components(entity)
+            .ok_or_else(|| EngineError::config("entity has no components"))?;
+
+        let current = components
+            .iter()
+            .find(|c| c.type_id() == comp_type)
+            .ok_or_else(|| EngineError::config(format!("entity has no {comp_type} component")))?;
+
+        // Serialize current data, merge fields, deserialize back
+        let mut current_val =
+            serde_json::to_value(current).map_err(|e| EngineError::other(e.to_string()))?;
+
+        // Merge the new data into the existing component data
+        if let Some(obj) = current_val.as_object_mut() {
+            if let Some(data_obj) = obj.get_mut("data").and_then(|d| d.as_object_mut()) {
+                if let Some(fields) = field_data.as_object() {
+                    for (key, value) in fields {
+                        data_obj.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+
+        let component: ComponentData = serde_json::from_value(current_val)
+            .map_err(|e| EngineError::config(format!("invalid component data: {e}")))?;
+
+        project.scene.upsert_component(entity, component)?;
+        project.scene_dirty = true;
+        let after = self.scene_snapshot()?;
+        self.shell
+            .push_undo(UndoCommand::new("Update Component", id_str, before, after));
+        self.bump_scene_version();
+        Ok(serde_json::json!({ "updated": comp_type }))
     }
 
     fn shell_remove_component(&mut self, params: &Value) -> EngineResult<Value> {
@@ -1469,6 +1976,8 @@ fn open_game_view(app: tauri::AppHandle) -> Result<(), String> {
         "game-view",
         tauri::WebviewUrl::App("index.html#/game-view".into()),
     )
+    .icon(APP_WINDOW_ICON.clone())
+    .map_err(|e| e.to_string())?
     .title("Game View")
     .inner_size(1280.0, 720.0)
     .min_inner_size(640.0, 360.0)
@@ -1532,6 +2041,7 @@ async fn select_project_location() -> Result<Option<String>, String> {
 fn apply_desktop_window_adaptations(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let desktop = DesktopIntegration::detect();
     if let Some(window) = app.get_webview_window("main") {
+        window.set_icon(APP_WINDOW_ICON.clone())?;
         window.set_background_color(Some(Color(24, 24, 24, 255)))?;
         window.set_decorations(desktop.prefers_native_chrome())?;
     }

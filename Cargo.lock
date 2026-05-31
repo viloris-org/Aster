@@ -175,6 +175,7 @@ name = "aster-editor-tauri"
 version = "0.1.0"
 dependencies = [
  "ashpd",
+ "engine-ai",
  "engine-assets",
  "engine-core",
  "engine-ecs",

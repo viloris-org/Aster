@@ -434,5 +434,42 @@ editor_status_scene_saved = "场景已保存"
 editor_status_opened = "已打开：{path}"
 editor_status_saved = "已保存：{path}"
 
+# Copilot
+copilot_empty_hint = "让我帮你编辑场景……试试\"创建玩家\"或\"添加灯光\""
+copilot_status_planning = "规划中"
+copilot_status_ready = "就绪"
+copilot_status_executing = "执行中"
+copilot_status_complete = "完成"
+copilot_status_error = "错误"
+copilot_plan_title = "计划"
+copilot_planned_ops = "已规划 {count} 个操作，请审核"
+copilot_no_ops = "无法确定要执行的操作，请更具体地描述"
+copilot_applied_ops = "已执行 {count} 个操作"
+copilot_badge_write = "写入"
+copilot_apply = "应用 ({count})"
+copilot_reject = "全部拒绝"
+copilot_executing = "正在执行操作……"
+copilot_trace = "追踪"
+copilot_auto_accept = "自动执行只读操作"
+copilot_input_placeholder = "让我帮你……"
+copilot_send = "发送"
+
+# Inspector
+inspector_select_hint = "选择一个游戏对象进行检查"
+inspector_components = "组件"
+inspector_all_components_added = "已添加所有组件"
+
+# Project panel
+project_refresh = "刷新"
+project_create = "创建"
+project_script_name = "脚本名称……"
+project_search = "搜索资源……"
+project_empty = "暂无资源"
+
+# Hierarchy
+hierarchy_search = "搜索对象……"
+hierarchy_search_no_matches = "无匹配对象"
+
 # Common
 common_none = "无"
+common_no_editable_fields = "无可编辑字段"

@@ -3,6 +3,8 @@ import {
   openGameView, openScene, rpc, saveSceneAs, viewportReadback,
 } from '../api';
 import { useTranslation } from '../i18n';
+import CopilotPanel from './CopilotPanel';
+import ProjectPanel from './ProjectPanel';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,7 @@ interface SceneObject {
   name: string;
   tag: string;
   position: [number, number, number];
+  parent_id?: string | null;
 }
 
 interface ConsoleEntry {
@@ -46,7 +49,10 @@ interface EntityDetails {
     rotation: [number, number, number, number];
     scale: [number, number, number];
   };
-  components: Array<{ type: string }>;
+  components: Array<{
+    type: string;
+    data?: Record<string, unknown>;
+  }>;
 }
 
 interface Props {
@@ -152,6 +158,9 @@ function ViewportCanvas({ sceneVersion = 0 }: { sceneVersion?: number }) {
   const isActiveRef = useRef(true);
   const versionRef = useRef(sceneVersion);
   const lastRenderedVersionRef = useRef<number | null>(null);
+  const cameraRef = useRef({ yaw: -0.5, pitch: 0.3, distance: 6, targetX: 0, targetY: 1, targetZ: 0 });
+  const dragging = useRef<'orbit' | 'pan' | null>(null);
+  const dragStart = useRef({ x: 0, y: 0, yaw: 0, pitch: 0, targetX: 0, targetY: 0, targetZ: 0 });
 
   // Keep version ref in sync
   versionRef.current = sceneVersion;
@@ -163,25 +172,31 @@ function ViewportCanvas({ sceneVersion = 0 }: { sceneVersion?: number }) {
     const poll = async () => {
       if (!isActiveRef.current) return;
       const { width, height } = sizeRef.current;
+      const cam = cameraRef.current;
       try {
         const buffer = await viewportReadback({
           width, height,
           lastVersion: lastRenderedVersionRef.current ?? undefined,
+          yaw: cam.yaw,
+          pitch: cam.pitch,
+          distance: cam.distance,
+          targetX: cam.targetX,
+          targetY: cam.targetY,
+          targetZ: cam.targetZ,
         });
         if (!isActiveRef.current || !canvasRef.current) return;
 
-        // Parse header: [width: u32 LE][height: u32 LE][RGBA pixels...]
-        const header = new Uint32Array(buffer, 0, 2);
+        const uint8 = new Uint8Array(buffer);
+        const header = new Uint32Array(uint8.buffer, uint8.byteOffset, 2);
         const w = header[0];
         const h = header[1];
 
-        // w === 0 means "no change" (lazy rendering skip)
         if (w > 0 && h > 0) {
           lastRenderedVersionRef.current = versionRef.current;
           const ctx = canvasRef.current.getContext('2d');
           if (ctx) {
             const imageData = new ImageData(
-              new Uint8ClampedArray(buffer, 8, w * h * 4),
+              new Uint8ClampedArray(uint8.buffer, uint8.byteOffset + 8, w * h * 4),
               w, h,
             );
             ctx.putImageData(imageData, 0, 0);
@@ -218,8 +233,76 @@ function ViewportCanvas({ sceneVersion = 0 }: { sceneVersion?: number }) {
     return () => observer.disconnect();
   }, []);
 
+  // ── Mouse handlers ──
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 2) {
+      // Right-click → orbit
+      dragging.current = 'orbit';
+      dragStart.current = { x: e.clientX, y: e.clientY, ...cameraRef.current };
+      e.preventDefault();
+    } else if (e.button === 1) {
+      // Middle-click → pan
+      dragging.current = 'pan';
+      dragStart.current = { x: e.clientX, y: e.clientY, ...cameraRef.current };
+      e.preventDefault();
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const dx = e.clientX - dragStart.current.x;
+      const dy = e.clientY - dragStart.current.y;
+
+      if (dragging.current === 'orbit') {
+        cameraRef.current.yaw = dragStart.current.yaw - dx * 0.005;
+        cameraRef.current.pitch = Math.max(-1.5, Math.min(1.5, dragStart.current.pitch + dy * 0.005));
+      } else if (dragging.current === 'pan') {
+        const d = cameraRef.current.distance * 0.002;
+        const yaw = cameraRef.current.yaw;
+        const sinY = Math.sin(yaw);
+        const cosY = Math.cos(yaw);
+        cameraRef.current.targetX = dragStart.current.targetX + (-dx * cosY - dy * sinY * 0.5) * d;
+        cameraRef.current.targetY = dragStart.current.targetY + dy * d * 0.5;
+        cameraRef.current.targetZ = dragStart.current.targetZ + (dx * sinY - dy * cosY * 0.5) * d;
+      }
+
+      // Force re-render by resetting the last version
+      lastRenderedVersionRef.current = null;
+    };
+
+    const handleMouseUp = () => {
+      dragging.current = null;
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      if (containerRef.current && containerRef.current.contains(e.target as Node)) {
+        const cam = cameraRef.current;
+        cam.distance = Math.max(0.5, Math.min(100, cam.distance + e.deltaY * 0.01));
+        lastRenderedVersionRef.current = null;
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
+
   return (
-    <div ref={containerRef} className="viewport-container">
+    <div
+      ref={containerRef}
+      className="viewport-container"
+      onMouseDown={onMouseDown}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <canvas ref={canvasRef} className="viewport-canvas" />
     </div>
   );
@@ -234,6 +317,8 @@ function HierarchyPanel({
   onCreateObject,
   onDeleteObject,
   onDuplicateObject,
+  onRename,
+  onRefresh,
 }: {
   objects: SceneObject[];
   selectedId: string | null;
@@ -241,14 +326,19 @@ function HierarchyPanel({
   onCreateObject: (parentId?: string) => Promise<void>;
   onDeleteObject: (id: string) => Promise<void>;
   onDuplicateObject: (id: string) => Promise<void>;
+  onRename: (id: string, name: string) => Promise<void>;
+  onRefresh: () => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [search, setSearch] = useState('');
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     id: string;
     x: number;
     y: number;
   } | null>(null);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState('');
 
   // Close context menu on outside click
   useEffect(() => {
@@ -258,8 +348,97 @@ function HierarchyPanel({
     return () => window.removeEventListener('click', handler);
   }, [contextMenu]);
 
+  // Build tree: root objects first, then children grouped by parent_id
+  const buildTree = useCallback(() => {
+    const filtered = search
+      ? objects.filter(obj => obj.name.toLowerCase().includes(search.toLowerCase()))
+      : objects;
+
+    const byParent = new Map<string | null, SceneObject[]>();
+    for (const obj of filtered) {
+      const parentKey = obj.parent_id ?? null;
+      if (!byParent.has(parentKey)) byParent.set(parentKey, []);
+      byParent.get(parentKey)!.push(obj);
+    }
+
+    // Recursively render
+    const renderChildren = (parentKey: string | null, depth: number): React.ReactNode[] => {
+      const children = byParent.get(parentKey) ?? [];
+      return children.flatMap(obj => {
+        const isRenaming = renameId === obj.id;
+        const items: React.ReactNode[] = [
+          <div
+            key={obj.id}
+            className={`hierarchy-item ${selectedId === obj.id ? 'selected' : ''}`}
+            style={{ paddingLeft: 10 + depth * 16 }}
+            onClick={() => onSelect(obj.id)}
+            onDoubleClick={() => {
+              setRenameId(obj.id);
+              setRenameText(obj.name);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({ id: obj.id, x: e.clientX, y: e.clientY });
+            }}
+            title={`Tag: ${obj.tag}\nPosition: ${obj.position.map((v) => v.toFixed(2)).join(', ')}`}
+          >
+            <span className={`entity-icon entity-icon-${obj.tag.toLowerCase()}`} />
+            {isRenaming ? (
+              <input
+                className="hierarchy-rename-input"
+                value={renameText}
+                onChange={(e) => setRenameText(e.target.value)}
+                onBlur={() => {
+                  if (renameText.trim() && renameText !== obj.name) {
+                    onRename(obj.id, renameText.trim());
+                  }
+                  setRenameId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    (e.target as HTMLInputElement).blur();
+                  } else if (e.key === 'Escape') {
+                    setRenameId(null);
+                  }
+                  e.stopPropagation();
+                }}
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <>
+                <span className="entity-name">{obj.name}</span>
+                <span className="entity-tag">{obj.tag}</span>
+              </>
+            )}
+          </div>,
+          ...renderChildren(obj.id, depth + 1),
+        ];
+        return items;
+      });
+    };
+
+    return renderChildren(null, 0);
+  }, [objects, search, selectedId, renameId, renameText, onSelect, onRename]);
+
   return (
     <>
+      {/* Search bar */}
+      <div className="hierarchy-search-row">
+        <input
+          className="hierarchy-search"
+          type="text"
+          placeholder={t('hierarchy_search')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {search && (
+          <span className="hierarchy-search-count">
+            {objects.filter(o => o.name.toLowerCase().includes(search.toLowerCase())).length}
+          </span>
+        )}
+      </div>
+
       {/* Toolbar row */}
       <div className="hierarchy-toolbar">
         <span className="hierarchy-count">{objects.length}</span>
@@ -279,57 +458,35 @@ function HierarchyPanel({
               </button>
               <button className="context-menu-item" onClick={async () => {
                 setCreateMenuOpen(false);
-                // Create with Camera component
-                await rpc('shell/add_component', {
-                  id: (await rpc<{ id: string }>('shell/create_object', {})).id,
-                  component_type: 'Camera',
-                });
-                if (onCreateObject) onCreateObject();
+                const { id } = await rpc<{ id: string }>('shell/create_object', {});
+                await rpc('shell/add_component', { id, component_type: 'Camera' });
+                await onRefresh();
               }}>
                 {t('hierarchy_create_camera')}
               </button>
               <button className="context-menu-item" onClick={async () => {
                 setCreateMenuOpen(false);
-                // Create with Light component
-                await rpc('shell/add_component', {
-                  id: (await rpc<{ id: string }>('shell/create_object', {})).id,
-                  component_type: 'Light',
-                });
-                if (onCreateObject) onCreateObject();
+                const { id } = await rpc<{ id: string }>('shell/create_object', {});
+                await rpc('shell/add_component', { id, component_type: 'Light' });
+                await onRefresh();
               }}>
                 {t('hierarchy_create_light')}
-              </button>
-              <button className="context-menu-item" onClick={async () => {
-                setCreateMenuOpen(false);
-                await onCreateObject();
-              }}>
-                {t('hierarchy_create_empty')}
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Object list */}
-      {objects.length === 0 && (
-        <p className="panel-empty">{t('hierarchy_no_objects')}</p>
-      )}
-      {objects.map((obj) => (
-        <div
-          key={obj.id}
-          className={`hierarchy-item ${selectedId === obj.id ? 'selected' : ''}`}
-          onClick={() => onSelect(obj.id)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setContextMenu({ id: obj.id, x: e.clientX, y: e.clientY });
-          }}
-          title={`Tag: ${obj.tag}\nPosition: ${obj.position.map((v) => v.toFixed(2)).join(', ')}`}
-        >
-          <span className={`entity-icon entity-icon-${obj.tag.toLowerCase()}`} />
-          <span className="entity-name">{obj.name}</span>
-          <span className="entity-tag">{obj.tag}</span>
-        </div>
-      ))}
+      {/* Object tree */}
+      <div className="hierarchy-scroll">
+        {objects.length === 0 ? (
+          <p className="panel-empty">{t('hierarchy_no_objects')}</p>
+        ) : buildTree().length === 0 ? (
+          <p className="panel-empty">{t('hierarchy_search_no_matches')}</p>
+        ) : (
+          buildTree()
+        )}
+      </div>
 
       {/* Context menu */}
       {contextMenu && (
@@ -357,6 +514,174 @@ function HierarchyPanel({
   );
 }
 
+// ─── Component Field Editor ─────────────────────────────────────────────────
+
+function ComponentFieldEditor({
+  componentType,
+  data,
+  entityId,
+  onRefresh,
+}: {
+  componentType: string;
+  data: Record<string, unknown> | null;
+  entityId: string;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(true);
+
+  // Debounced field update
+  const updateField = useCallback((field: string, value: unknown) => {
+    rpc('shell/update_component', {
+      id: entityId,
+      component_type: componentType,
+      data: { [field]: value },
+    }).catch(console.error);
+  }, [entityId, componentType]);
+
+  // Schema definition for known component types
+  type FieldSchema = { key: string; label: string; type: 'f32' | 'bool' | 'string' | 'enum'; options?: string[] };
+
+  const fieldSchemas: Record<string, FieldSchema[]> = {
+    Camera: [
+      { key: 'vertical_fov_degrees', label: 'FOV', type: 'f32' },
+      { key: 'near', label: 'Near', type: 'f32' },
+      { key: 'far', label: 'Far', type: 'f32' },
+    ],
+    Light: [
+      { key: 'intensity', label: 'Intensity', type: 'f32' },
+      { key: 'range', label: 'Range', type: 'f32' },
+      { key: 'spot_angle', label: 'Spot Angle', type: 'f32' },
+    ],
+    Rigidbody: [
+      { key: 'mass', label: 'Mass', type: 'f32' },
+      { key: 'linear_damping', label: 'Linear Damping', type: 'f32' },
+      { key: 'angular_damping', label: 'Angular Damping', type: 'f32' },
+    ],
+    Collider: [
+      { key: 'is_trigger', label: 'Is Trigger', type: 'bool' },
+    ],
+    AudioSource: [
+      { key: 'volume', label: 'Volume', type: 'f32' },
+    ],
+    MeshRenderer: [],  // No editable scalar fields currently
+  };
+
+  const schema = fieldSchemas[componentType];
+  const hasFields = schema && schema.length > 0;
+
+  // Color vector editor (3-component)
+  const renderColorEditor = (key: string, val: unknown) => {
+    if (!Array.isArray(val) || val.length < 3) return null;
+    const numVal = val as number[];
+    return (
+      <div className="inspector-color-row">
+        <div
+          className="inspector-color-swatch"
+          style={{
+            background: `rgb(${Math.round(numVal[0] * 255)}, ${Math.round(numVal[1] * 255)}, ${Math.round(numVal[2] * 255)})`,
+          }}
+        />
+        {['R', 'G', 'B'].map((axis, ai) => (
+          <span key={ai} className="inspector-vec3-input-wrap" style={{ width: 'auto', flex: 1 }}>
+            <span className="inspector-vec3-label">{axis}</span>
+            <input
+              type="text"
+              defaultValue={numVal[ai].toFixed(2)}
+              onBlur={(e) => {
+                const newVal = [...numVal];
+                newVal[ai] = parseFloat(e.target.value) || 0;
+                updateField(key, newVal);
+                onRefresh();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              style={{ width: '100%' }}
+            />
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="inspector-component">
+      <button
+        className="inspector-component-header"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <span className="inspector-component-caret">{collapsed ? '▶' : '▼'}</span>
+        <span className="inspector-component-type">{componentType}</span>
+        <button
+          className="inspector-remove-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            rpc('shell/remove_component', { id: entityId, component_type: componentType })
+              .then(() => onRefresh())
+              .catch(console.error);
+          }}
+          title={t('inspector_remove_component')}
+        >
+          ×
+        </button>
+      </button>
+      {!collapsed && (
+        <div className="inspector-component-fields">
+          {data && 'color' in data && renderColorEditor('color', data.color)}
+          {hasFields && data ? schema.map((field) => {
+            const val = data[field.key];
+            if (val === undefined) return null;
+
+            switch (field.type) {
+              case 'f32': {
+                const numVal = typeof val === 'number' ? val : parseFloat(String(val)) || 0;
+                return (
+                  <div key={field.key} className="inspector-field">
+                    <label>{field.label}</label>
+                    <input
+                      type="text"
+                      className="inspector-field-input"
+                      defaultValue={numVal.toFixed(2)}
+                      onBlur={(e) => {
+                        updateField(field.key, parseFloat(e.target.value) || 0);
+                        onRefresh();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      }}
+                    />
+                  </div>
+                );
+              }
+              case 'bool': {
+                const boolVal = typeof val === 'boolean' ? val : val === 'true';
+                return (
+                  <div key={field.key} className="inspector-field inspector-field-row">
+                    <label>{field.label}</label>
+                    <input
+                      type="checkbox"
+                      checked={boolVal}
+                      onChange={(e) => {
+                        updateField(field.key, e.target.checked);
+                        onRefresh();
+                      }}
+                    />
+                  </div>
+                );
+              }
+              default:
+                return null;
+            }
+          }) : !hasFields && (
+            <p className="inspector-field-empty">{t('common_no_editable_fields')}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Inspector Panel ─────────────────────────────────────────────────────────
 
 type TransformKey = 'position' | 'rotation' | 'scale';
@@ -371,12 +696,14 @@ function InspectorPanel({
   const { t } = useTranslation();
   const [details, setDetails] = useState<EntityDetails | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   const loadDetails = useCallback(async () => {
     if (!selectedId) { setDetails(null); return; }
     try {
       const d = await rpc<EntityDetails>('shell/get_entity', { id: selectedId });
       setDetails(d);
+      setRefreshVersion((v) => v + 1);
     } catch { setDetails(null); }
   }, [selectedId]);
 
@@ -491,17 +818,14 @@ function InspectorPanel({
       {/* Components */}
       <div className="inspector-section">
         <div className="inspector-section-title">{t('inspector_components')}</div>
-        {details.components.map((c, i) => (
-          <div key={i} className="inspector-component">
-            <span>{c.type}</span>
-            <button
-              className="inspector-remove-btn"
-              onClick={() => removeComponent(c.type)}
-              title={t('inspector_remove_component')}
-            >
-              ×
-            </button>
-          </div>
+        {details.components.map((c) => (
+          <ComponentFieldEditor
+            key={`${selectedId}-${c.type}-${refreshVersion}`}
+            componentType={c.type}
+            data={c.data ?? null}
+            entityId={selectedId}
+            onRefresh={loadDetails}
+          />
         ))}
         {details.components.length === 0 && (
           <p className="panel-empty">{t('common_none')}</p>
@@ -758,6 +1082,9 @@ export default function EditorPage({ onCloseProject }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [selectedId, handleDeleteObject, handleOpenScene, handleSaveSceneAs]);
 
+  const [rightTab, setRightTab] = useState<'inspector' | 'copilot'>('inspector');
+  const [bottomTab, setBottomTab] = useState<'console' | 'project'>('console');
+
   // Bottom resize handle
   const bottomHandleDown = useDragHandle('vertical', (delta) => {
     setBottomHeight((h) => {
@@ -828,6 +1155,11 @@ export default function EditorPage({ onCloseProject }: Props) {
             onCreateObject={handleCreateObject}
             onDeleteObject={handleDeleteObject}
             onDuplicateObject={handleDuplicateObject}
+            onRename={async (id, name) => {
+              await rpc('shell/rename_object', { id, name });
+              await refreshSceneTree();
+            }}
+            onRefresh={refreshSceneTree}
           />
         </ResizablePanel>
 
@@ -841,23 +1173,55 @@ export default function EditorPage({ onCloseProject }: Props) {
         <ResizablePanel
           side="right"
           width={rightWidth}
-          minWidth={180}
+          minWidth={220}
           onResize={setRightWidth}
           collapsed={rightCollapsed}
           onToggle={() => setRightCollapsed(!rightCollapsed)}
-          header={t('panel_inspector')}
+          header={
+            <div className="panel-tabs">
+              <button
+                className={`panel-tab ${rightTab === 'inspector' ? 'active' : ''}`}
+                onClick={() => setRightTab('inspector')}
+              >
+                {t('panel_inspector')}
+              </button>
+              <button
+                className={`panel-tab ${rightTab === 'copilot' ? 'active' : ''}`}
+                onClick={() => setRightTab('copilot')}
+              >
+                {t('panel_copilot')}
+              </button>
+            </div>
+          }
         >
-          <InspectorPanel selectedId={selectedId} onRefresh={refreshSceneTree} />
+          {rightTab === 'inspector' ? (
+            <InspectorPanel selectedId={selectedId} onRefresh={refreshSceneTree} />
+          ) : (
+            <CopilotPanel />
+          )}
         </ResizablePanel>
       </div>
 
-      {/* Bottom Console */}
+      {/* Bottom Panel (Console / Project) */}
       <div
         className={`panel panel-bottom${bottomCollapsed ? ' collapsed' : ''}`}
         style={{ height: bottomCollapsed ? 28 : bottomHeight }}
       >
         <div className="panel-header">
-          <span>{t('panel_console')}</span>
+          <div className="panel-tabs">
+            <button
+              className={`panel-tab ${bottomTab === 'console' ? 'active' : ''}`}
+              onClick={() => setBottomTab('console')}
+            >
+              {t('panel_console')}
+            </button>
+            <button
+              className={`panel-tab ${bottomTab === 'project' ? 'active' : ''}`}
+              onClick={() => setBottomTab('project')}
+            >
+              {t('panel_project')}
+            </button>
+          </div>
           <button
             className="panel-toggle"
             onClick={() => setBottomCollapsed(!bottomCollapsed)}
@@ -867,7 +1231,11 @@ export default function EditorPage({ onCloseProject }: Props) {
           </button>
         </div>
         {!bottomCollapsed && (
-          <ConsolePanel entries={consoleEntries} />
+          bottomTab === 'console' ? (
+            <ConsolePanel entries={consoleEntries} />
+          ) : (
+            <ProjectPanel />
+          )
         )}
       </div>
 

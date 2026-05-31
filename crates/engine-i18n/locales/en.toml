@@ -434,5 +434,37 @@ editor_status_scene_saved = "Scene saved"
 editor_status_opened = "Opened: {path}"
 editor_status_saved = "Saved: {path}"
 
+# Copilot
+copilot_empty_hint = "Ask me to help with your scene... Try \"create a player\" or \"add a light\"."
+copilot_status_planning = "Planning"
+copilot_status_ready = "Ready"
+copilot_status_executing = "Executing"
+copilot_status_complete = "Complete"
+copilot_status_error = "Error"
+copilot_plan_title = "Plan"
+copilot_planned_ops = "I've prepared {count} operations for your review."
+copilot_no_ops = "I couldn't determine what to do. Try being more specific."
+copilot_applied_ops = "Applied {count} operations."
+copilot_badge_write = "WRITE"
+copilot_apply = "Apply ({count})"
+copilot_reject = "Reject All"
+copilot_executing = "Applying operations..."
+copilot_trace = "Trace"
+copilot_auto_accept = "Auto-execute read-only ops"
+copilot_input_placeholder = "Ask me to help..."
+copilot_send = "Send"
+
+# Project panel
+project_refresh = "Refresh"
+project_create = "Create"
+project_script_name = "Script name..."
+project_search = "Search assets..."
+project_empty = "No assets found"
+
+# Hierarchy
+hierarchy_search = "Search objects..."
+hierarchy_search_no_matches = "No matching objects"
+
 # Common
 common_none = "None"
+common_no_editable_fields = "No editable fields"

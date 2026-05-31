@@ -20,6 +20,7 @@ serde_json.workspace = true
 
 image = { workspace = true, default-features = false, features = ["png"] }
 
+engine-ai.workspace = true
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-editor.workspace = true

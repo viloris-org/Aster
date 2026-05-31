@@ -27,7 +27,8 @@ export default function GameView() {
         if (!isActiveRef.current || !canvasRef.current) return;
 
         // Parse header: [width: u32 LE][height: u32 LE][RGBA pixels...]
-        const header = new Uint32Array(buffer, 0, 2);
+        const uint8 = new Uint8Array(buffer);
+        const header = new Uint32Array(uint8.buffer, uint8.byteOffset, 2);
         const w = header[0];
         const h = header[1];
 
@@ -36,7 +37,7 @@ export default function GameView() {
           const ctx = canvasRef.current.getContext('2d');
           if (ctx) {
             const imageData = new ImageData(
-              new Uint8ClampedArray(buffer, 8, w * h * 4),
+              new Uint8ClampedArray(uint8.buffer, uint8.byteOffset + 8, w * h * 4),
               w, h,
             );
             ctx.putImageData(imageData, 0, 0);
