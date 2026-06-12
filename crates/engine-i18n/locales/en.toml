@@ -290,6 +290,10 @@ settings_theme_light = "Light"
 settings_theme_system = "System"
 settings_language_en = "English"
 settings_language_zh = "中文"
+settings_language_ja = "日本語"
+settings_language_ko = "한국어"
+settings_language_es = "Español"
+settings_language_zh_hant = "繁體中文"
 
 # New project dialog
 dialog_new_project = "Create Project"
@@ -468,3 +472,277 @@ hierarchy_search_no_matches = "No matching objects"
 # Common
 common_none = "None"
 common_no_editable_fields = "No editable fields"
+
+# Model selector
+model_available_title = "Available models from the configured provider"
+model_none = "No models"
+model_discovery_failed = "Provider discovery failed; showing fallback models"
+model_refresh = "↻ Refresh list"
+
+# Context bar
+label_objects = "objects"
+label_turn = "turn"
+label_turns = "turns"
+ai_new_chat = "New Chat"
+ai_settings = "AI Settings"
+
+# Entity context
+entity_untagged = "Untagged"
+label_comp = "comp"
+label_comps = "comps"
+prop_position = "Position"
+
+# Tool calls
+tool_calling = "calling..."
+tool_parsing = "(parsing...)"
+
+# Thinking
+ai_thinking_process = "Thinking process"
+
+# Message states
+msg_queued = "Queued for the next turn"
+msg_interrupted = "Interrupted"
+
+# Plan items
+op_allowed_icon = "✓ Allowed"
+op_denied_icon = "✗ Denied"
+btn_allow = "Allow"
+btn_deny = "Deny"
+op_auto = "auto"
+
+# Quick actions
+ai_workspace_label = "Workspace"
+
+# Response messages
+ai_propose_ops = "I propose {count} operation(s)."
+ai_no_changes = "No project changes are needed."
+ai_applied_ops = "Applied {count} operation(s)."
+ai_continuing = "Inspection complete. Continuing with the build plan…"
+ai_execution_failed = "❌ Execution failed."
+error_generic = "Something went wrong."
+
+# AI status labels
+status_idle = "Ready for an outcome"
+status_planning = "Planning the task"
+status_waiting_review = "Waiting for review"
+status_applying = "Applying approved work"
+status_task_complete = "Task complete"
+status_action_required = "Action required"
+
+# Workspace tabs
+tab_chat = "Chat"
+tab_tasks = "Tasks"
+tab_changes = "Changes"
+
+# Task workspace
+ai_current_project = "Current project"
+ai_current_workflow = "Current workflow"
+workflow_describe = "Describe the outcome"
+workflow_inspect = "Build and inspect the plan"
+workflow_review = "Review proposed changes"
+workflow_apply = "Apply and verify"
+ai_context_scope = "Context scope"
+scope_scene_snapshot = "Scene snapshot"
+scope_no_entity = "No entity pinned"
+policy_session_allow = "Allowed for this session"
+policy_ask_write = "Ask before writing"
+
+# Changes workspace
+changes_bundle_title = "Proposed change bundle"
+changes_applied = "Applied and verified"
+label_operations = "operations"
+label_trace_entries = "trace entries"
+changes_empty = "No pending changes"
+changes_empty_desc = "Ask Aster to build or modify something. Proposed operations will appear here before they touch the project."
+changes_decision_hint = "Reads run automatically. Writes and commands require a decision."
+op_allowed_auto = "Allowed automatically"
+op_always_allowed = "Always allowed"
+op_allowed = "Allowed"
+op_denied_once = "Denied this time"
+btn_allow_once = "Allow once"
+btn_allow_session = "Allow for session"
+btn_deny_once = "Deny once"
+btn_allow_always = "Always allow command"
+
+# Empty state
+ai_workspace_eyebrow = "AI workspace"
+ai_empty_title = "What should Aster build?"
+ai_empty_desc = "Describe an outcome. Aster will inspect the scene, propose a plan, and ask before applying changes."
+workflow_step_describe = "Describe"
+workflow_step_review = "Review plan"
+workflow_step_apply = "Apply"
+workflow_step_verify = "Verify"
+
+# Prompt chips
+prompt_playable_char = "Playable character"
+prompt_playable_char_desc = "Create movement, camera, and input setup"
+prompt_improve_scene = "Improve the scene"
+prompt_improve_scene_desc = "Refine lighting and atmosphere"
+prompt_inspect = "Inspect project"
+prompt_inspect_desc = "Find the best next improvement"
+
+# AI settings link
+ai_model_settings = "Model and provider settings"
+
+# Status indicators
+status_executing = "Executing..."
+status_thinking = "Thinking..."
+
+# Plan bar
+btn_continue_allowed = "Continue with allowed ({count})"
+btn_approve_all = "Approve all ({count})"
+btn_discard = "Discard"
+label_write = "write"
+label_writes = "writes"
+
+# Queue status
+queue_stopping = "Stopping after the current provider response…"
+queue_messages_queued = "{count} message(s) queued for the next turn"
+queue_applying = "Applying changes. New messages will run next."
+queue_responding = "Aster is responding. You can queue another message or stop this response."
+btn_stopping = "Stopping…"
+btn_stop_response = "Stop response"
+
+# Input area
+input_queue_next = "Queue the next instruction"
+input_describe = "Describe the outcome"
+input_queue_hint = "It will run after the current step"
+input_send_hint = "Enter to send · Shift+Enter for a new line"
+ai_input_placeholder = "Build, change, inspect, or fix something... Use @ to reference an entity."
+
+# Thinking effort
+thinking_effort_title = "Thinking/reasoning effort level"
+thinking_off = "No thinking"
+thinking_low = "Light thinking"
+thinking_medium = "Balanced"
+thinking_high = "Deep thinking"
+
+# EditorPage
+editor_workspace_kicker = "Aster workspace"
+editor_untitled = "Untitled"
+badge_ai_only = "AI only"
+editor_open_game_view = "Open Game View"
+editor_close = "Close"
+tab_prd = "PRD"
+tab_game_view = "Game View"
+tab_scripts = "Scripts"
+prd_header = "Product requirements"
+prd_untitled_game = "Untitled game"
+prd_brief_desc = "Living brief maintained by Aster from the current project and conversation."
+prd_vision = "Vision"
+prd_vision_text = "Build a coherent, playable game experience through outcome-driven AI iteration. The project currently contains {scene_count} scene objects and {script_count} scripts."
+prd_current_scope = "Current scope"
+prd_scope_player_exp = "Player experience"
+prd_scope_playable = "Playable core loop"
+prd_scope_world = "World"
+prd_scope_authored = "authored objects"
+prd_scope_automation = "Automation"
+prd_scope_review = "Review before apply"
+prd_scope_delivery = "Delivery"
+prd_scope_verification = "Game View verification"
+prd_acceptance = "Acceptance criteria"
+prd_criteria_1 = "The game launches into a playable state."
+prd_criteria_2 = "AI-generated changes remain reviewable before write operations."
+prd_criteria_3 = "Every task ends with a Game View verification pass."
+prd_criteria_4 = "Scripts remain inspectable without exposing manual scene editing."
+task_execution_plan = "Execution plan"
+task_waiting = "Waiting for an outcome"
+task_current_step = "Current step"
+task_complete = "Complete"
+task_pending = "Pending"
+task_proposed_ops = "Proposed operations"
+task_no_plan = "No active plan"
+task_no_plan_desc = "Describe a result in chat. Aster's plan will appear here."
+op_auto_allowed = "Auto allowed"
+op_awaiting = "Awaiting permission in chat"
+game_live_view = "Live Game View"
+game_run_window = "Run window"
+scripts_header = "Project scripts"
+scripts_empty = "No scripts found."
+scripts_select = "Select a script"
+scripts_line_select_hint = "CLICK · SHIFT+CLICK TO SELECT LINES"
+artifact_ask_about = "Ask Aster about {kind}"
+artifact_ask_placeholder = "Ask about this selection…"
+btn_ask = "Ask"
+status_selected = "Selected:"
+status_unsaved = "Unsaved changes"
+status_saved = "Saved"
+editor_focus_viewport = "Focus in viewport"
+badge_live = "Live"
+
+# ProjectPanel context menu
+action_rename = "Rename"
+action_copy_guid = "Copy GUID"
+action_reimport = "Reimport"
+action_show_in_fm = "Show in File Manager"
+action_confirm_delete = "Confirm Delete"
+action_delete = "Delete"
+
+# ScriptEditor
+script_save_title = "Save (Ctrl+S)"
+btn_save = "Save"
+btn_close = "Close"
+script_find_placeholder = "Find…"
+
+# CommandPalette
+cmd_search_placeholder = "Search commands…"
+cmd_no_results = "No commands found."
+
+# MenuBar snap
+tool_snap = "Snap"
+snap_move = "Move"
+snap_angle = "Angle"
+
+# CameraPreview
+camera_preview = "Camera Preview"
+
+# GameView
+game_start_failed = "Failed to start play mode:"
+
+# Provider labels
+provider_anthropic = "Anthropic (Claude)"
+provider_openai = "OpenAI"
+provider_codex_oauth = "Codex OAuth (ChatGPT)"
+provider_gemini = "Google Gemini"
+provider_deepseek = "DeepSeek"
+provider_mimo = "Xiaomi MiMo"
+provider_glm = "GLM/Zhipu AI"
+provider_ollama = "Ollama (Local)"
+provider_custom = "Custom (OpenAI-Compatible)"
+provider_stub = "None (Disabled)"
+
+# Hub settings - AI Provider
+settings_ai_provider = "AI Provider"
+settings_provider = "Provider"
+settings_provider_desc = "Select your AI model provider"
+settings_api_key = "API Key"
+settings_api_key_desc = "Authentication credential for the provider"
+settings_chatgpt_account = "ChatGPT Account"
+settings_chatgpt_desc = "Sign in with your ChatGPT subscription"
+settings_waiting_auth = "Waiting for authorization..."
+settings_sign_out = "Sign out"
+settings_sign_in_chatgpt = "Sign in with ChatGPT"
+settings_connected = "Connected"
+settings_enter_code = "Enter code {code} in the browser."
+settings_endpoint = "Endpoint"
+settings_endpoint_optional = "(optional override)"
+settings_endpoint_desc = "API base URL for the provider"
+settings_billing_mode = "Billing Mode"
+settings_mimo_billing_desc = "Token Plan subscription or pay-as-you-go API"
+settings_token_plan = "Token Plan"
+settings_pay_as_you_go = "Pay-as-you-go"
+settings_region = "Region"
+settings_region_desc = "Regional cluster for Token Plan"
+settings_region_china = "China"
+settings_region_singapore = "Singapore"
+settings_region_europe = "Europe"
+settings_glm_billing_desc = "Subscription or pay-as-you-go API"
+settings_subscription = "Subscription"
+settings_glm_region_desc = "Bigmodel (China) or ZAI (International)"
+settings_bigmodel_china = "Bigmodel (China)"
+settings_zai_international = "ZAI (International)"
+settings_max_tokens = "Max Tokens"
+settings_max_tokens_desc = "Maximum response length"
+settings_saving = "Saving..."
+settings_saved = "Saved!"
+settings_save_ai = "Save AI Settings"

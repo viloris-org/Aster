@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from '../i18n';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ interface CommandPaletteProps {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -108,7 +110,7 @@ export default function CommandPalette({ isOpen, onClose, commands }: CommandPal
             ref={inputRef}
             className="command-palette-search"
             type="text"
-            placeholder="Search commands…"
+            placeholder={t('cmd_search_placeholder')}
             value={query}
             onChange={e => {
               setQuery(e.target.value);
@@ -142,7 +144,7 @@ export default function CommandPalette({ isOpen, onClose, commands }: CommandPal
             </div>
           ))}
           {filtered.length === 0 && (
-            <p className="command-palette-empty">No commands found.</p>
+            <p className="command-palette-empty">{t('cmd_no_results')}</p>
           )}
         </div>
       </div>

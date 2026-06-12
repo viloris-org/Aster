@@ -569,20 +569,20 @@ interface CopilotSettingsData {
   glm_config?: GlmConfig;
 }
 
-const PROVIDER_OPTIONS: Array<{ value: CopilotSettingsData['provider']; label: string }> = [
-  { value: 'anthropic', label: 'Anthropic (Claude)' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'codex_oauth', label: 'Codex OAuth (ChatGPT)' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'mimo', label: 'Xiaomi MiMo' },
-  { value: 'glm', label: 'GLM/Zhipu AI' },
-  { value: 'ollama', label: 'Ollama (Local)' },
-  { value: 'custom', label: 'Custom (OpenAI-Compatible)' },
-  { value: 'stub', label: 'None (Disabled)' },
-];
-
 function CopilotSettingsSection() {
+  const { t } = useTranslation();
+  const providerOptions: Array<{ value: CopilotSettingsData['provider']; label: string }> = [
+    { value: 'anthropic', label: t('provider_anthropic') },
+    { value: 'openai', label: t('provider_openai') },
+    { value: 'codex_oauth', label: t('provider_codex_oauth') },
+    { value: 'gemini', label: t('provider_gemini') },
+    { value: 'deepseek', label: t('provider_deepseek') },
+    { value: 'mimo', label: t('provider_mimo') },
+    { value: 'glm', label: t('provider_glm') },
+    { value: 'ollama', label: t('provider_ollama') },
+    { value: 'custom', label: t('provider_custom') },
+    { value: 'stub', label: t('provider_stub') },
+  ];
   const [settings, setSettings] = useState<CopilotSettingsData>({
     provider: 'stub',
     model: '',
@@ -684,13 +684,13 @@ function CopilotSettingsSection() {
 
   return (
     <div className="settings-section">
-      <div className="settings-section-title">AI Provider</div>
+      <div className="settings-section-title">{t('settings_ai_provider')}</div>
 
       {/* Provider */}
       <div className="settings-row">
         <div>
-          <div className="settings-label">Provider</div>
-          <div className="settings-desc">Select your AI model provider</div>
+          <div className="settings-label">{t('settings_provider')}</div>
+          <div className="settings-desc">{t('settings_provider_desc')}</div>
         </div>
         <div className="settings-control">
           <select
@@ -698,7 +698,7 @@ function CopilotSettingsSection() {
             onChange={(e) => handleProviderChange(e.target.value as CopilotSettingsData['provider'])}
             style={{ minWidth: 200 }}
           >
-            {PROVIDER_OPTIONS.map(opt => (
+            {providerOptions.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
@@ -709,8 +709,8 @@ function CopilotSettingsSection() {
       {showApiKey && (
         <div className="settings-row">
           <div>
-            <div className="settings-label">API Key</div>
-            <div className="settings-desc">Authentication credential for the provider</div>
+            <div className="settings-label">{t('settings_api_key')}</div>
+            <div className="settings-desc">{t('settings_api_key_desc')}</div>
           </div>
           <div className="settings-control">
             <input
@@ -731,8 +731,8 @@ function CopilotSettingsSection() {
       {settings.provider === 'codex_oauth' && (
         <div className="settings-row">
           <div>
-            <div className="settings-label">ChatGPT Account</div>
-            <div className="settings-desc">Sign in with your ChatGPT subscription</div>
+            <div className="settings-label">{t('settings_chatgpt_account')}</div>
+            <div className="settings-desc">{t('settings_chatgpt_desc')}</div>
           </div>
           <div className="settings-control" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <button
@@ -740,10 +740,10 @@ function CopilotSettingsSection() {
               onClick={codexConnected ? handleCodexLogout : handleCodexLogin}
               disabled={codexAuthBusy}
             >
-              {codexAuthBusy ? 'Waiting for authorization...' : codexConnected ? 'Sign out' : 'Sign in with ChatGPT'}
+              {codexAuthBusy ? t('settings_waiting_auth') : codexConnected ? t('settings_sign_out') : t('settings_sign_in_chatgpt')}
             </button>
-            {codexConnected && <small style={{ color: 'var(--success)' }}>Connected</small>}
-            {codexCode && <small>Enter code <strong>{codexCode}</strong> in the browser.</small>}
+            {codexConnected && <small style={{ color: 'var(--success)' }}>{t('settings_connected')}</small>}
+            {codexCode && <small>{t('settings_enter_code').replace('{code}', codexCode ?? '')}</small>}
             {codexAuthError && <small style={{ color: 'var(--error)' }}>{codexAuthError}</small>}
           </div>
         </div>
@@ -754,9 +754,9 @@ function CopilotSettingsSection() {
         <div className="settings-row">
           <div>
             <div className="settings-label">
-              Endpoint {endpointRequired ? '' : <small style={{ opacity: 0.6 }}>(optional override)</small>}
+              {t('settings_endpoint')} {endpointRequired ? '' : <small style={{ opacity: 0.6 }}>{t('settings_endpoint_optional')}</small>}
             </div>
-            <div className="settings-desc">API base URL for the provider</div>
+            <div className="settings-desc">{t('settings_endpoint_desc')}</div>
           </div>
           <div className="settings-control">
             <input
@@ -775,8 +775,8 @@ function CopilotSettingsSection() {
         <>
           <div className="settings-row">
             <div>
-              <div className="settings-label">Billing Mode</div>
-              <div className="settings-desc">Token Plan subscription or pay-as-you-go API</div>
+              <div className="settings-label">{t('settings_billing_mode')}</div>
+              <div className="settings-desc">{t('settings_mimo_billing_desc')}</div>
             </div>
             <div className="settings-control">
               <select
@@ -791,15 +791,15 @@ function CopilotSettingsSection() {
                 }))}
                 style={{ minWidth: 150 }}
               >
-                <option value="subscription">Token Plan</option>
-                <option value="api">Pay-as-you-go</option>
+                <option value="subscription">{t('settings_token_plan')}</option>
+                <option value="api">{t('settings_pay_as_you_go')}</option>
               </select>
             </div>
           </div>
           <div className="settings-row">
             <div>
-              <div className="settings-label">Region</div>
-              <div className="settings-desc">Regional cluster for Token Plan</div>
+              <div className="settings-label">{t('settings_region')}</div>
+              <div className="settings-desc">{t('settings_region_desc')}</div>
             </div>
             <div className="settings-control">
               <select
@@ -814,9 +814,9 @@ function CopilotSettingsSection() {
                 }))}
                 style={{ minWidth: 150 }}
               >
-                <option value="china">China</option>
-                <option value="singapore">Singapore</option>
-                <option value="europe">Europe</option>
+                <option value="china">{t('settings_region_china')}</option>
+                <option value="singapore">{t('settings_region_singapore')}</option>
+                <option value="europe">{t('settings_region_europe')}</option>
               </select>
             </div>
           </div>
@@ -828,8 +828,8 @@ function CopilotSettingsSection() {
         <>
           <div className="settings-row">
             <div>
-              <div className="settings-label">Billing Mode</div>
-              <div className="settings-desc">Subscription or pay-as-you-go API</div>
+              <div className="settings-label">{t('settings_billing_mode')}</div>
+              <div className="settings-desc">{t('settings_glm_billing_desc')}</div>
             </div>
             <div className="settings-control">
               <select
@@ -844,15 +844,15 @@ function CopilotSettingsSection() {
                 }))}
                 style={{ minWidth: 150 }}
               >
-                <option value="subscription">Subscription</option>
-                <option value="api">Pay-as-you-go</option>
+                <option value="subscription">{t('settings_subscription')}</option>
+                <option value="api">{t('settings_pay_as_you_go')}</option>
               </select>
             </div>
           </div>
           <div className="settings-row">
             <div>
-              <div className="settings-label">Region</div>
-              <div className="settings-desc">Bigmodel (China) or ZAI (International)</div>
+              <div className="settings-label">{t('settings_region')}</div>
+              <div className="settings-desc">{t('settings_glm_region_desc')}</div>
             </div>
             <div className="settings-control">
               <select
@@ -867,8 +867,8 @@ function CopilotSettingsSection() {
                 }))}
                 style={{ minWidth: 150 }}
               >
-                <option value="bigmodel">Bigmodel (China)</option>
-                <option value="zai">ZAI (International)</option>
+                <option value="bigmodel">{t('settings_bigmodel_china')}</option>
+                <option value="zai">{t('settings_zai_international')}</option>
               </select>
             </div>
           </div>
@@ -879,8 +879,8 @@ function CopilotSettingsSection() {
       {settings.provider !== 'stub' && (
         <div className="settings-row">
           <div>
-            <div className="settings-label">Max Tokens</div>
-            <div className="settings-desc">Maximum response length</div>
+            <div className="settings-label">{t('settings_max_tokens')}</div>
+            <div className="settings-desc">{t('settings_max_tokens_desc')}</div>
           </div>
           <div className="settings-control">
             <input
@@ -900,7 +900,7 @@ function CopilotSettingsSection() {
         <div />
         <div className="settings-control">
           <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : saved ? 'Saved!' : 'Save AI Settings'}
+            {saving ? t('settings_saving') : saved ? t('settings_saved') : t('settings_save_ai')}
           </button>
         </div>
       </div>
@@ -968,6 +968,10 @@ function SettingsPage({
               {[
                 { id: 'en', label: t('settings_language_en') },
                 { id: 'zh', label: t('settings_language_zh') },
+                { id: 'ja', label: t('settings_language_ja') },
+                { id: 'ko', label: t('settings_language_ko') },
+                { id: 'es', label: t('settings_language_es') },
+                { id: 'zh_hant', label: t('settings_language_zh_hant') },
               ].map(opt => (
                 <button
                   key={opt.id}

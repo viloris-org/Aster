@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from '../i18n';
 import { detectLanguage, highlightCode } from './syntaxHighlight';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -13,6 +14,7 @@ interface ScriptEditorProps {
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function ScriptEditor({ filePath, initialContent, onSave, onClose }: ScriptEditorProps) {
+  const { t } = useTranslation();
   const [content, setContent] = useState(initialContent);
   const [dirty, setDirty] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
@@ -83,16 +85,16 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
             className="tool-btn"
             onClick={handleSave}
             disabled={!dirty}
-            title="Save (Ctrl+S)"
+            title={t('script_save_title')}
           >
-            Save
+            {t('btn_save')}
           </button>
           <button
             className="tool-btn"
             onClick={onClose}
-            title="Close"
+            title={t('btn_close')}
           >
-            × Close
+            × {t('btn_close')}
           </button>
         </div>
       </div>
@@ -103,7 +105,7 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
           <input
             className="script-editor-find-input"
             type="text"
-            placeholder="Find…"
+            placeholder={t('script_find_placeholder')}
             value={findText}
             onChange={(e) => setFindText(e.target.value)}
             autoFocus

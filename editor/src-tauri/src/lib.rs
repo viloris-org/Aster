@@ -277,6 +277,7 @@ struct PreparedCopilotRequest {
 struct CompletedCopilotRequest {
     enriched_prompt: String,
     response: Result<String, String>,
+    tool_calls: Vec<engine_ai::ToolCall>,
 }
 
 #[derive(Clone, Default)]
@@ -568,6 +569,10 @@ impl EditorHost {
             })).collect::<Vec<_>>(),
             "locale": match self.hub.preferences().locale {
                 engine_i18n::Locale::Zh => "zh",
+                engine_i18n::Locale::Ja => "ja",
+                engine_i18n::Locale::Ko => "ko",
+                engine_i18n::Locale::Es => "es",
+                engine_i18n::Locale::ZhHant => "zh_hant",
                 _ => "en",
             },
             "installs": self.hub.installs().iter().map(|i| serde_json::json!({
@@ -752,6 +757,10 @@ impl EditorHost {
             "locale": match self.translations.locale() {
                 Locale::En => "en",
                 Locale::Zh => "zh",
+                Locale::Ja => "ja",
+                Locale::Ko => "ko",
+                Locale::Es => "es",
+                Locale::ZhHant => "zh_hant",
             },
             "entries": entries,
         }))
@@ -764,6 +773,10 @@ impl EditorHost {
             .ok_or_else(|| EngineError::config("missing 'locale' parameter"))?;
         let locale = match locale_str {
             "zh" => Locale::Zh,
+            "ja" => Locale::Ja,
+            "ko" => Locale::Ko,
+            "es" => Locale::Es,
+            "zh_hant" => Locale::ZhHant,
             _ => Locale::En,
         };
         self.hub.set_locale(locale);
@@ -1288,8 +1301,13 @@ fn on_update(entity, dt) {
         // Scene View always uses an editor-controlled camera. Game View keeps
         // the camera extracted from the scene, including Camera2D.
         // If entity_id is provided, render from that entity's camera perspective.
+        // If editor_camera is true (inline preview), use editor orbit camera on the game scene.
         let entity_id_str = params.get("entity_id").and_then(|v| v.as_str());
-        if !play_mode {
+        let editor_camera = params
+            .get("editor_camera")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !play_mode || editor_camera {
             let camera_yaw = params.get("yaw").and_then(|v| v.as_f64()).unwrap_or(-0.5) as f32;
             let camera_pitch = params.get("pitch").and_then(|v| v.as_f64()).unwrap_or(0.3) as f32;
             let camera_dist = params
@@ -1434,13 +1452,24 @@ fn on_update(entity, dt) {
                 .resize_default_target(width.max(1), height.max(1))
                 .map_err(|e| EngineError::other(format!("resize failed: {e}")))?;
         }
+        let (cur_gw, cur_gh) = device.game_target_size();
+        if cur_gw != width || cur_gh != height {
+            device
+                .resize_game_target(width.max(1), height.max(1))
+                .map_err(|e| EngineError::other(format!("game resize failed: {e}")))?;
+        }
 
-        // Render
-        device.render_world_offscreen(&world)?;
-
-        // Readback raw RGBA
-        let (w, h, rgba) = device.readback_default_target()?;
-        Ok((w, h, rgba))
+        if play_mode {
+            // Render to game target, readback from game target
+            device.render_world_offscreen_game(&world)?;
+            let (w, h, rgba) = device.readback_game_target()?;
+            Ok((w, h, rgba))
+        } else {
+            // Render to default (scene) target
+            device.render_world_offscreen(&world)?;
+            let (w, h, rgba) = device.readback_default_target()?;
+            Ok((w, h, rgba))
+        }
     }
 
     /// Legacy JSON viewport readback — encodes as PNG + base64.
@@ -1857,7 +1886,7 @@ fn on_update(entity, dt) {
             prepared.glm_config.as_ref(),
         )?;
         let response = model.chat_stream(prepared.request, on_delta)?;
-        self.finish_copilot_response(&prepared.enriched_prompt, &response.content)
+        self.finish_copilot_response_with_tools(&prepared.enriched_prompt, &response.content, &response.tool_calls)
     }
 
     fn prepare_copilot_request(&mut self, params: &Value) -> EngineResult<PreparedCopilotRequest> {
@@ -1952,109 +1981,102 @@ fn on_update(entity, dt) {
         })
     }
 
-    fn finish_copilot_response(
+    fn finish_copilot_response_with_tools(
         &mut self,
         enriched_prompt: &str,
         response: &str,
+        tool_calls: &[engine_ai::ToolCall],
     ) -> EngineResult<Value> {
         let scene = self.scene_clone_for_agent()?;
         let ctx = self.build_agent_context(scene)?;
         let mut session = AgentSession::new(ctx)?;
-        match session.plan_from_response(response, PermissionPolicy::transactional_write()) {
-            Ok(mut plan) => {
-                let assistant_message = plan
-                    .operations
-                    .iter()
-                    .find_map(|planned| match &planned.operation {
-                        engine_ai::AgentOperation::Complete { summary } => summary.clone(),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-                plan.operations.retain(|planned| {
-                    !matches!(
-                        &planned.operation,
-                        engine_ai::AgentOperation::Complete { .. }
-                    )
-                });
-                plan.read_only = plan.operations.iter().all(|op| !op.requires_write);
-                plan.requires_write = plan.operations.iter().any(|op| op.requires_write);
 
-                let operations: Vec<serde_json::Value> = plan
-                    .operations
-                    .iter()
-                    .enumerate()
-                    .map(|(i, op)| {
-                        let command = match &op.operation {
-                            engine_ai::AgentOperation::ExecuteCommand { command, .. } => {
-                                Some(command.as_str())
-                            }
-                            _ => None,
-                        };
-                        let permission_kind = if command.is_some() {
-                            "command"
-                        } else if op.requires_write {
-                            "write"
-                        } else {
-                            "read"
-                        };
-                        let permanently_allowed = command.is_some_and(|command| {
-                            self.copilot_settings
-                                .allowed_commands
-                                .iter()
-                                .any(|allowed| allowed == command)
-                        });
-                        serde_json::json!({
-                            "index": i,
-                            "preview": op.preview,
-                            "requires_write": op.requires_write,
-                            "permission_kind": permission_kind,
-                            "command": command,
-                            "permanently_allowed": permanently_allowed,
-                        })
-                    })
-                    .collect();
+        let mut plan = if !tool_calls.is_empty() {
+            session.plan_from_tool_calls(tool_calls, response, PermissionPolicy::transactional_write())?
+        } else {
+            session.plan_from_response(response, PermissionPolicy::transactional_write())?
+        };
 
-                // Record user message in conversation history
-                self.copilot_conversation
-                    .push(engine_ai::ChatMessage::user(enriched_prompt));
+        let assistant_message = plan
+            .operations
+            .iter()
+            .find_map(|planned| match &planned.operation {
+                engine_ai::AgentOperation::Complete { summary } => summary.clone(),
+                _ => None,
+            })
+            .unwrap_or_default();
+        plan.operations.retain(|planned| {
+            !matches!(
+                &planned.operation,
+                engine_ai::AgentOperation::Complete { .. }
+            )
+        });
+        plan.read_only = plan.operations.iter().all(|op| !op.requires_write);
+        plan.requires_write = plan.operations.iter().any(|op| op.requires_write);
 
-                let history_message = if assistant_message.is_empty() {
-                    let plan_summary: Vec<String> = plan
-                        .operations
-                        .iter()
-                        .map(|op| op.preview.clone())
-                        .collect();
-                    format!(
-                        "Proposed {} operation(s):\n{}",
-                        plan.operations.len(),
-                        plan_summary.join("\n")
-                    )
-                } else {
-                    assistant_message.clone()
+        let operations: Vec<serde_json::Value> = plan
+            .operations
+            .iter()
+            .enumerate()
+            .map(|(i, op)| {
+                let command = match &op.operation {
+                    engine_ai::AgentOperation::ExecuteCommand { command, .. } => {
+                        Some(command.as_str())
+                    }
+                    _ => None,
                 };
-                self.copilot_conversation
-                    .push(engine_ai::ChatMessage::assistant(history_message));
+                let permission_kind = if command.is_some() {
+                    "command"
+                } else if op.requires_write {
+                    "write"
+                } else {
+                    "read"
+                };
+                let permanently_allowed = command.is_some_and(|command| {
+                    self.copilot_settings
+                        .allowed_commands
+                        .iter()
+                        .any(|allowed| allowed == command)
+                });
+                serde_json::json!({
+                    "index": i,
+                    "preview": op.preview,
+                    "requires_write": op.requires_write,
+                    "permission_kind": permission_kind,
+                    "command": command,
+                    "permanently_allowed": permanently_allowed,
+                })
+            })
+            .collect();
 
-                self.last_copilot_plan = Some(plan);
+        self.copilot_conversation
+            .push(engine_ai::ChatMessage::user(enriched_prompt));
 
-                Ok(serde_json::json!({
-                    "message": assistant_message,
-                    "operations": operations,
-                    "read_only": operations.iter().all(|o| !o["requires_write"].as_bool().unwrap_or(true)),
-                    "requires_write": operations.iter().any(|o| o["requires_write"].as_bool().unwrap_or(false)),
-                }))
-            }
-            Err(e) => {
-                // Still record the user message even on failure, so the model
-                // has context if the user retries.
-                self.copilot_conversation
-                    .push(engine_ai::ChatMessage::user(enriched_prompt));
-                self.copilot_conversation
-                    .push(engine_ai::ChatMessage::assistant(format!("Error: {}", e)));
-                self.last_copilot_plan = None;
-                Err(e)
-            }
-        }
+        let history_message = if assistant_message.is_empty() {
+            let plan_summary: Vec<String> = plan
+                .operations
+                .iter()
+                .map(|op| op.preview.clone())
+                .collect();
+            format!(
+                "Proposed {} operation(s):\n{}",
+                plan.operations.len(),
+                plan_summary.join("\n")
+            )
+        } else {
+            assistant_message.clone()
+        };
+        self.copilot_conversation
+            .push(engine_ai::ChatMessage::assistant(history_message));
+
+        self.last_copilot_plan = Some(plan);
+
+        Ok(serde_json::json!({
+            "message": assistant_message,
+            "operations": operations,
+            "read_only": operations.iter().all(|o| !o["requires_write"].as_bool().unwrap_or(true)),
+            "requires_write": operations.iter().any(|o| o["requires_write"].as_bool().unwrap_or(false)),
+        }))
     }
 
     fn copilot_apply(&mut self, params: &Value) -> EngineResult<Value> {
@@ -3135,23 +3157,32 @@ fn start_copilot_plan(
         )
         .and_then(|model| {
             model.chat_stream(prepared.request, &mut |delta| {
+                let delta_payload = match &delta {
+                    engine_ai::AiStreamDelta::ToolCallDelta(tc) => {
+                        serde_json::to_string(tc).unwrap_or_default()
+                    }
+                    _ => delta.text().to_owned(),
+                };
                 let _ = app.emit(
                     "copilot-stream",
                     serde_json::json!({
                         "request_id": request_id,
                         "kind": delta.kind(),
-                        "delta": delta.text(),
+                        "delta": delta_payload,
                     }),
                 );
             })
-        })
-        .map(|response| response.content)
-        .map_err(|error| error.to_string());
+        });
+        let (content_result, tool_calls) = match result {
+            Ok(response) => (Ok(response.content), response.tool_calls),
+            Err(e) => (Err(e.to_string()), Vec::new()),
+        };
         completed.lock().expect("poisoned lock").insert(
             request_id.clone(),
             CompletedCopilotRequest {
                 enriched_prompt,
-                response: result,
+                response: content_result,
+                tool_calls,
             },
         );
         let _ = app.emit(
@@ -3176,7 +3207,9 @@ fn finish_copilot_plan(
         .ok_or_else(|| "copilot request has not completed".to_owned())?;
     let response = completed.response?;
     state
-        .with_host(|host| host.finish_copilot_response(&completed.enriched_prompt, &response))
+        .with_host(|host| {
+            host.finish_copilot_response_with_tools(&completed.enriched_prompt, &response, &completed.tool_calls)
+        })
         .map_err(|error| error.to_string())
 }
 
@@ -3195,12 +3228,18 @@ fn rpc(
                 .unwrap_or_default()
                 .to_owned();
             host.copilot_plan_streaming(&params, &mut |delta| {
+                let delta_payload = match &delta {
+                    engine_ai::AiStreamDelta::ToolCallDelta(tc) => {
+                        serde_json::to_string(tc).unwrap_or_default()
+                    }
+                    _ => delta.text().to_owned(),
+                };
                 let _ = app.emit(
                     "copilot-stream",
                     serde_json::json!({
                         "request_id": request_id,
                         "kind": delta.kind(),
-                        "delta": delta.text(),
+                        "delta": delta_payload,
                     }),
                 );
             })

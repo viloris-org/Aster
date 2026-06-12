@@ -428,23 +428,23 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
           onClick={(e) => e.stopPropagation()}
         >
           <button className="context-menu-item" onClick={() => handleRenameStart(contextMenu.asset)}>
-            <IconEdit size={12} /> Rename
+            <IconEdit size={12} /> {t('action_rename')}
           </button>
           <button className="context-menu-item" onClick={() => handleCopyGuid(contextMenu.asset.guid)}>
-            <IconCopy size={12} /> Copy GUID
+            <IconCopy size={12} /> {t('action_copy_guid')}
           </button>
           <button className="context-menu-item" onClick={() => handleReimport(contextMenu.asset.source_path)}>
-            <IconRefresh size={12} /> Reimport
+            <IconRefresh size={12} /> {t('action_reimport')}
           </button>
           <button className="context-menu-item" onClick={() => handleOpenInFileManager(contextMenu.asset.source_path)}>
-            <IconFolder size={12} /> Show in File Manager
+            <IconFolder size={12} /> {t('action_show_in_fm')}
           </button>
           <div className="context-menu-sep" />
           <button
             className={`context-menu-item danger ${contextMenu.deleteConfirm ? 'confirming' : ''}`}
             onClick={() => handleDeleteAsset(contextMenu.asset.source_path)}
           >
-            <IconTrash size={12} /> {contextMenu.deleteConfirm ? 'Confirm Delete' : 'Delete'}
+            <IconTrash size={12} /> {contextMenu.deleteConfirm ? t('action_confirm_delete') : t('action_delete')}
           </button>
         </div>
       )}

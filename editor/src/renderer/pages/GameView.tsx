@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from '../i18n';
 import { startPlayMode, stopPlayMode, viewportReadback } from '../api';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
@@ -7,6 +8,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
  * Renders via binary IPC (raw RGBA, no PNG/base64 overhead).
  */
 export default function GameView() {
+  const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const sizeRef = useRef({ width: 1280, height: 720 });
@@ -42,8 +44,10 @@ export default function GameView() {
         if (w > 0 && h > 0) {
           const ctx = canvasRef.current.getContext('2d');
           if (ctx) {
+            const pixelOffset = uint8.byteOffset + 8;
+            const pixelBytes = w * h * 4;
             const imageData = new ImageData(
-              new Uint8ClampedArray(uint8.buffer, uint8.byteOffset + 8, w * h * 4),
+              new Uint8ClampedArray(uint8.buffer.slice(pixelOffset, pixelOffset + pixelBytes)),
               w, h,
             );
             ctx.putImageData(imageData, 0, 0);
@@ -103,7 +107,7 @@ export default function GameView() {
     <div ref={containerRef} className="gameview-container">
       {gameError && (
         <div className="gameview-error">
-          <p>Failed to start play mode:</p>
+          <p>{t('game_start_failed')}</p>
           <pre>{gameError}</pre>
         </div>
       )}

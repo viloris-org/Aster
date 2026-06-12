@@ -1,4 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, createContext } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { rpc, streamCopilotPlan } from '../api';
 import { useTranslation } from '../i18n';
 import {
@@ -64,6 +67,8 @@ interface AiMessage {
   thinking?: string;
   /** Inline tool result cards */
   cards?: AiCard[];
+  /** Active tool calls being constructed during streaming */
+  activeToolCalls?: ActiveToolCall[];
   timestamp: number;
   queued?: boolean;
   interrupted?: boolean;
@@ -77,6 +82,13 @@ interface QueuedPrompt {
 interface AiCard {
   type: 'plan' | 'trace' | 'graph' | 'entity-list' | 'error';
   data: any;
+}
+
+interface ActiveToolCall {
+  id: string;
+  name: string;
+  argumentsPreview: string;
+  complete: boolean;
 }
 
 // ─── Context Bar ────────────────────────────────────────────────────────────
@@ -123,6 +135,7 @@ interface CopilotSettingsFull {
 }
 
 function ModelSelector() {
+  const { t } = useTranslation();
   const [currentModel, setCurrentModel] = useState<string>('');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -180,20 +193,20 @@ function ModelSelector() {
       <select
         className="ai-model-select"
         value={known ? currentModel : currentModel ? '__custom__' : ''}
-        title={discoveryError ?? 'Available models from the configured provider'}
+        title={discoveryError ?? t('model_available_title')}
         onChange={(e) => {
           const val = e.target.value;
           if (val === '__refresh__') { loadModels(); return; }
           handleChange(val === '__custom__' ? currentModel : val);
         }}
       >
-        {models.length === 0 && !currentModel && <option value="">No models</option>}
+        {models.length === 0 && !currentModel && <option value="">{t('model_none')}</option>}
         {models.map(m => (
           <option key={m.id} value={m.id}>{m.display_name}</option>
         ))}
         {!known && currentModel && <option value="__custom__">{currentModel}</option>}
-        {discoveryError && <option value="__discovery_error__" disabled>Provider discovery failed; showing fallback models</option>}
-        <option value="__refresh__">↻ Refresh list</option>
+        {discoveryError && <option value="__discovery_error__" disabled>{t('model_discovery_failed')}</option>}
+        <option value="__refresh__">↻ {t('model_refresh')}</option>
       </select>
     </div>
   );
@@ -209,21 +222,22 @@ function ContextBar({ projectName, selectedEntity, sceneObjectCount, onSettingsC
   onNewChat?: () => void;
   conversationTurns: number;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="ai-context-bar">
       {projectName && <span className="ai-context-tag">{projectName}</span>}
-      <span className="ai-context-tag">{sceneObjectCount} objects</span>
+      <span className="ai-context-tag">{sceneObjectCount} {t('label_objects')}</span>
       {selectedEntity && (
         <span className="ai-context-tag ai-context-selected">@ {selectedEntity}</span>
       )}
       {conversationTurns > 0 && (
-        <span className="ai-context-tag ai-context-turns">{conversationTurns} turn{conversationTurns !== 1 ? 's' : ''}</span>
+        <span className="ai-context-tag ai-context-turns">{conversationTurns} {conversationTurns !== 1 ? t('label_turns') : t('label_turn')}</span>
       )}
       <div className="ai-context-actions">
-        <button className="ai-context-settings-btn" onClick={onNewChat} title="New Chat">
+        <button className="ai-context-settings-btn" onClick={onNewChat} title={t('ai_new_chat')}>
           <IconRefresh />
         </button>
-        <button className="ai-context-settings-btn" onClick={onSettingsClick} title="AI Settings">
+        <button className="ai-context-settings-btn" onClick={onSettingsClick} title={t('ai_settings')}>
           <IconSettings />
         </button>
       </div>
@@ -234,6 +248,7 @@ function ContextBar({ projectName, selectedEntity, sceneObjectCount, onSettingsC
 // ─── Entity Context Card ───────────────────────────────────────────────────
 
 function EntityContextCard({ entity }: { entity: EntityDetails }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const pos = entity.transform.position;
   const comps = entity.components;
@@ -243,13 +258,13 @@ function EntityContextCard({ entity }: { entity: EntityDetails }) {
       <button className="ai-entity-context-header" onClick={() => setExpanded(!expanded)}>
         {expanded ? <IconChevronDown /> : <IconChevronRight />}
         <span className="ai-entity-context-name">{entity.name}</span>
-        <span className="ai-entity-context-tag">{entity.tag || 'Untagged'}</span>
-        <span className="ai-entity-context-components">{comps.length} comp{comps.length !== 1 ? 's' : ''}</span>
+        <span className="ai-entity-context-tag">{entity.tag || t('entity_untagged')}</span>
+        <span className="ai-entity-context-components">{comps.length} {comps.length !== 1 ? t('label_comps') : t('label_comp')}</span>
       </button>
       {expanded && (
         <div className="ai-entity-context-body">
           <div className="ai-entity-context-row">
-            <span className="ai-entity-context-label">Position</span>
+            <span className="ai-entity-context-label">{t('prop_position')}</span>
             <span className="ai-entity-context-value">
               {pos[0].toFixed(2)}, {pos[1].toFixed(2)}, {pos[2].toFixed(2)}
             </span>
@@ -267,7 +282,42 @@ function EntityContextCard({ entity }: { entity: EntityDetails }) {
 
 // ─── Message Bubble ─────────────────────────────────────────────────────────
 
+function ToolCallIndicator({ toolCalls }: { toolCalls: ActiveToolCall[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="ai-tool-calls">
+      {toolCalls.map((tc, i) => (
+        <div key={i} className={`ai-tool-call ${tc.complete ? 'complete' : 'pending'}`}>
+          <span className="ai-tool-call-icon">{tc.complete ? '✓' : '⟳'}</span>
+          <span className="ai-tool-call-name">{tc.name}</span>
+          {!tc.complete && <span className="ai-tool-call-status">{t('tool_calling')}</span>}
+          {tc.complete && tc.argumentsPreview && (
+            <span className="ai-tool-call-args">
+              {(() => {
+                try {
+                  const args = JSON.parse(tc.argumentsPreview);
+                  const keys = Object.keys(args);
+                  if (keys.length === 0) return null;
+                  const preview = keys.map(k => {
+                    const v = args[k];
+                    const display = typeof v === 'string' ? `"${v.slice(0, 30)}${v.length > 30 ? '...' : ''}"` : JSON.stringify(v);
+                    return `${k}: ${display}`;
+                  }).join(', ');
+                  return <span className="ai-tool-call-args-text">({preview})</span>;
+                } catch {
+                  return <span className="ai-tool-call-args-text">({t('tool_parsing')})</span>;
+                }
+              })()}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MessageBubble({ msg }: { msg: AiMessage }) {
+  const { t } = useTranslation();
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
 
   return (
@@ -284,16 +334,47 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
             >
               {thinkingExpanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
               <IconBrain size={12} />
-              <span>Thinking process</span>
+               <span>{t('ai_thinking_process')}</span>
             </button>
             {thinkingExpanded && (
               <div className="ai-thinking-content">{msg.thinking}</div>
             )}
           </div>
         )}
-        <div className="ai-message-content">{msg.content}</div>
-        {msg.queued && <div className="ai-message-state queued">Queued for the next turn</div>}
-        {msg.interrupted && <div className="ai-message-state interrupted">Interrupted</div>}
+        {msg.activeToolCalls && msg.activeToolCalls.length > 0 && (
+          <ToolCallIndicator toolCalls={msg.activeToolCalls} />
+        )}
+        <div className="ai-message-content">
+          {msg.role === 'assistant' ? (
+            <ReactMarkdown
+              components={{
+                code({ className, children, ...props }) {
+                  const match = /language-(\w+)/.exec(className || '');
+                  const codeString = String(children).replace(/\n$/, '');
+                  if (match) {
+                    return (
+                      <SyntaxHighlighter
+                        style={vscDarkPlus}
+                        language={match[1]}
+                        PreTag="div"
+                        customStyle={{ margin: '0.5em 0', borderRadius: '6px', fontSize: '0.85em' }}
+                      >
+                        {codeString}
+                      </SyntaxHighlighter>
+                    );
+                  }
+                  return <code className={className} {...props}>{children}</code>;
+                },
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
+          ) : (
+            msg.content
+          )}
+        </div>
+        {msg.queued && <div className="ai-message-state queued">{t('msg_queued')}</div>}
+        {msg.interrupted && <div className="ai-message-state interrupted">{t('msg_interrupted')}</div>}
         {msg.cards && msg.cards.map((card, i) => (
           <InlineCard key={i} card={card} />
         ))}
@@ -301,6 +382,17 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
     </div>
   );
 }
+
+// ─── Plan Approval Context (lets PlanCard access approval callbacks) ─────────
+
+interface PlanApprovalCtx {
+  approved: Set<number>;
+  denied: Set<number>;
+  decideOperation: (op: CopilotOperation, decision: 'once' | 'session' | 'always' | 'deny') => void;
+  active: boolean; // false when plan is already executed / no longer pending
+}
+
+const PlanApprovalContext = createContext<PlanApprovalCtx | null>(null);
 
 // ─── Inline Cards ───────────────────────────────────────────────────────────
 
@@ -326,16 +418,55 @@ function InlineCard({ card }: { card: AiCard }) {
 }
 
 function PlanCard({ data }: { data: CopilotPlan }) {
+  const { t } = useTranslation();
+  const ctx = useContext(PlanApprovalContext);
+
   return (
     <div className="ai-plan-card">
-      {data.operations.map((op) => (
-        <div key={op.index} className="ai-plan-item">
-          <span className={`ai-plan-badge ${op.requires_write ? 'write' : 'read'}`}>
-            {op.requires_write ? 'W' : 'R'}
-          </span>
-          <span>{op.preview}</span>
-        </div>
-      ))}
+      {data.operations.map((op) => {
+        const isRead = op.permission_kind === 'read';
+        const isApproved = ctx?.approved.has(op.index);
+        const isDenied = ctx?.denied.has(op.index);
+        const showControls = ctx?.active && !isRead;
+
+        return (
+          <div key={op.index} className="ai-plan-item">
+            <span className={`ai-plan-badge ${op.requires_write ? 'write' : 'read'}`}>
+              {op.permission_kind === 'read' ? 'R' : op.permission_kind === 'command' ? 'CMD' : 'W'}
+            </span>
+            <span className="ai-plan-item-preview">{op.preview}</span>
+            {showControls && (
+              <div className="ai-plan-item-actions">
+                {isApproved ? (
+                  <span className="ai-plan-item-state allowed">{t('op_allowed_icon')}</span>
+                ) : isDenied ? (
+                  <span className="ai-plan-item-state denied">{t('op_denied_icon')}</span>
+                ) : (
+                  <>
+                    <button
+                      className="ai-plan-item-btn allow"
+                      onClick={() => ctx.decideOperation(op, 'once')}
+                      title="Allow this operation once"
+                    >
+                      {t('btn_allow')}
+                    </button>
+                    <button
+                      className="ai-plan-item-btn deny"
+                      onClick={() => ctx.decideOperation(op, 'deny')}
+                      title="Deny this operation"
+                    >
+                      {t('btn_deny')}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {isRead && (
+              <span className="ai-plan-item-state auto">{t('op_auto')}</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -381,7 +512,7 @@ function QuickActions({ onAction }: { onAction: (action: string) => void }) {
   const { t } = useTranslation();
   return (
     <div className="ai-quick-actions">
-      <span className="ai-quick-actions-label">Workspace</span>
+      <span className="ai-quick-actions-label">{t('ai_workspace_label')}</span>
       <button className="ai-quick-btn" onClick={() => onAction('save')} title={t('command_save')} aria-label={t('command_save')}>
         <IconSave />
       </button>
@@ -583,6 +714,31 @@ export default function AiPanel({
               thinking: (message.thinking ?? '') + delta,
             };
           }
+          if (kind === 'tool_call') {
+            // Parse the tool call delta
+            try {
+              const tcDelta = JSON.parse(delta);
+              const toolCalls = [...(message.activeToolCalls ?? [])];
+              if (tcDelta.name) {
+                // New tool call starting
+                toolCalls.push({
+                  id: tcDelta.id || `tc-${toolCalls.length}`,
+                  name: tcDelta.name,
+                  argumentsPreview: '',
+                  complete: false,
+                });
+              }
+              if (tcDelta.arguments_delta && toolCalls.length > 0) {
+                // Accumulating arguments
+                const last = toolCalls[toolCalls.length - 1];
+                last.argumentsPreview += tcDelta.arguments_delta;
+              }
+              return { ...message, activeToolCalls: toolCalls };
+            } catch {
+              // If parsing fails, treat as text
+              return { ...message, content: message.content + delta };
+            }
+          }
           return {
             ...message,
             content: message.content + delta,
@@ -591,7 +747,7 @@ export default function AiPanel({
       });
       if (interruptRequestedRef.current) {
         setMessages(prev => prev.map(message => message.id === streamingMessageId
-          ? { ...message, content: message.content || 'Response interrupted.', interrupted: true }
+          ? { ...message, content: message.content || t('msg_interrupted'), interrupted: true }
           : message));
         setPlan(null);
         setApproved(new Set());
@@ -614,8 +770,8 @@ export default function AiPanel({
       setConversationTurns(t => t + 1);
 
       const finalContent = result.message || (result.operations.length > 0
-          ? `I propose ${result.operations.length} operation(s).`
-          : 'No project changes are needed.');
+          ? `${t('ai_propose_ops').replace('{count}', String(result.operations.length))}`
+          : t('ai_no_changes'));
       setMessages(prev => prev.map(message => message.id === streamingMessageId
         ? {
             ...message,
@@ -634,7 +790,7 @@ export default function AiPanel({
     } catch (err: any) {
       if (interruptRequestedRef.current) {
         setMessages(prev => prev.map(message => message.id === streamingMessageId
-          ? { ...message, content: message.content || 'Response interrupted.', interrupted: true }
+          ? { ...message, content: message.content || t('msg_interrupted'), interrupted: true }
           : message));
         setStatus('idle');
         return;
@@ -642,7 +798,7 @@ export default function AiPanel({
       const msg = typeof err === 'string' ? err : err.message || 'Unknown error';
       setStatus('error');
       setMessages(prev => prev.map(message => message.id === streamingMessageId
-        ? { ...message, content: 'Something went wrong.', cards: [{ type: 'error', data: msg }] }
+        ? { ...message, content: t('error_generic'), cards: [{ type: 'error', data: msg }] }
         : message));
     } finally {
       activeRequestRef.current = false;
@@ -703,7 +859,7 @@ export default function AiPanel({
       setStatus('complete');
       setPlan(null);
 
-      const summary = result.summary || `Applied ${result.operations_performed} operation(s).`;
+      const summary = result.summary || `${t('ai_applied_ops').replace('{count}', String(result.operations_performed))}`;
       setCompletedBundle({
         summary,
         operationsPerformed: result.operations_performed,
@@ -717,7 +873,7 @@ export default function AiPanel({
       if (result.needs_continuation && continuationDepthRef.current < 4) {
         continuationDepthRef.current += 1;
         setPendingContinuation(true);
-        addMessage('system', 'Inspection complete. Continuing with the build plan…');
+        addMessage('system', t('ai_continuing'));
       } else {
         setWorkspaceView('changes');
       }
@@ -727,7 +883,7 @@ export default function AiPanel({
     } catch (err: any) {
       const msg = typeof err === 'string' ? err : err.message || 'Unknown error';
       setStatus('error');
-      addMessage('assistant', '❌ Execution failed.', [{ type: 'error', data: msg }]);
+      addMessage('assistant', t('ai_execution_failed'), [{ type: 'error', data: msg }]);
     }
   }, [approved, addMessage, onSceneChanged]);
 
@@ -882,13 +1038,21 @@ export default function AiPanel({
   const approvedWriteCount = plan?.operations.filter(operation => (
     operation.requires_write && approved.has(operation.index)
   )).length ?? 0;
+
+  // Context value for inline plan card approval buttons
+  const planApprovalCtx = useMemo<PlanApprovalCtx>(() => ({
+    approved,
+    denied,
+    decideOperation,
+    active: status === 'ready',
+  }), [approved, denied, decideOperation, status]);
   const statusLabel: Record<AiStatus, string> = {
-    idle: 'Ready for an outcome',
-    thinking: 'Planning the task',
-    ready: 'Waiting for review',
-    executing: 'Applying approved work',
-    complete: 'Task complete',
-    error: 'Action required',
+    idle: t('status_idle'),
+    thinking: t('status_planning'),
+    ready: t('status_waiting_review'),
+    executing: t('status_applying'),
+    complete: t('status_task_complete'),
+    error: t('status_action_required'),
   };
 
   const discardProposal = useCallback(() => {
@@ -931,7 +1095,7 @@ export default function AiPanel({
             role="tab"
             aria-selected={workspaceView === view}
           >
-            {view === 'chat' ? 'Chat' : view === 'tasks' ? 'Tasks' : 'Changes'}
+            {view === 'chat' ? t('tab_chat') : view === 'tasks' ? t('tab_tasks') : t('tab_changes')}
             {view === 'changes' && plan && plan.operations.length > 0 && (
               <span>{plan.operations.length}</span>
             )}
@@ -943,6 +1107,7 @@ export default function AiPanel({
       {entityDetails && <EntityContextCard entity={entityDetails} />}
 
       {/* Messages */}
+      <PlanApprovalContext.Provider value={planApprovalCtx}>
       <div
         ref={scrollRef}
         className={`ai-messages ${!chatOnly && workspaceView !== 'chat' ? 'ai-workspace-detail' : ''}`}
@@ -954,56 +1119,56 @@ export default function AiPanel({
               <span className="ai-task-state-dot" />
               <div>
                 <strong>{statusLabel[status]}</strong>
-                <span>{projectName || 'Current project'} · {sceneObjectCount} scene objects</span>
+                <span>{projectName || t('ai_current_project')} · {sceneObjectCount} scene objects</span>
               </div>
             </div>
             <div className="ai-task-section">
-              <div className="ai-task-section-title">Current workflow</div>
+              <div className="ai-task-section-title">{t('ai_current_workflow')}</div>
               <ol className="ai-task-timeline">
-                <li className={status !== 'idle' ? 'complete' : 'active'}>Describe the outcome</li>
-                <li className={status === 'thinking' ? 'active' : ['ready', 'executing', 'complete'].includes(status) ? 'complete' : ''}>Build and inspect the plan</li>
-                <li className={status === 'ready' ? 'active' : ['executing', 'complete'].includes(status) ? 'complete' : ''}>Review proposed changes</li>
-                <li className={status === 'executing' ? 'active' : status === 'complete' ? 'complete' : ''}>Apply and verify</li>
+                <li className={status !== 'idle' ? 'complete' : 'active'}>{t('workflow_describe')}</li>
+                <li className={status === 'thinking' ? 'active' : ['ready', 'executing', 'complete'].includes(status) ? 'complete' : ''}>{t('workflow_inspect')}</li>
+                <li className={status === 'ready' ? 'active' : ['executing', 'complete'].includes(status) ? 'complete' : ''}>{t('workflow_review')}</li>
+                <li className={status === 'executing' ? 'active' : status === 'complete' ? 'complete' : ''}>{t('workflow_apply')}</li>
               </ol>
             </div>
             <div className="ai-task-section">
-              <div className="ai-task-section-title">Context scope</div>
+              <div className="ai-task-section-title">{t('ai_context_scope')}</div>
               <div className="ai-scope-list">
-                <span>Scene snapshot <strong>{sceneObjectCount} objects</strong></span>
-                <span>Selection <strong>{selectedEntityName || 'No entity pinned'}</strong></span>
-                <span>Write policy <strong>{sessionWritesAllowed ? 'Allowed for this session' : 'Ask before writing'}</strong></span>
+                <span>{t('scope_scene_snapshot')} <strong>{sceneObjectCount} objects</strong></span>
+                <span>Selection <strong>{selectedEntityName || t('scope_no_entity')}</strong></span>
+                <span>Write policy <strong>{sessionWritesAllowed ? t('policy_session_allow') : t('policy_ask_write')}</strong></span>
               </div>
             </div>
           </div>
         )}
         {!chatOnly && workspaceView === 'changes' && (
           <div className="ai-changes-workspace">
-            <div className="ai-task-section-title">Proposed change bundle</div>
+            <div className="ai-task-section-title">{t('changes_bundle_title')}</div>
             {!plan || plan.operations.length === 0 ? (
               completedBundle ? (
                 <div className="ai-completed-bundle">
                   <div className="ai-completed-heading">
                     <IconCheck />
                     <div>
-                      <strong>Applied and verified</strong>
+                      <strong>{t('changes_applied')}</strong>
                       <span>{completedBundle.summary}</span>
                     </div>
                   </div>
                   <div className="ai-completed-stats">
-                    <span><strong>{completedBundle.operationsPerformed}</strong> operations</span>
-                    <span><strong>{completedBundle.traceEntries.length}</strong> trace entries</span>
+                    <span><strong>{completedBundle.operationsPerformed}</strong> {t('label_operations')}</span>
+                    <span><strong>{completedBundle.traceEntries.length}</strong> {t('label_trace_entries')}</span>
                   </div>
                   {completedBundle.traceEntries.length > 0 && <TraceCard data={completedBundle.traceEntries} />}
                 </div>
               ) : (
                 <div className="ai-workspace-empty">
-                  <strong>No pending changes</strong>
-                  <span>Ask Aster to build or modify something. Proposed operations will appear here before they touch the project.</span>
+                  <strong>{t('changes_empty')}</strong>
+                  <span>{t('changes_empty_desc')}</span>
                 </div>
               )
             ) : <>
               <div className="ai-change-summary">
-                <span>Reads run automatically. Writes and commands require a decision.</span>
+                <span>{t('changes_decision_hint')}</span>
               </div>
               {plan.operations.map(operation => (
               <div key={operation.index} className="ai-change-row">
@@ -1013,21 +1178,21 @@ export default function AiPanel({
                 <span className="ai-change-description">{operation.preview}</span>
                 <div className="ai-permission-actions">
                   {operation.permission_kind === 'read' ? (
-                    <span className="ai-permission-state allowed">Allowed automatically</span>
+                    <span className="ai-permission-state allowed">{t('op_allowed_auto')}</span>
                   ) : approved.has(operation.index) ? (
                     <span className="ai-permission-state allowed">
-                      {operation.permission_kind === 'command' && operation.permanently_allowed ? 'Always allowed' : 'Allowed'}
+                      {operation.permission_kind === 'command' && operation.permanently_allowed ? t('op_always_allowed') : t('op_allowed')}
                     </span>
                   ) : denied.has(operation.index) ? (
-                    <span className="ai-permission-state denied">Denied this time</span>
+                    <span className="ai-permission-state denied">{t('op_denied_once')}</span>
                   ) : operation.permission_kind === 'write' ? <>
-                    <button onClick={() => decideOperation(operation, 'once')}>Allow once</button>
-                    <button onClick={() => decideOperation(operation, 'session')}>Allow for session</button>
-                    <button onClick={() => decideOperation(operation, 'deny')}>Deny once</button>
+                    <button onClick={() => decideOperation(operation, 'once')}>{t('btn_allow_once')}</button>
+                    <button onClick={() => decideOperation(operation, 'session')}>{t('btn_allow_session')}</button>
+                    <button onClick={() => decideOperation(operation, 'deny')}>{t('btn_deny_once')}</button>
                   </> : <>
-                    <button onClick={() => decideOperation(operation, 'once')}>Allow once</button>
-                    <button onClick={() => decideOperation(operation, 'always')}>Always allow command</button>
-                    <button onClick={() => decideOperation(operation, 'deny')}>Deny once</button>
+                    <button onClick={() => decideOperation(operation, 'once')}>{t('btn_allow_once')}</button>
+                    <button onClick={() => decideOperation(operation, 'always')}>{t('btn_allow_always')}</button>
+                    <button onClick={() => decideOperation(operation, 'deny')}>{t('btn_deny_once')}</button>
                   </>}
                 </div>
               </div>
@@ -1039,34 +1204,34 @@ export default function AiPanel({
         {messages.length === 0 && (
           <div className="ai-empty">
             <div className="ai-empty-mark"><IconSparkles size={24} /></div>
-            <span className="ai-empty-eyebrow">AI workspace</span>
-            <p className="ai-empty-title">What should Aster build?</p>
+            <span className="ai-empty-eyebrow">{t('ai_workspace_eyebrow')}</span>
+            <p className="ai-empty-title">{t('ai_empty_title')}</p>
             <p className="ai-empty-description">
-              Describe an outcome. Aster will inspect the scene, propose a plan, and ask before applying changes.
+              {t('ai_empty_desc')}
             </p>
             <div className="ai-workflow" aria-label="AI editing workflow">
-              <span className="active">Describe</span>
-              <span>Review plan</span>
-              <span>Apply</span>
-              <span>Verify</span>
+              <span className="active">{t('workflow_step_describe')}</span>
+              <span>{t('workflow_step_review')}</span>
+              <span>{t('workflow_step_apply')}</span>
+              <span>{t('workflow_step_verify')}</span>
             </div>
             <div className="ai-empty-prompts">
               <button className="ai-prompt-chip" onClick={() => submitPrompt('Create a playable third-person character with a following camera and basic movement controls')}>
-                <strong>Playable character</strong>
-                <span>Create movement, camera, and input setup</span>
+                <strong>{t('prompt_playable_char')}</strong>
+                <span>{t('prompt_playable_char_desc')}</span>
               </button>
               <button className="ai-prompt-chip" onClick={() => submitPrompt('Improve the lighting and atmosphere of this scene while preserving the current composition')}>
-                <strong>Improve the scene</strong>
-                <span>Refine lighting and atmosphere</span>
+                <strong>{t('prompt_improve_scene')}</strong>
+                <span>{t('prompt_improve_scene_desc')}</span>
               </button>
               <button className="ai-prompt-chip" onClick={() => submitPrompt('Inspect the current project and recommend the highest-impact next improvement')}>
-                <strong>Inspect project</strong>
-                <span>Find the best next improvement</span>
+                <strong>{t('prompt_inspect')}</strong>
+                <span>{t('prompt_inspect_desc')}</span>
               </button>
             </div>
             <button className="ai-empty-configure" onClick={onOpenSettings}>
               <IconSettings size={12} />
-              <span>Model and provider settings</span>
+              <span>{t('ai_model_settings')}</span>
               <IconChevronRight size={12} />
             </button>
           </div>
@@ -1079,37 +1244,69 @@ export default function AiPanel({
         {status === 'executing' && (
           <div className="ai-executing">
             <IconLoader className="spin-icon" />
-            <span>Executing...</span>
+            <span>{t('status_executing')}</span>
           </div>
         )}
         {status === 'thinking' && (
           <div className="ai-executing">
             <IconLoader className="spin-icon" />
-            <span>Thinking...</span>
+            <span>{t('status_thinking')}</span>
           </div>
         )}
         </>}
       </div>
+      </PlanApprovalContext.Provider>
 
       {/* Plan approval bar */}
-      {hasPlan && (
-        <div className="ai-plan-bar">
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => executeApproved()}
-            disabled={approved.size === 0}
-          >
-            Continue with allowed ({approved.size})
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={discardProposal}
-          >
-            Discard proposal
-          </button>
-          {approvedWriteCount > 0 && <span className="ai-write-warning">{approvedWriteCount} write operation{approvedWriteCount === 1 ? '' : 's'}</span>}
-        </div>
-      )}
+      {hasPlan && (() => {
+        const pendingOps = plan!.operations.filter(
+          op => !approved.has(op.index) && !denied.has(op.index) && op.permission_kind !== 'read'
+        );
+        const approveAll = () => {
+          setApproved(current => {
+            const next = new Set(current);
+            plan!.operations
+              .filter(op => op.permission_kind !== 'read')
+              .forEach(op => next.add(op.index));
+            return next;
+          });
+          setDenied(current => {
+            const next = new Set(current);
+            plan!.operations
+              .filter(op => op.permission_kind !== 'read')
+              .forEach(op => next.delete(op.index));
+            return next;
+          });
+        };
+        return (
+          <div className="ai-plan-bar">
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => executeApproved()}
+              disabled={approved.size === 0}
+              title={approved.size === 0 ? 'Approve at least one operation below, or click \"Approve all\" to continue' : undefined}
+            >
+              {t('btn_continue_allowed').replace('{count}', String(approved.size))}
+            </button>
+            {pendingOps.length > 0 && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={approveAll}
+                title={`Approve all ${pendingOps.length} pending write/command operation${pendingOps.length === 1 ? '' : 's'}`}
+              >
+                {t('btn_approve_all').replace('{count}', String(pendingOps.length))}
+              </button>
+            )}
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={discardProposal}
+            >
+              {t('btn_discard')}
+            </button>
+            {approvedWriteCount > 0 && <span className="ai-write-warning">{approvedWriteCount} {approvedWriteCount === 1 ? t('label_write') : t('label_writes')}</span>}
+          </div>
+        );
+      })()}
 
       {/* Quick Actions + Input */}
       <div className="ai-input-area">
@@ -1121,17 +1318,17 @@ export default function AiPanel({
               <IconLoader className={requestActive || status === 'executing' ? 'spin-icon' : undefined} />
               <span>
                 {interruptRequested
-                  ? 'Stopping after the current provider response…'
+                  ? t('queue_stopping')
                   : queuedPrompts.length > 0
-                    ? `${queuedPrompts.length} message${queuedPrompts.length === 1 ? '' : 's'} queued for the next turn`
+                    ? t('queue_messages_queued').replace('{count}', String(queuedPrompts.length))
                     : status === 'executing'
-                      ? 'Applying changes. New messages will run next.'
-                      : 'Aster is responding. You can queue another message or stop this response.'}
+                      ? t('queue_applying')
+                      : t('queue_responding')}
               </span>
             </div>
             {requestActive && status !== 'executing' && (
               <button onClick={requestInterrupt} disabled={interruptRequested}>
-                {interruptRequested ? 'Stopping…' : 'Stop response'}
+                {interruptRequested ? t('btn_stopping') : t('btn_stop_response')}
               </button>
             )}
           </div>
@@ -1154,14 +1351,14 @@ export default function AiPanel({
         )}
 
         <div className="ai-input-heading">
-          <span>{requestActive || status === 'executing' ? 'Queue the next instruction' : 'Describe the outcome'}</span>
-          <span>{requestActive || status === 'executing' ? 'It will run after the current step' : 'Enter to send · Shift+Enter for a new line'}</span>
+          <span>{requestActive || status === 'executing' ? t('input_queue_next') : t('input_describe')}</span>
+          <span>{requestActive || status === 'executing' ? t('input_queue_hint') : t('input_send_hint')}</span>
         </div>
         <div className="ai-input-row">
           <textarea
             ref={inputRef as React.RefObject<HTMLTextAreaElement>}
             className="ai-input"
-            placeholder="Build, change, inspect, or fix something... Use @ to reference an entity."
+            placeholder={t('ai_input_placeholder')}
             value={input}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
@@ -1183,12 +1380,12 @@ export default function AiPanel({
               className="ai-thinking-select"
               value={thinkingEffort}
               onChange={(e) => setThinkingEffort(e.target.value as ThinkingEffort)}
-              title="Thinking/reasoning effort level"
+              title={t('thinking_effort_title')}
             >
-              <option value="off">No thinking</option>
-              <option value="low">Light thinking</option>
-              <option value="medium">Balanced</option>
-              <option value="high">Deep thinking</option>
+              <option value="off">{t('thinking_off')}</option>
+              <option value="low">{t('thinking_low')}</option>
+              <option value="medium">{t('thinking_medium')}</option>
+              <option value="high">{t('thinking_high')}</option>
             </select>
           </div>
         </div>

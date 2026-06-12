@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from '../i18n';
 import { viewportReadback } from '../api';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -23,9 +24,11 @@ export default function CameraPreview({
   width = 160,
   height = 120,
 }: CameraPreviewProps) {
+  const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const activeRef = useRef(true);
   const lastVersionRef = useRef<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     activeRef.current = true;
@@ -56,15 +59,17 @@ export default function CameraPreview({
           }
           const ctx = canvas.getContext('2d');
           if (ctx) {
+            const pixelOffset = uint8.byteOffset + 8;
+            const pixelBytes = w * h * 4;
             const imageData = new ImageData(
-              new Uint8ClampedArray(uint8.buffer, uint8.byteOffset + 8, w * h * 4),
+              new Uint8ClampedArray(uint8.buffer.slice(pixelOffset, pixelOffset + pixelBytes)),
               w, h,
             );
             ctx.putImageData(imageData, 0, 0);
           }
         }
-      } catch {
-        // Silently ignore — preview may not be supported yet
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
       }
 
       // Low-frequency poll
@@ -79,7 +84,8 @@ export default function CameraPreview({
 
   return (
     <div className="camera-preview-container">
-      <div className="camera-preview-label">Camera Preview</div>
+      <div className="camera-preview-label">{t('camera_preview')}</div>
+      {error && <div className="camera-preview-error">{error}</div>}
       <canvas
         ref={canvasRef}
         className="camera-preview-canvas"

@@ -7,15 +7,30 @@ pub enum Locale {
     #[default]
     En,
     Zh,
+    Ja,
+    Ko,
+    Es,
+    ZhHant,
 }
 
 impl Locale {
-    pub const VARIANTS: &'static [Locale] = &[Locale::En, Locale::Zh];
+    pub const VARIANTS: &'static [Locale] = &[
+        Locale::En,
+        Locale::Zh,
+        Locale::Ja,
+        Locale::Ko,
+        Locale::Es,
+        Locale::ZhHant,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Locale::En => "English",
             Locale::Zh => "中文",
+            Locale::Ja => "日本語",
+            Locale::Ko => "한국어",
+            Locale::Es => "Español",
+            Locale::ZhHant => "繁體中文",
         }
     }
 }
@@ -57,6 +72,10 @@ impl Translations {
         let raw = match locale {
             Locale::En => include_str!("../locales/en.toml"),
             Locale::Zh => include_str!("../locales/zh.toml"),
+            Locale::Ja => include_str!("../locales/ja.toml"),
+            Locale::Ko => include_str!("../locales/ko.toml"),
+            Locale::Es => include_str!("../locales/es.toml"),
+            Locale::ZhHant => include_str!("../locales/zh_hant.toml"),
         };
         let map = parse_toml_map(raw);
         Translations { locale, map }
@@ -107,11 +126,23 @@ mod tests {
     fn loads_both_locales() {
         let en = Translations::load(Locale::En);
         let zh = Translations::load(Locale::Zh);
+        let ja = Translations::load(Locale::Ja);
+        let ko = Translations::load(Locale::Ko);
+        let es = Translations::load(Locale::Es);
+        let zh_hant = Translations::load(Locale::ZhHant);
 
         assert_eq!(en.tr("app_name"), "Aster");
         assert_eq!(zh.tr("app_name"), "Aster");
+        assert_eq!(ja.tr("app_name"), "Aster");
+        assert_eq!(ko.tr("app_name"), "Aster");
+        assert_eq!(es.tr("app_name"), "Aster");
+        assert_eq!(zh_hant.tr("app_name"), "Aster");
         assert_eq!(en.tr("sidebar_projects"), "Projects");
         assert_eq!(zh.tr("sidebar_projects"), "项目");
+        assert_eq!(ja.tr("sidebar_projects"), "プロジェクト");
+        assert_eq!(ko.tr("sidebar_projects"), "프로젝트");
+        assert_eq!(es.tr("sidebar_projects"), "Proyectos");
+        assert_eq!(zh_hant.tr("sidebar_projects"), "專案");
     }
 
     #[test]

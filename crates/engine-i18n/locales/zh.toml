@@ -290,6 +290,10 @@ settings_theme_light = "浅色"
 settings_theme_system = "跟随系统"
 settings_language_en = "English"
 settings_language_zh = "中文"
+settings_language_ja = "日本語"
+settings_language_ko = "한국어"
+settings_language_es = "Español"
+settings_language_zh_hant = "繁體中文"
 
 # New project dialog
 dialog_new_project = "创建项目"
@@ -473,3 +477,277 @@ hierarchy_search_no_matches = "无匹配对象"
 # Common
 common_none = "无"
 common_no_editable_fields = "无可编辑字段"
+
+# Model selector
+model_available_title = "可用的模型列表"
+model_none = "无模型"
+model_discovery_failed = "模型发现失败；显示备用模型"
+model_refresh = "↻ 刷新列表"
+
+# Context bar
+label_objects = "个对象"
+label_turn = "轮"
+label_turns = "轮"
+ai_new_chat = "新建对话"
+ai_settings = "AI 设置"
+
+# Entity context
+entity_untagged = "未标记"
+label_comp = "个组件"
+label_comps = "个组件"
+prop_position = "位置"
+
+# Tool calls
+tool_calling = "调用中..."
+tool_parsing = "(解析中...)"
+
+# Thinking
+ai_thinking_process = "思考过程"
+
+# Message states
+msg_queued = "已排队等待下一轮"
+msg_interrupted = "已中断"
+
+# Plan items
+op_allowed_icon = "✓ 已允许"
+op_denied_icon = "✗ 已拒绝"
+btn_allow = "允许"
+btn_deny = "拒绝"
+op_auto = "自动"
+
+# Quick actions
+ai_workspace_label = "工作区"
+
+# Response messages
+ai_propose_ops = "我提议 {count} 个操作。"
+ai_no_changes = "无需项目更改。"
+ai_applied_ops = "已应用 {count} 个操作。"
+ai_continuing = "检查完成。继续执行构建计划…"
+ai_execution_failed = "❌ 执行失败。"
+error_generic = "出了点问题。"
+
+# AI status labels
+status_idle = "等待输入"
+status_planning = "规划任务中"
+status_waiting_review = "等待审核"
+status_applying = "应用已批准的工作"
+status_task_complete = "任务完成"
+status_action_required = "需要操作"
+
+# Workspace tabs
+tab_chat = "对话"
+tab_tasks = "任务"
+tab_changes = "变更"
+
+# Task workspace
+ai_current_project = "当前项目"
+ai_current_workflow = "当前工作流"
+workflow_describe = "描述结果"
+workflow_inspect = "构建并检查计划"
+workflow_review = "审核提议的更改"
+workflow_apply = "应用并验证"
+ai_context_scope = "上下文范围"
+scope_scene_snapshot = "场景快照"
+scope_no_entity = "未固定实体"
+policy_session_allow = "本次会话允许"
+policy_ask_write = "写入前询问"
+
+# Changes workspace
+changes_bundle_title = "提议的变更包"
+changes_applied = "已应用并验证"
+label_operations = "个操作"
+label_trace_entries = "条追踪记录"
+changes_empty = "无待处理更改"
+changes_empty_desc = "让 Aster 构建或修改某些内容。提议的操作将在触及项目之前显示在这里。"
+changes_decision_hint = "读取操作自动执行。写入和命令操作需要决策。"
+op_allowed_auto = "自动允许"
+op_always_allowed = "始终允许"
+op_allowed = "已允许"
+op_denied_once = "本次已拒绝"
+btn_allow_once = "允许一次"
+btn_allow_session = "允许本次会话"
+btn_deny_once = "拒绝一次"
+btn_allow_always = "始终允许命令"
+
+# Empty state
+ai_workspace_eyebrow = "AI 工作区"
+ai_empty_title = "Aster 应该构建什么？"
+ai_empty_desc = "描述一个结果。Aster 将检查场景、提出计划，并在应用更改前征求同意。"
+workflow_step_describe = "描述"
+workflow_step_review = "审核计划"
+workflow_step_apply = "应用"
+workflow_step_verify = "验证"
+
+# Prompt chips
+prompt_playable_char = "可玩角色"
+prompt_playable_char_desc = "创建移动、相机和输入设置"
+prompt_improve_scene = "改进场景"
+prompt_improve_scene_desc = "优化光照和氛围"
+prompt_inspect = "检查项目"
+prompt_inspect_desc = "找到最佳的下一步改进"
+
+# AI settings link
+ai_model_settings = "模型和提供商设置"
+
+# Status indicators
+status_executing = "执行中..."
+status_thinking = "思考中..."
+
+# Plan bar
+btn_continue_allowed = "继续已允许的操作 ({count})"
+btn_approve_all = "全部批准 ({count})"
+btn_discard = "放弃"
+label_write = "次写入"
+label_writes = "次写入"
+
+# Queue status
+queue_stopping = "等待当前提供商响应后停止…"
+queue_messages_queued = "{count} 条消息已排队等待下一轮"
+queue_applying = "正在应用更改。新消息将在下一轮运行。"
+queue_responding = "Aster 正在响应。您可以排队另一条消息或停止此响应。"
+btn_stopping = "停止中…"
+btn_stop_response = "停止响应"
+
+# Input area
+input_queue_next = "排队下一条指令"
+input_describe = "描述结果"
+input_queue_hint = "将在当前步骤之后运行"
+input_send_hint = "Enter 发送 · Shift+Enter 换行"
+ai_input_placeholder = "构建、更改、检查或修复某些内容... 使用 @ 引用实体。"
+
+# Thinking effort
+thinking_effort_title = "思考/推理强度级别"
+thinking_off = "不思考"
+thinking_low = "轻度思考"
+thinking_medium = "平衡"
+thinking_high = "深度思考"
+
+# EditorPage
+editor_workspace_kicker = "Aster 工作区"
+editor_untitled = "未命名"
+badge_ai_only = "仅 AI"
+editor_open_game_view = "打开游戏视图"
+editor_close = "关闭"
+tab_prd = "PRD"
+tab_game_view = "游戏视图"
+tab_scripts = "脚本"
+prd_header = "产品需求"
+prd_untitled_game = "未命名游戏"
+prd_brief_desc = "由 Aster 根据当前项目和对话维护的动态简报。"
+prd_vision = "愿景"
+prd_vision_text = "通过结果驱动的 AI 迭代构建连贯、可玩的游戏体验。项目当前包含 {scene_count} 个场景对象和 {script_count} 个脚本。"
+prd_current_scope = "当前范围"
+prd_scope_player_exp = "玩家体验"
+prd_scope_playable = "可玩核心循环"
+prd_scope_world = "世界"
+prd_scope_authored = "个已创建对象"
+prd_scope_automation = "自动化"
+prd_scope_review = "应用前审核"
+prd_scope_delivery = "交付"
+prd_scope_verification = "游戏视图验证"
+prd_acceptance = "验收标准"
+prd_criteria_1 = "游戏启动后进入可玩状态。"
+prd_criteria_2 = "AI 生成的更改在写入操作前保持可审核。"
+prd_criteria_3 = "每个任务以游戏视图验证结束。"
+prd_criteria_4 = "脚本保持可检查，不暴露手动场景编辑。"
+task_execution_plan = "执行计划"
+task_waiting = "等待输入"
+task_current_step = "当前步骤"
+task_complete = "完成"
+task_pending = "待处理"
+task_proposed_ops = "提议的操作"
+task_no_plan = "无活动计划"
+task_no_plan_desc = "在对话中描述结果。Aster 的计划将显示在这里。"
+op_auto_allowed = "自动允许"
+op_awaiting = "等待对话中的权限"
+game_live_view = "实时游戏视图"
+game_run_window = "运行窗口"
+scripts_header = "项目脚本"
+scripts_empty = "未找到脚本。"
+scripts_select = "选择脚本"
+scripts_line_select_hint = "点击 · Shift+点击 选择行"
+artifact_ask_about = "询问 Aster 关于 {kind}"
+artifact_ask_placeholder = "询问关于此选择…"
+btn_ask = "询问"
+status_selected = "已选中:"
+status_unsaved = "未保存的更改"
+status_saved = "已保存"
+editor_focus_viewport = "在视口中聚焦"
+badge_live = "实时"
+
+# ProjectPanel context menu
+action_rename = "重命名"
+action_copy_guid = "复制 GUID"
+action_reimport = "重新导入"
+action_show_in_fm = "在文件管理器中显示"
+action_confirm_delete = "确认删除"
+action_delete = "删除"
+
+# ScriptEditor
+script_save_title = "保存 (Ctrl+S)"
+btn_save = "保存"
+btn_close = "关闭"
+script_find_placeholder = "查找…"
+
+# CommandPalette
+cmd_search_placeholder = "搜索命令…"
+cmd_no_results = "未找到命令。"
+
+# MenuBar snap
+tool_snap = "对齐"
+snap_move = "移动"
+snap_angle = "角度"
+
+# CameraPreview
+camera_preview = "相机预览"
+
+# GameView
+game_start_failed = "启动播放模式失败:"
+
+# Provider labels
+provider_anthropic = "Anthropic (Claude)"
+provider_openai = "OpenAI"
+provider_codex_oauth = "Codex OAuth (ChatGPT)"
+provider_gemini = "Google Gemini"
+provider_deepseek = "DeepSeek"
+provider_mimo = "小米 MiMo"
+provider_glm = "GLM/智谱 AI"
+provider_ollama = "Ollama (本地)"
+provider_custom = "自定义 (OpenAI 兼容)"
+provider_stub = "无 (已禁用)"
+
+# Hub settings - AI Provider
+settings_ai_provider = "AI 提供商"
+settings_provider = "提供商"
+settings_provider_desc = "选择您的 AI 模型提供商"
+settings_api_key = "API 密钥"
+settings_api_key_desc = "提供商的身份验证凭据"
+settings_chatgpt_account = "ChatGPT 账户"
+settings_chatgpt_desc = "使用您的 ChatGPT 订阅登录"
+settings_waiting_auth = "等待授权中..."
+settings_sign_out = "退出登录"
+settings_sign_in_chatgpt = "使用 ChatGPT 登录"
+settings_connected = "已连接"
+settings_enter_code = "在浏览器中输入代码 {code}。"
+settings_endpoint = "端点"
+settings_endpoint_optional = "(可选覆盖)"
+settings_endpoint_desc = "提供商的 API 基础 URL"
+settings_billing_mode = "计费模式"
+settings_mimo_billing_desc = "Token Plan 订阅或按量付费 API"
+settings_token_plan = "Token Plan"
+settings_pay_as_you_go = "按量付费"
+settings_region = "区域"
+settings_region_desc = "Token Plan 的区域集群"
+settings_region_china = "中国"
+settings_region_singapore = "新加坡"
+settings_region_europe = "欧洲"
+settings_glm_billing_desc = "订阅或按量付费 API"
+settings_subscription = "订阅"
+settings_glm_region_desc = "Bigmodel (中国) 或 ZAI (国际)"
+settings_bigmodel_china = "Bigmodel (中国)"
+settings_zai_international = "ZAI (国际)"
+settings_max_tokens = "最大 Token 数"
+settings_max_tokens_desc = "最大响应长度"
+settings_saving = "保存中..."
+settings_saved = "已保存！"
+settings_save_ai = "保存 AI 设置"

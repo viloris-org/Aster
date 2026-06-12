@@ -223,12 +223,12 @@ export function ToolbarExtras({
           onClick={() => setShowSnap(!showSnap)}
           title={t('tool_snap')}
         >
-          <IconChevronDown size={10} /> Snap
+          <IconChevronDown size={10} /> {t('tool_snap')}
         </button>
         {showSnap && (
           <div className="context-menu" style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100, width: 180 }}>
             <div className="context-menu-item" style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 8px' }}>
-              <span style={{ fontSize: 11, minWidth: 60 }}>Move</span>
+              <span style={{ fontSize: 11, minWidth: 60 }}>{t('snap_move')}</span>
               <select value={moveSnap} onChange={e => onMoveSnapChange(Number(e.target.value))} className="toolbar-select">
                 <option value={0.1}>0.1</option>
                 <option value={0.25}>0.25</option>
@@ -237,7 +237,7 @@ export function ToolbarExtras({
               </select>
             </div>
             <div className="context-menu-item" style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '4px 8px' }}>
-              <span style={{ fontSize: 11, minWidth: 60 }}>Angle</span>
+              <span style={{ fontSize: 11, minWidth: 60 }}>{t('snap_angle')}</span>
               <select value={angleSnap} onChange={e => onAngleSnapChange(Number(e.target.value))} className="toolbar-select">
                 <option value={5}>5°</option>
                 <option value={15}>15°</option>

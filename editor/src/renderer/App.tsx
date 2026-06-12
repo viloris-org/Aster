@@ -3,7 +3,7 @@ import HubPage from './pages/HubPage';
 import EditorPage from './pages/EditorPage';
 import GameView from './pages/GameView';
 import { rpc } from './api';
-import { I18nProvider } from './i18n';
+import { I18nProvider, useTranslation } from './i18n';
 
 interface DesktopIntegration {
   desktop_environment: string;
@@ -38,6 +38,16 @@ function AppFrame({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-frame">
       <div className="app-frame-content">{children}</div>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  const { t } = useTranslation();
+  return (
+    <div className="loading-screen">
+      <div className="spinner" />
+      <span>{t('loading')}</span>
     </div>
   );
 }
@@ -153,10 +163,7 @@ export default function App() {
     return (
       <I18nProvider locale={locale}>
         <AppFrame>
-          <div className="loading-screen">
-            <div className="spinner" />
-            <span>Loading...</span>
-          </div>
+          <LoadingScreen />
         </AppFrame>
       </I18nProvider>
     );

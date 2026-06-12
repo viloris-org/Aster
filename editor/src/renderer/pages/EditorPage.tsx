@@ -64,6 +64,7 @@ function WorkspaceInspector({ object, onFocus, onPositionChange }: {
   onFocus: () => void;
   onPositionChange: (position: [number, number, number]) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [position, setPosition] = useState<[string, string, string]>(() => (
     object.position.map(value => value.toFixed(2)) as [string, string, string]
   ));
@@ -86,11 +87,11 @@ function WorkspaceInspector({ object, onFocus, onPositionChange }: {
       <div className="workspace-selection-title">
         <div>
           <strong>{object.name}</strong>
-          <span>{object.tag || 'Untagged entity'}</span>
+          <span>{object.tag || t('entity_untagged')}</span>
         </div>
-        <span className="workspace-live-badge">Live</span>
+        <span className="workspace-live-badge">{t('badge_live')}</span>
       </div>
-      <label className="workspace-property-label">Position</label>
+      <label className="workspace-property-label">{t('prop_position')}</label>
       <div className="workspace-position workspace-position-editable">
         {position.map((value, index) => (
           <label key={index}>
@@ -116,7 +117,7 @@ function WorkspaceInspector({ object, onFocus, onPositionChange }: {
           </label>
         ))}
       </div>
-      <button onClick={onFocus}>Focus in viewport</button>
+      <button onClick={onFocus}>{t('editor_focus_viewport')}</button>
     </div>
   );
 }
@@ -160,7 +161,7 @@ function useDragHandle(
 
 // ─── Viewport ────────────────────────────────────────────────────────────────
 
-function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode }: {
+function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode, playMode, editorCamera }: {
   sceneVersion?: number;
   cameraRef?: React.MutableRefObject<{
     yaw: number; pitch: number; distance: number;
@@ -168,6 +169,8 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode 
   }>;
   onCameraChange?: () => void;
   viewMode: '2d' | '3d';
+  playMode?: boolean;
+  editorCamera?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -202,6 +205,8 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode 
           yaw: cam.yaw, pitch: cam.pitch, distance: cam.distance,
           targetX: cam.targetX, targetY: cam.targetY, targetZ: cam.targetZ,
           viewMode,
+          playMode,
+          editorCamera,
         });
         if (!isActiveRef.current || !canvasRef.current) return;
         const uint8 = new Uint8Array(buffer);
@@ -217,8 +222,10 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode 
           }
           const ctx = canvas.getContext('2d');
           if (ctx) {
+            const pixelOffset = uint8.byteOffset + 8;
+            const pixelBytes = w * h * 4;
             const imageData = new ImageData(
-              new Uint8ClampedArray(uint8.buffer, uint8.byteOffset + 8, w * h * 4),
+              new Uint8ClampedArray(uint8.buffer.slice(pixelOffset, pixelOffset + pixelBytes)),
               w, h,
             );
             ctx.putImageData(imageData, 0, 0);
@@ -231,7 +238,7 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode 
     };
     poll();
     return () => { isActiveRef.current = false; };
-  }, [viewMode]);
+  }, [viewMode, playMode, editorCamera]);
 
   // Resize observer
   useEffect(() => {
@@ -796,7 +803,7 @@ export default function EditorPage({ onCloseProject, onOpenSettings }: Props) {
   const selectedObject = selectedId
     ? sceneTree.find(o => o.id === selectedId) ?? null
     : null;
-  const taskSteps = ['Describe outcome', 'Inspect project', 'Review plan', 'Apply changes', 'Verify result'];
+  const taskSteps = [t('workflow_step_describe'), t('prompt_inspect'), t('workflow_step_review'), t('workflow_apply'), t('workflow_step_verify')];
   const taskStepIndex = aiWorkspace?.status === 'thinking' ? 1
     : aiWorkspace?.status === 'ready' ? 2
       : aiWorkspace?.status === 'executing' ? 3
@@ -813,12 +820,12 @@ export default function EditorPage({ onCloseProject, onOpenSettings }: Props) {
       {/* Minimal toolbar */}
       <div className="editor-toolbar editor-toolbar-minimal">
         <div className="toolbar-project">
-          <span className="toolbar-project-kicker">Aster workspace</span>
-          <span className="toolbar-project-name">{shellState.project_name || 'Untitled'}</span>
+          <span className="toolbar-project-kicker">{t('editor_workspace_kicker')}</span>
+          <span className="toolbar-project-name">{shellState.project_name || t('editor_untitled')}</span>
         </div>
-        <span className="ai-only-badge">AI only</span>
-        <button className="tool-btn play-btn" onClick={() => setWorkspaceView('game')} title="Open Game View"><IconPlay /></button>
-        <button className="tool-btn" onClick={handleClose} title="Close"><IconX /></button>
+        <span className="ai-only-badge">{t('badge_ai_only')}</span>
+        <button className="tool-btn play-btn" onClick={() => setWorkspaceView('game')} title={t('editor_open_game_view')}><IconPlay /></button>
+        <button className="tool-btn" onClick={handleClose} title={t('editor_close')}><IconX /></button>
       </div>
 
       {/* Main body: viewport + AI panel */}
@@ -826,10 +833,10 @@ export default function EditorPage({ onCloseProject, onOpenSettings }: Props) {
         <main className="ai-product-workspace" ref={viewportMainRef}>
           <nav className="product-tabs" role="tablist" aria-label="Project outputs">
             {([
-              ['prd', 'PRD', <IconFile key="prd" />],
-              ['tasks', 'Tasks', <IconCheck key="tasks" />],
-              ['game', 'Game View', <IconPlay key="game" />],
-              ['scripts', 'Scripts', <IconCode key="scripts" />],
+              ['prd', t('tab_prd'), <IconFile key="prd" />],
+              ['tasks', t('tab_tasks'), <IconCheck key="tasks" />],
+              ['game', t('tab_game_view'), <IconPlay key="game" />],
+              ['scripts', t('tab_scripts'), <IconCode key="scripts" />],
             ] as const).map(([view, label, icon]) => (
               <button key={view} className={workspaceView === view ? 'active' : ''} onClick={() => setWorkspaceView(view)} role="tab" aria-selected={workspaceView === view}>
                 {icon}<span>{label}</span>
@@ -841,28 +848,28 @@ export default function EditorPage({ onCloseProject, onOpenSettings }: Props) {
 
           <section className={`product-view product-view-${workspaceView}`}>
             {workspaceView === 'prd' && <article className="prd-document" onMouseUp={selectDocumentText}>
-              <header><span>Product requirements</span><strong>{shellState.project_name || 'Untitled game'}</strong><p>Living brief maintained by Aster from the current project and conversation.</p></header>
-              <section><h2>Vision</h2><p>Build a coherent, playable game experience through outcome-driven AI iteration. The project currently contains {sceneTree.length} scene objects and {scripts.length} scripts.</p></section>
-              <section><h2>Current scope</h2><div className="prd-grid"><div><span>Player experience</span><strong>Playable core loop</strong></div><div><span>World</span><strong>{sceneTree.length} authored objects</strong></div><div><span>Automation</span><strong>Review before apply</strong></div><div><span>Delivery</span><strong>Game View verification</strong></div></div></section>
-              <section><h2>Acceptance criteria</h2><ul><li>The game launches into a playable state.</li><li>AI-generated changes remain reviewable before write operations.</li><li>Every task ends with a Game View verification pass.</li><li>Scripts remain inspectable without exposing manual scene editing.</li></ul></section>
+              <header><span>{t('prd_header')}</span><strong>{shellState.project_name || t('prd_untitled_game')}</strong><p>{t('prd_brief_desc')}</p></header>
+              <section><h2>{t('prd_vision')}</h2><p>{t('prd_vision_text').replace('{scene_count}', String(sceneTree.length)).replace('{script_count}', String(scripts.length))}</p></section>
+              <section><h2>{t('prd_current_scope')}</h2><div className="prd-grid"><div><span>{t('prd_scope_player_exp')}</span><strong>{t('prd_scope_playable')}</strong></div><div><span>{t('prd_scope_world')}</span><strong>{sceneTree.length} {t('prd_scope_authored')}</strong></div><div><span>{t('prd_scope_automation')}</span><strong>{t('prd_scope_review')}</strong></div><div><span>{t('prd_scope_delivery')}</span><strong>{t('prd_scope_verification')}</strong></div></div></section>
+              <section><h2>{t('prd_acceptance')}</h2><ul><li>{t('prd_criteria_1')}</li><li>{t('prd_criteria_2')}</li><li>{t('prd_criteria_3')}</li><li>{t('prd_criteria_4')}</li></ul></section>
             </article>}
 
             {workspaceView === 'tasks' && <div className="task-board">
-              <header><div><span>Execution plan</span><h1>{aiWorkspace?.status === 'idle' || !aiWorkspace ? 'Waiting for an outcome' : aiWorkspace.status}</h1></div><small>{shellState.project_name} · {sceneTree.length} objects</small></header>
-              <ol className="task-progress">{taskSteps.map((step, index) => <li key={step} className={index < taskStepIndex ? 'complete' : index === taskStepIndex ? 'active' : ''}><span>{index < taskStepIndex ? <IconCheck /> : index + 1}</span><div><strong>{step}</strong><small>{index === taskStepIndex ? 'Current step' : index < taskStepIndex ? 'Complete' : 'Pending'}</small></div></li>)}</ol>
-              <section className="task-operations"><div className="task-section-title"><span>Proposed operations</span></div>
-                {!aiWorkspace?.plan ? <div className="product-empty"><IconProjects /><strong>No active plan</strong><span>Describe a result in chat. Aster's plan will appear here.</span></div> : aiWorkspace.plan.operations.map(operation => <div key={operation.index}><span className={operation.permission_kind}>{operation.permission_kind.toUpperCase()}</span><p>{operation.preview}</p><small>{operation.permission_kind === 'read' ? 'Auto allowed' : aiWorkspace.approved.has(operation.index) ? 'Allowed' : aiWorkspace.denied.has(operation.index) ? 'Denied once' : 'Awaiting permission in chat'}</small></div>)}
+              <header><div><span>{t('task_execution_plan')}</span><h1>{aiWorkspace?.status === 'idle' || !aiWorkspace ? t('task_waiting') : aiWorkspace.status}</h1></div><small>{shellState.project_name} · {sceneTree.length} {t('label_objects')}</small></header>
+              <ol className="task-progress">{taskSteps.map((step, index) => <li key={step} className={index < taskStepIndex ? 'complete' : index === taskStepIndex ? 'active' : ''}><span>{index < taskStepIndex ? <IconCheck /> : index + 1}</span><div><strong>{step}</strong><small>{index === taskStepIndex ? t('task_current_step') : index < taskStepIndex ? t('task_complete') : t('task_pending')}</small></div></li>)}</ol>
+              <section className="task-operations"><div className="task-section-title"><span>{t('task_proposed_ops')}</span></div>
+                {!aiWorkspace?.plan ? <div className="product-empty"><IconProjects /><strong>{t('task_no_plan')}</strong><span>{t('task_no_plan_desc')}</span></div> : aiWorkspace.plan.operations.map(operation => <div key={operation.index}><span className={operation.permission_kind}>{operation.permission_kind.toUpperCase()}</span><p>{operation.preview}</p><small>{operation.permission_kind === 'read' ? t('op_auto_allowed') : aiWorkspace.approved.has(operation.index) ? t('op_allowed') : aiWorkspace.denied.has(operation.index) ? t('op_denied_once') : t('op_awaiting')}</small></div>)}
               </section>
-              {aiWorkspace?.plan && <footer><button className="btn btn-ghost" onClick={aiWorkspace.discardProposal}>Discard</button><button className="btn btn-primary" disabled={aiWorkspace.approved.size === 0} onClick={aiWorkspace.applyApproved}>Continue with allowed ({aiWorkspace.approved.size})</button></footer>}
+              {aiWorkspace?.plan && <footer><button className="btn btn-ghost" onClick={aiWorkspace.discardProposal}>{t('btn_discard')}</button><button className="btn btn-primary" disabled={aiWorkspace.approved.size === 0} onClick={aiWorkspace.applyApproved}>{t('btn_continue_allowed').replace('{count}', String(aiWorkspace.approved.size))}</button></footer>}
             </div>}
 
-            {workspaceView === 'game' && <div className="game-preview"><div className="game-preview-bar"><div><span className="live-dot" />Live Game View</div><div className="viewport-mode-switch"><button className={viewMode === '2d' ? 'active' : ''} onClick={() => setViewMode('2d')}>2D</button><button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button><button onClick={openGameView}><IconPlay /> Run window</button></div></div><div className="game-preview-canvas" onClick={handleViewportClick}><ViewportCanvas sceneVersion={sceneVersion} cameraRef={cameraRef} onCameraChange={handleCameraChange} viewMode={viewMode} /></div></div>}
+            {workspaceView === 'game' && <div className="game-preview"><div className="game-preview-bar"><div><span className="live-dot" />{t('game_live_view')}</div><div className="viewport-mode-switch"><button className={viewMode === '2d' ? 'active' : ''} onClick={() => setViewMode('2d')}>2D</button><button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button><button onClick={openGameView}><IconPlay /> {t('game_run_window')}</button></div></div><div className="game-preview-canvas" onClick={handleViewportClick}><ViewportCanvas sceneVersion={sceneVersion} cameraRef={cameraRef} onCameraChange={handleCameraChange} viewMode={viewMode} playMode editorCamera /></div></div>}
 
-            {workspaceView === 'scripts' && <div className="script-preview"><aside><header>Project scripts <span>{scripts.length}</span></header>{scripts.length === 0 ? <p>No scripts found.</p> : scripts.map(path => <button key={path} className={selectedScript === path ? 'active' : ''} onClick={() => setSelectedScript(path)}><IconCode /><span>{path.split('/').pop()}</span><small>{path}</small></button>)}</aside><article><header><span>{selectedScript || 'Select a script'}</span><b>CLICK · SHIFT+CLICK TO SELECT LINES</b></header><pre className="selectable-code"><code>{(scriptContent || '// Aster-generated scripts will appear here.').split('\n').map((line, index) => { const lineNumber = index + 1; const selected = scriptLineRange && lineNumber >= scriptLineRange[0] && lineNumber <= scriptLineRange[1]; return <button key={lineNumber} className={selected ? 'selected' : ''} onClick={event => selectScriptLine(lineNumber, event.shiftKey, event)}><span>{lineNumber}</span><i>{line || ' '}</i></button>; })}</code></pre></article></div>}
+            {workspaceView === 'scripts' && <div className="script-preview"><aside><header>{t('scripts_header')} <span>{scripts.length}</span></header>{scripts.length === 0 ? <p>{t('scripts_empty')}</p> : scripts.map(path => <button key={path} className={selectedScript === path ? 'active' : ''} onClick={() => setSelectedScript(path)}><IconCode /><span>{path.split('/').pop()}</span><small>{path}</small></button>)}</aside><article><header><span>{selectedScript || t('scripts_select')}</span><b>{t('scripts_line_select_hint')}</b></header><pre className="selectable-code"><code>{(scriptContent || '// Aster-generated scripts will appear here.').split('\n').map((line, index) => { const lineNumber = index + 1; const selected = scriptLineRange && lineNumber >= scriptLineRange[0] && lineNumber <= scriptLineRange[1]; return <button key={lineNumber} className={selected ? 'selected' : ''} onClick={event => selectScriptLine(lineNumber, event.shiftKey, event)}><span>{lineNumber}</span><i>{line || ' '}</i></button>; })}</code></pre></article></div>}
           </section>
 
           {artifactSelection && <div className={`artifact-ask-popover ${artifactQuestionOpen ? 'expanded' : ''}`} style={{ left: artifactSelection.x, top: artifactSelection.y }}>
-            {!artifactQuestionOpen ? <button onClick={() => setArtifactQuestionOpen(true)}><IconSparkles /> Ask Aster about {artifactSelection.kind}</button> : <div><header><span>{artifactSelection.label}</span><button onClick={() => setArtifactSelection(null)}><IconX /></button></header><div><input autoFocus value={artifactQuestion} onChange={event => setArtifactQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitArtifactQuestion(); if (event.key === 'Escape') setArtifactQuestionOpen(false); }} placeholder="Ask about this selection…" /><button onClick={submitArtifactQuestion} disabled={!artifactQuestion.trim()}>Ask</button></div></div>}
+            {!artifactQuestionOpen ? <button onClick={() => setArtifactQuestionOpen(true)}><IconSparkles /> {t('artifact_ask_about').replace('{kind}', artifactSelection.kind)}</button> : <div><header><span>{artifactSelection.label}</span><button onClick={() => setArtifactSelection(null)}><IconX /></button></header><div><input autoFocus value={artifactQuestion} onChange={event => setArtifactQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitArtifactQuestion(); if (event.key === 'Escape') setArtifactQuestionOpen(false); }} placeholder={t('artifact_ask_placeholder')} /><button onClick={submitArtifactQuestion} disabled={!artifactQuestion.trim()}>{t('btn_ask')}</button></div></div>}
           </div>}
         </main>
 
@@ -906,16 +913,16 @@ export default function EditorPage({ onCloseProject, onOpenSettings }: Props) {
       {/* Status Bar */}
       <footer className="editor-statusbar">
         <div className="status-group">
-          <span className="status-item">{shellState.project_name || 'No project'}</span>
+          <span className="status-item">{shellState.project_name || t('status_no_project')}</span>
           <span className="status-divider" />
-          <span className="status-item">{sceneTree.length} objects</span>
-          {selectedEntityName && <><span className="status-divider" /><span className="status-item status-selection">Selected: {selectedEntityName}</span></>}
+          <span className="status-item">{sceneTree.length} {t('label_objects')}</span>
+          {selectedEntityName && <><span className="status-divider" /><span className="status-item status-selection">{t('status_selected')} {selectedEntityName}</span></>}
         </div>
         <div className="status-group">
           {shellState.scene_dirty ? (
-            <span className="status-item status-dirty"><span className="status-dot" />Unsaved changes</span>
+            <span className="status-item status-dirty"><span className="status-dot" />{t('status_unsaved')}</span>
           ) : (
-            <span className="status-item status-saved">Saved</span>
+            <span className="status-item status-saved">{t('status_saved')}</span>
           )}
           <span className="status-divider" />
           <span className="status-item" style={{ color: 'var(--accent)' }}>v0.1.0</span>
