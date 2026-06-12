@@ -82,6 +82,13 @@ pub enum CopilotProvider {
     Glm,
 }
 
+impl CopilotProvider {
+    /// Whether this provider accepts a user-configured endpoint URL.
+    pub fn endpoint_configurable(&self) -> bool {
+        matches!(self, Self::Ollama | Self::Custom)
+    }
+}
+
 /// Billing mode for providers that support both subscription and pay-as-you-go.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

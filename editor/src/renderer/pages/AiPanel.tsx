@@ -121,6 +121,7 @@ interface ProviderMeta {
   display_name: string;
   requires_api_key: boolean;
   requires_endpoint: boolean;
+  endpoint_configurable: boolean;
   default_endpoint: string | null;
   models: ModelInfo[];
 }

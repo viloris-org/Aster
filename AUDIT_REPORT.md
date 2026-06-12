@@ -67,7 +67,6 @@ The ECS uses `HashMap<Entity, Vec<Box<dyn Component>>>` — the simplest possibl
 - **No normal mapping** — WGSL shader receives normals but doesn't sample normal maps
 - **No compute shaders** — no GPU particles, no GPU culling, no post-processing passes
 - **No skeleton animation rendering** — `upload_bone_matrices`/`draw_skinned_mesh` stubs exist
-- **Vulkan backend** is completely non-functional (device creation + sync only, no pipelines)
 - **Render graph** is architecturally defined but never executed by any backend
 - Material system gap: `StandardMaterial3D` has 5 texture slots but WGPU backend only passes flat colors
 

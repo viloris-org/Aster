@@ -25,8 +25,6 @@ pub use target::{RenderTarget, RenderTargetDesc, ViewKind};
 pub enum RenderApi {
     /// No rendering backend.
     Headless,
-    /// Vulkan backend.
-    Vulkan,
     /// Metal backend.
     Metal,
     /// Direct3D 12 backend.
@@ -94,6 +92,21 @@ pub struct RenderObject {
     pub mesh: String,
     /// Material identifier, either a built-in name or asset label.
     pub material: String,
+}
+
+/// Texture handles for a PBR material, ready for GPU binding.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RenderMaterialTextures {
+    /// Base color (albedo) texture handle.
+    pub base_color: Option<ImageHandle>,
+    /// Tangent-space normal map texture handle.
+    pub normal: Option<ImageHandle>,
+    /// Metallic (B), roughness (G), ambient occlusion (R) packed texture handle.
+    pub metallic_roughness: Option<ImageHandle>,
+    /// Emissive texture handle.
+    pub emissive: Option<ImageHandle>,
+    /// Ambient occlusion texture handle (single channel).
+    pub occlusion: Option<ImageHandle>,
 }
 
 /// 2D sprite draw data extracted from a scene.
@@ -451,6 +464,17 @@ pub trait RenderDevice {
         _metallic: f32,
         _roughness: f32,
         _emissive: [f32; 3],
+    ) {
+    }
+
+    /// Registers GPU texture handles for a named material.
+    ///
+    /// Backends that support texture sampling override this to create
+    /// per-material bind groups. Unset slots fall back to default textures.
+    fn register_material_textures(
+        &mut self,
+        _name: &str,
+        _textures: &RenderMaterialTextures,
     ) {
     }
 }

@@ -37,7 +37,7 @@ bun tauri dev
 - **可视化场景编辑器**——通过直观界面放置对象、调整变换、添加组件。两全其美：让 AI 完成繁重工作，再手工打磨每个细节。
 - **实时播放模式**——点击 Play，物理和脚本开始运行；点击 Stop，零清理。编辑场景从不被修改。
 - **资源管线**——将 glTF/PNG 拖入项目面板。文件监听自动触发导入，热重载实时推送更新。
-- **可插拔渲染**——无需修改引擎代码即可切换后端。自带 WGPU；Vulkan 开发中。
+- **可插拔渲染**——无需修改引擎代码即可切换后端。自带 WGPU。
 - **无头运行时**——同一引擎用于服务器、CI 管线或自动化构建。无需窗口。
 - **零不安全代码**——每个 crate 使用 `#![forbid(unsafe_code)]`。默认安全。
 
@@ -52,7 +52,6 @@ Aster/
 │   ├── engine-assets/       # 数据库、导入器、热重载
 │   ├── engine-render/       # 渲染图、设备 trait
 │   ├── engine-render-wgpu/  # WGPU 后端
-│   ├── engine-render-vulkan/# Vulkan 后端（开发中）
 │   ├── engine-physics/      # 物理（rapier3d）
 │   ├── engine-audio/        # 音频管线
 │   ├── engine-core/         # ID、错误、数学、配置

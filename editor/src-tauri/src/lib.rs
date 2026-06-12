@@ -1584,6 +1584,9 @@ fn on_update(entity, dt) {
         {
             settings.allowed_commands = self.copilot_settings.allowed_commands.clone();
         }
+        if !settings.provider.endpoint_configurable() {
+            settings.api_endpoint = None;
+        }
 
         // Persist non-secret settings into durable state
         let mut settings_for_state = settings.clone();
@@ -1817,7 +1820,7 @@ fn on_update(entity, dt) {
             }
         };
 
-        let config = model_detection_config(params, &self.copilot_settings);
+        let config = model_detection_config(params, &self.copilot_settings, &provider_kind);
 
         let models = engine_ai::registry::detect_available_models(&provider_kind, &config)?;
         Ok(serde_json::to_value(&models).unwrap_or_default())
@@ -1854,6 +1857,7 @@ fn on_update(entity, dt) {
                         "display_name": p.display_name(),
                         "requires_api_key": p.requires_api_key(),
                         "requires_endpoint": p.requires_endpoint(),
+                        "endpoint_configurable": p.endpoint_configurable(),
                         "default_endpoint": p.default_endpoint(),
                         "models": models,
                     })
@@ -1965,7 +1969,11 @@ fn on_update(entity, dt) {
             provider: provider_str.to_owned(),
             model: self.copilot_settings.model.clone(),
             api_key: self.copilot_settings.api_key.clone(),
-            endpoint: self.copilot_settings.api_endpoint.clone(),
+            endpoint: if self.copilot_settings.provider.endpoint_configurable() {
+                self.copilot_settings.api_endpoint.clone()
+            } else {
+                None
+            },
             max_tokens: self.copilot_settings.max_tokens,
             codex_oauth,
             mimo_config: if provider_str == "mimo" {
@@ -3026,6 +3034,7 @@ fn on_update(entity, dt) {
 fn model_detection_config(
     params: &Value,
     settings: &engine_editor::CopilotSettings,
+    provider: &engine_ai::registry::ProviderKind,
 ) -> engine_ai::registry::ProviderConfig {
     engine_ai::registry::ProviderConfig {
         api_key: params
@@ -3034,12 +3043,29 @@ fn model_detection_config(
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
             .or_else(|| settings.api_key.clone()),
-        endpoint: params
-            .get("endpoint")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .or_else(|| settings.api_endpoint.clone()),
+        endpoint: match provider {
+            engine_ai::registry::ProviderKind::Mimo => Some(
+                engine_ai::registry::MimoEndpoints::base_url(
+                    &settings.mimo_config.billing,
+                    &settings.mimo_config.region,
+                )
+                .to_owned(),
+            ),
+            engine_ai::registry::ProviderKind::Glm => Some(
+                engine_ai::registry::GlmEndpoints::base_url(
+                    &settings.glm_config.billing,
+                    &settings.glm_config.region,
+                )
+                .to_owned(),
+            ),
+            _ if provider.endpoint_configurable() => params
+                .get("endpoint")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .or_else(|| settings.api_endpoint.clone()),
+            _ => None,
+        },
     }
 }
 
@@ -3583,17 +3609,115 @@ mod tests {
     #[test]
     fn model_detection_uses_saved_credentials_when_request_omits_them() {
         let settings = engine_editor::CopilotSettings {
+            provider: CopilotProvider::Custom,
             api_key: Some("saved-key".to_owned()),
             api_endpoint: Some("https://provider.example/v1".to_owned()),
             ..Default::default()
         };
 
-        let config = model_detection_config(&serde_json::json!({}), &settings);
+        let config = model_detection_config(
+            &serde_json::json!({}),
+            &settings,
+            &engine_ai::registry::ProviderKind::Custom,
+        );
 
         assert_eq!(config.api_key.as_deref(), Some("saved-key"));
         assert_eq!(
             config.endpoint.as_deref(),
             Some("https://provider.example/v1")
+        );
+    }
+
+    #[test]
+    fn model_detection_ignores_saved_endpoint_for_fixed_provider() {
+        let settings = engine_editor::CopilotSettings {
+            provider: CopilotProvider::OpenAI,
+            api_endpoint: Some("https://provider.example/v1".to_owned()),
+            ..Default::default()
+        };
+
+        let config = model_detection_config(
+            &serde_json::json!({}),
+            &settings,
+            &engine_ai::registry::ProviderKind::OpenAI,
+        );
+
+        assert_eq!(config.endpoint, None);
+    }
+
+    #[test]
+    fn model_detection_resolves_mimo_and_glm_configured_endpoints() {
+        let mimo_settings = engine_editor::CopilotSettings {
+            provider: CopilotProvider::Mimo,
+            mimo_config: engine_editor::MimoConfig {
+                billing: engine_editor::BillingMode::Subscription,
+                region: engine_editor::MimoRegion::Singapore,
+            },
+            ..Default::default()
+        };
+        let mimo = model_detection_config(
+            &serde_json::json!({}),
+            &mimo_settings,
+            &engine_ai::registry::ProviderKind::Mimo,
+        );
+        assert_eq!(
+            mimo.endpoint.as_deref(),
+            Some("https://token-plan-sgp.xiaomimimo.com/v1")
+        );
+
+        let glm_settings = engine_editor::CopilotSettings {
+            provider: CopilotProvider::Glm,
+            glm_config: engine_editor::GlmConfig {
+                billing: engine_editor::BillingMode::Subscription,
+                region: engine_editor::GlmRegion::Zai,
+            },
+            ..Default::default()
+        };
+        let glm = model_detection_config(
+            &serde_json::json!({}),
+            &glm_settings,
+            &engine_ai::registry::ProviderKind::Glm,
+        );
+        assert_eq!(
+            glm.endpoint.as_deref(),
+            Some("https://api.z.ai/api/coding/paas/v4")
+        );
+    }
+
+    #[test]
+    fn fixed_provider_clears_custom_endpoint_when_settings_are_updated() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FileEditorStore::new(temp.path().join("aster-editor-state.toml"));
+        let mut host = EditorHost::new(store).unwrap();
+
+        host.update_copilot_settings(&serde_json::json!({
+            "provider": "openai",
+            "model": "gpt-4.1",
+            "api_endpoint": "https://provider.example/v1",
+            "max_tokens": 4096
+        }))
+        .unwrap();
+
+        assert_eq!(host.copilot_settings.api_endpoint, None);
+    }
+
+    #[test]
+    fn ollama_preserves_custom_endpoint_when_settings_are_updated() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FileEditorStore::new(temp.path().join("aster-editor-state.toml"));
+        let mut host = EditorHost::new(store).unwrap();
+
+        host.update_copilot_settings(&serde_json::json!({
+            "provider": "ollama",
+            "model": "qwen3",
+            "api_endpoint": "http://192.168.1.20:11434",
+            "max_tokens": 4096
+        }))
+        .unwrap();
+
+        assert_eq!(
+            host.copilot_settings.api_endpoint.as_deref(),
+            Some("http://192.168.1.20:11434")
         );
     }
 

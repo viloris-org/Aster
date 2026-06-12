@@ -652,10 +652,56 @@ pub enum ThinkingFormat {
     /// OpenAI format: reasoning.effort
     #[default]
     OpenAI,
-    /// Anthropic/MiMo format: thinking.type
-    AnthropicType,
+    /// MiMo/GLM format: thinking.type
+    ThinkingType,
     /// DeepSeek format: thinking.type + reasoning_effort
     DeepSeek,
+}
+
+fn apply_thinking_config(
+    body: &mut serde_json::Value,
+    thinking_effort: &crate::ThinkingEffort,
+    format: &ThinkingFormat,
+) -> EngineResult<()> {
+    use crate::ThinkingEffort;
+    match format {
+        ThinkingFormat::OpenAI => {
+            let effort = match thinking_effort {
+                ThinkingEffort::Off => return Err(EngineError::config(
+                    "OpenAI reasoning models do not support disabling reasoning. Use 'low' effort instead."
+                )),
+                ThinkingEffort::Low => "low",
+                ThinkingEffort::Medium => "medium",
+                ThinkingEffort::High => "high",
+            };
+            body["reasoning"] = serde_json::json!({ "effort": effort });
+        }
+        ThinkingFormat::ThinkingType => {
+            body["thinking"] = serde_json::json!({
+                "type": if matches!(thinking_effort, ThinkingEffort::Off) {
+                    "disabled"
+                } else {
+                    "enabled"
+                }
+            });
+        }
+        ThinkingFormat::DeepSeek => match thinking_effort {
+            ThinkingEffort::Off => {
+                body["thinking"] = serde_json::json!({ "type": "disabled" });
+            }
+            _ => {
+                let effort = match thinking_effort {
+                    ThinkingEffort::Low => "low",
+                    ThinkingEffort::Medium => "medium",
+                    ThinkingEffort::High => "high",
+                    ThinkingEffort::Off => unreachable!(),
+                };
+                body["thinking"] = serde_json::json!({ "type": "enabled" });
+                body["reasoning_effort"] = serde_json::json!(effort);
+            }
+        },
+    }
+    Ok(())
 }
 
 /// OpenAI-compatible provider (works with OpenAI, Groq, Together, etc.).
@@ -680,7 +726,7 @@ impl OpenAIProvider {
         let uses_responses_api = endpoint.contains("api.openai.com");
         // Detect thinking format based on endpoint
         let thinking_format = if endpoint.contains("xiaomimimo.com") {
-            ThinkingFormat::AnthropicType
+            ThinkingFormat::ThinkingType
         } else if endpoint.contains("deepseek.com") {
             ThinkingFormat::DeepSeek
         } else {
@@ -791,50 +837,7 @@ impl AiModel for OpenAIProvider {
 
         // Add thinking/reasoning configuration based on provider format
         if let Some(thinking_effort) = &request.thinking_effort {
-            use crate::ThinkingEffort;
-            match self.thinking_format {
-                ThinkingFormat::OpenAI => {
-                    // OpenAI format: reasoning.effort
-                    let effort = match thinking_effort {
-                        ThinkingEffort::Off => return Err(EngineError::config(
-                            "OpenAI reasoning models do not support disabling reasoning. Use 'low' effort instead."
-                        )),
-                        ThinkingEffort::Low => "low",
-                        ThinkingEffort::Medium => "medium",
-                        ThinkingEffort::High => "high",
-                    };
-                    body["reasoning"] = serde_json::json!({ "effort": effort });
-                }
-                ThinkingFormat::AnthropicType => {
-                    // MiMo/Anthropic format: thinking.type
-                    match thinking_effort {
-                        ThinkingEffort::Off => {
-                            body["thinking"] = serde_json::json!({ "type": "disabled" });
-                        }
-                        _ => {
-                            body["thinking"] = serde_json::json!({ "type": "enabled" });
-                        }
-                    }
-                }
-                ThinkingFormat::DeepSeek => {
-                    // DeepSeek format: thinking.type + reasoning_effort
-                    match thinking_effort {
-                        ThinkingEffort::Off => {
-                            body["thinking"] = serde_json::json!({ "type": "disabled" });
-                        }
-                        _ => {
-                            let effort = match thinking_effort {
-                                ThinkingEffort::Low => "low",
-                                ThinkingEffort::Medium => "medium",
-                                ThinkingEffort::High => "high",
-                                ThinkingEffort::Off => unreachable!(),
-                            };
-                            body["thinking"] = serde_json::json!({ "type": "enabled" });
-                            body["reasoning_effort"] = serde_json::json!(effort);
-                        }
-                    }
-                }
-            }
+            apply_thinking_config(&mut body, thinking_effort, &self.thinking_format)?;
         }
 
         // Add tool definitions if provided
@@ -995,6 +998,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn thinking_type_format_supports_enabling_and_disabling() {
+        let mut enabled = serde_json::json!({});
+        apply_thinking_config(
+            &mut enabled,
+            &crate::ThinkingEffort::High,
+            &ThinkingFormat::ThinkingType,
+        )
+        .unwrap();
+        assert_eq!(enabled["thinking"]["type"], "enabled");
+
+        let mut disabled = serde_json::json!({});
+        apply_thinking_config(
+            &mut disabled,
+            &crate::ThinkingEffort::Off,
+            &ThinkingFormat::ThinkingType,
+        )
+        .unwrap();
+        assert_eq!(disabled["thinking"]["type"], "disabled");
+        assert!(disabled.get("reasoning").is_none());
+    }
+
+    #[test]
     fn parses_openai_sse_deltas() {
         let input = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n",
@@ -1104,10 +1129,8 @@ mod tests {
 /// Creates the appropriate `AiModel` implementation from a provider string,
 /// model name, optional API key, optional endpoint, and max tokens.
 ///
-/// Supported provider strings: `"anthropic"`, `"openai"`, `"gemini"`,
-/// `"ollama"`, `"custom"`, `"mimo_subscription"`, `"mimo_api"`, `"deepseek"`,
-/// `"glm_zai_subscription"`, `"glm_zai_api"`, `"glm_bigmodel_subscription"`,
-/// `"glm_bigmodel_api"`.
+/// Supported provider strings: `"anthropic"`, `"openai"`, `"codex_oauth"`,
+/// `"gemini"`, `"ollama"`, `"custom"`, `"mimo"`, `"deepseek"`, and `"glm"`.
 /// Returns `EngineError::Config` for unknown providers or missing API keys.
 #[allow(clippy::module_name_repetitions)]
 pub fn create_provider(
@@ -1198,7 +1221,13 @@ pub fn create_provider(
             let key = api_key.ok_or_else(|| {
                 EngineError::config("GLM API key is required but not configured.")
             })?;
-            Ok(Box::new(OpenAIProvider::new(model, key, Some(ep), max_tokens)))
+            Ok(Box::new(OpenAIProvider::new_with_format(
+                model,
+                key,
+                Some(ep),
+                max_tokens,
+                ThinkingFormat::ThinkingType,
+            )))
         }
         other => Err(EngineError::config(format!(
             "Unknown AI provider '{other}'. Supported: anthropic, openai, codex_oauth, gemini, ollama, custom, mimo, deepseek, glm"

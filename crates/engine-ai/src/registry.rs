@@ -82,6 +82,11 @@ impl ProviderKind {
         matches!(self, Self::Custom)
     }
 
+    /// Whether the user may override this provider's endpoint URL.
+    pub fn endpoint_configurable(&self) -> bool {
+        matches!(self, Self::Ollama | Self::Custom)
+    }
+
     /// Whether the endpoint is auto-determined by provider config.
     pub fn endpoint_auto_determined(&self) -> bool {
         matches!(self, Self::Mimo | Self::Glm)
@@ -125,11 +130,19 @@ pub struct GlmEndpoints;
 
 impl GlmEndpoints {
     /// Returns the base URL for GLM based on billing mode and region.
-    pub fn base_url(_billing: &engine_editor::BillingMode, region: &engine_editor::GlmRegion) -> &'static str {
-        use engine_editor::GlmRegion;
-        match region {
-            GlmRegion::Bigmodel => "https://open.bigmodel.cn/api/paas/v4",
-            GlmRegion::Zai => "https://open.bigmodel.cn/api/paas/v4", // ZAI uses same endpoint
+    pub fn base_url(billing: &engine_editor::BillingMode, region: &engine_editor::GlmRegion) -> &'static str {
+        use engine_editor::{BillingMode, GlmRegion};
+        match (billing, region) {
+            (BillingMode::Subscription, GlmRegion::Bigmodel) => {
+                "https://open.bigmodel.cn/api/coding/paas/v4"
+            }
+            (BillingMode::Subscription, GlmRegion::Zai) => {
+                "https://api.z.ai/api/coding/paas/v4"
+            }
+            (BillingMode::Api, GlmRegion::Bigmodel) => {
+                "https://open.bigmodel.cn/api/paas/v4"
+            }
+            (BillingMode::Api, GlmRegion::Zai) => "https://api.z.ai/api/paas/v4",
         }
     }
 }
@@ -414,8 +427,8 @@ fn builtin_models() -> Vec<ModelInfo> {
             id: "mimo-v2.5-pro".into(),
             display_name: "MiMo V2.5 Pro".into(),
             provider: ProviderKind::Mimo,
-            context_window: 128_000,
-            default_max_tokens: 16_384,
+            context_window: 1_000_000,
+            default_max_tokens: 128_000,
             capabilities: ModelCapabilities {
                 can_reason: true,
                 supports_vision: false,
@@ -426,10 +439,10 @@ fn builtin_models() -> Vec<ModelInfo> {
             id: "mimo-v2.5".into(),
             display_name: "MiMo V2.5".into(),
             provider: ProviderKind::Mimo,
-            context_window: 128_000,
-            default_max_tokens: 16_384,
+            context_window: 1_000_000,
+            default_max_tokens: 128_000,
             capabilities: ModelCapabilities {
-                can_reason: false,
+                can_reason: true,
                 supports_vision: true,
                 supports_tools: true,
             },
@@ -438,10 +451,10 @@ fn builtin_models() -> Vec<ModelInfo> {
             id: "mimo-v2-flash".into(),
             display_name: "MiMo V2 Flash".into(),
             provider: ProviderKind::Mimo,
-            context_window: 128_000,
-            default_max_tokens: 16_384,
+            context_window: 256_000,
+            default_max_tokens: 64_000,
             capabilities: ModelCapabilities {
-                can_reason: false,
+                can_reason: true,
                 supports_vision: false,
                 supports_tools: true,
             },
@@ -911,7 +924,11 @@ fn detect_openai_compatible_typed(
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_available_models, is_openai_chat_model, ProviderConfig, ProviderKind};
+    use super::{
+        detect_available_models, is_openai_chat_model, GlmEndpoints, MimoEndpoints,
+        ProviderConfig, ProviderKind,
+    };
+    use engine_editor::{BillingMode, GlmRegion, MimoRegion};
     use std::io::Write;
     use std::net::TcpListener;
     use std::thread;
@@ -929,6 +946,46 @@ mod tests {
         assert!(!is_openai_chat_model("gpt-image-1"));
         assert!(!is_openai_chat_model("gpt-4o-realtime-preview"));
         assert!(!is_openai_chat_model("text-embedding-3-large"));
+    }
+
+    #[test]
+    fn mimo_endpoints_follow_billing_and_subscription_region() {
+        assert_eq!(
+            MimoEndpoints::base_url(&BillingMode::Subscription, &MimoRegion::China),
+            "https://token-plan-cn.xiaomimimo.com/v1"
+        );
+        assert_eq!(
+            MimoEndpoints::base_url(&BillingMode::Subscription, &MimoRegion::Singapore),
+            "https://token-plan-sgp.xiaomimimo.com/v1"
+        );
+        assert_eq!(
+            MimoEndpoints::base_url(&BillingMode::Subscription, &MimoRegion::Europe),
+            "https://token-plan-ams.xiaomimimo.com/v1"
+        );
+        assert_eq!(
+            MimoEndpoints::base_url(&BillingMode::Api, &MimoRegion::Europe),
+            "https://api.xiaomimimo.com/v1"
+        );
+    }
+
+    #[test]
+    fn glm_endpoints_follow_billing_and_region() {
+        assert_eq!(
+            GlmEndpoints::base_url(&BillingMode::Subscription, &GlmRegion::Bigmodel),
+            "https://open.bigmodel.cn/api/coding/paas/v4"
+        );
+        assert_eq!(
+            GlmEndpoints::base_url(&BillingMode::Subscription, &GlmRegion::Zai),
+            "https://api.z.ai/api/coding/paas/v4"
+        );
+        assert_eq!(
+            GlmEndpoints::base_url(&BillingMode::Api, &GlmRegion::Bigmodel),
+            "https://open.bigmodel.cn/api/paas/v4"
+        );
+        assert_eq!(
+            GlmEndpoints::base_url(&BillingMode::Api, &GlmRegion::Zai),
+            "https://api.z.ai/api/paas/v4"
+        );
     }
 
     #[test]

@@ -9,7 +9,7 @@ use engine_core::{EngineError, EngineResult, Handle, HandleAllocator};
 use engine_render::{
     BufferDesc, BufferHandle, BufferUsage, GuiDrawList, GuiTextureId, ImageDesc, ImageFormat,
     ImageHandle, ImageUsage, RenderApi, RenderDevice, RenderFrame, RenderGraph, RenderLight,
-    RenderLightKind, RenderTarget, RenderTargetDesc, RenderWorld, ViewKind,
+    RenderLightKind, RenderMaterialTextures, RenderTarget, RenderTargetDesc, RenderWorld, ViewKind,
 };
 use wgpu::util::DeviceExt;
 
@@ -22,6 +22,9 @@ const CUBE_INDEX_COUNT: u32 = 36;
 const MAX_FORWARD_LIGHTS: usize = 8;
 const MAX_DIRECTIONAL_LIGHTS: usize = 2;
 const DEFAULT_AMBIENT_LIGHT: [f32; 4] = [0.16, 0.16, 0.16, 1.0];
+const CSM_CASCADE_COUNT: usize = 3;
+const CSM_SHADOW_RESOLUTION: u32 = 2048;
+const CSM_CASCADE_SPLITS: [f32; CSM_CASCADE_COUNT] = [15.0, 50.0, 150.0];
 
 /// GPU vertex layout: position (3×f32), normal (3×f32), UV (2×f32).
 #[repr(C)]
@@ -91,11 +94,21 @@ struct ShadowUniform {
 }
 
 impl ShadowUniform {
+    #[allow(dead_code)]
     fn zeroed() -> Self {
         Self {
             light_view_projection: IDENTITY_MAT4,
         }
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CsmUniform {
+    /// Light-space VP matrix for each cascade.
+    cascade_vps: [[[f32; 4]; 4]; CSM_CASCADE_COUNT],
+    /// Split depth for each cascade in view space (vec4 for alignment, only first 3 used).
+    cascade_splits: [f32; 4],
 }
 
 #[repr(C)]
@@ -110,8 +123,12 @@ struct SkyboxUniform {
 
 struct GpuImage {
     _texture: wgpu::Texture,
-    _view: wgpu::TextureView,
+    view: wgpu::TextureView,
     _desc: ImageDesc,
+}
+
+struct MaterialGpuData {
+    bind_group: wgpu::BindGroup,
 }
 
 struct GpuTarget {
@@ -185,8 +202,15 @@ pub struct WgpuRenderDevice {
     camera_uniform: wgpu::Buffer,
     lighting_uniform: wgpu::Buffer,
     _default_texture: wgpu::Texture,
-    _default_texture_view: wgpu::TextureView,
+    default_texture_view: wgpu::TextureView,
+    _default_normal_texture: wgpu::Texture,
+    default_normal_texture_view: wgpu::TextureView,
+    _default_mra_texture: wgpu::Texture,
+    default_mra_texture_view: wgpu::TextureView,
     _default_sampler: wgpu::Sampler,
+    material_bind_group_layout: wgpu::BindGroupLayout,
+    default_material_bind_group: wgpu::BindGroup,
+    material_gpu: HashMap<String, MaterialGpuData>,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     instance_buffer: wgpu::Buffer,
@@ -203,19 +227,19 @@ pub struct WgpuRenderDevice {
     grid_bind_group: wgpu::BindGroup,
     grid_vertex_buffer: wgpu::Buffer,
     grid_vertex_count: u32,
-    _shadow_depth: wgpu::Texture,
-    shadow_depth_view: wgpu::TextureView,
-    _shadow_sampler: wgpu::Sampler,
-    shadow_uniform: wgpu::Buffer,
+    csm_depth_views: [wgpu::TextureView; CSM_CASCADE_COUNT],
+    _csm_depth_textures: [wgpu::Texture; CSM_CASCADE_COUNT],
+    _csm_sampler: wgpu::Sampler,
+    csm_uniform: wgpu::Buffer,
     shadow_pipeline: wgpu::RenderPipeline,
-    shadow_bind_group: wgpu::BindGroup,
+    shadow_bind_group_layout: wgpu::BindGroupLayout,
     material_cache: HashMap<String, ([f32; 4], f32, f32, [f32; 3])>,
     skybox_pipeline: wgpu::RenderPipeline,
     skybox_bind_group: wgpu::BindGroup,
     skybox_uniform: wgpu::Buffer,
     _skybox_default_cubemap: wgpu::Texture,
-    skybox_default_cubemap_view: wgpu::TextureView,
-    skybox_sampler: wgpu::Sampler,
+    _skybox_default_cubemap_view: wgpu::TextureView,
+    _skybox_sampler: wgpu::Sampler,
     /// Frame-lagged destruction queue: (frame_index, resource).
     destroy_queue: Vec<(u64, DestroyResource)>,
 }
@@ -540,15 +564,15 @@ impl WgpuRenderDevice {
     }
 
     /// Prepares instance buffer from mesh batches for rendering.
-    fn prepare_render_batches(&mut self, world: &RenderWorld) -> Vec<(String, u32)> {
+    fn prepare_render_batches(&mut self, world: &RenderWorld) -> Vec<(String, u32, String)> {
         let batches = self.mesh_batches_from_world(world);
-        let total_instances: usize = batches.iter().map(|(_, inst)| inst.len()).sum();
+        let total_instances: usize = batches.iter().map(|(_, inst, _)| inst.len()).sum();
         if total_instances > self.instance_capacity {
             self.instance_capacity = total_instances.next_power_of_two();
             self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
         }
         let mut all_instances = Vec::with_capacity(total_instances);
-        for (_, instances) in &batches {
+        for (_, instances, _) in &batches {
             all_instances.extend_from_slice(instances);
         }
         if !all_instances.is_empty() {
@@ -560,7 +584,7 @@ impl WgpuRenderDevice {
         }
         batches
             .into_iter()
-            .map(|(name, instances)| (name, instances.len() as u32))
+            .map(|(name, instances, mat)| (name, instances.len() as u32, mat))
             .collect()
     }
 
@@ -724,9 +748,9 @@ impl WgpuRenderDevice {
         let lighting = lighting_uniform_from_world(world);
         self.queue
             .write_buffer(&self.lighting_uniform, 0, bytemuck::bytes_of(&lighting));
-        let shadow = shadow_uniform_from_world(world);
+        let csm = csm_uniform_from_world(world, aspect);
         self.queue
-            .write_buffer(&self.shadow_uniform, 0, bytemuck::bytes_of(&shadow));
+            .write_buffer(&self.csm_uniform, 0, bytemuck::bytes_of(&csm));
         let skybox = skybox_uniform_from_world(world);
         self.queue
             .write_buffer(&self.skybox_uniform, 0, bytemuck::bytes_of(&skybox));
@@ -740,17 +764,38 @@ impl WgpuRenderDevice {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some(encoder_label),
             });
-        encode_shadow_pass(
-            &mut encoder,
-            &self.shadow_depth_view,
-            &self.shadow_pipeline,
-            &self.shadow_bind_group,
-            &self.vertex_buffer,
-            &self.index_buffer,
-            &self.instance_buffer,
-            &batches,
-            &self.mesh_cache,
-        );
+
+        // CSM shadow passes (one per cascade)
+        for cascade_idx in 0..CSM_CASCADE_COUNT {
+            let cascade_vp = ShadowUniform {
+                light_view_projection: csm.cascade_vps[cascade_idx],
+            };
+            let cascade_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("aster csm cascade {cascade_idx} uniform")),
+                contents: bytemuck::bytes_of(&cascade_vp),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let cascade_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("aster csm cascade {cascade_idx} bind group")),
+                layout: &self.shadow_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: cascade_buf.as_entire_binding(),
+                }],
+            });
+            encode_shadow_pass(
+                &mut encoder,
+                &self.csm_depth_views[cascade_idx],
+                &self.shadow_pipeline,
+                &cascade_bg,
+                &self.vertex_buffer,
+                &self.index_buffer,
+                &self.instance_buffer,
+                &batches,
+                &self.mesh_cache,
+            );
+        }
+
         encode_skybox_pass(
             &mut encoder,
             &target.color_view,
@@ -764,6 +809,8 @@ impl WgpuRenderDevice {
             target.depth_view.as_ref(),
             &self.pipeline,
             &self.camera_bind_group,
+            &self.default_material_bind_group,
+            &self.material_gpu,
             &self.mesh_cache,
             &self.vertex_buffer,
             &self.index_buffer,
@@ -847,13 +894,6 @@ impl WgpuRenderDevice {
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let model_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster model uniform"),
-            contents: bytemuck::bytes_of(&ModelUniform {
-                model: IDENTITY_MAT4,
-            }),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
         let lighting_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("aster lighting uniform"),
             contents: bytemuck::bytes_of(&LightingUniform::default()),
@@ -904,24 +944,35 @@ impl WgpuRenderDevice {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        // Shadow map resources
-        let shadow_depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster shadow depth"),
-            size: wgpu::Extent3d {
-                width: 2048,
-                height: 2048,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let shadow_depth_view = shadow_depth.create_view(&wgpu::TextureViewDescriptor::default());
-        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster shadow sampler"),
+        // CSM cascade shadow maps
+        let mut csm_depth_textures = Vec::with_capacity(CSM_CASCADE_COUNT);
+        let mut csm_depth_views = Vec::with_capacity(CSM_CASCADE_COUNT);
+        for i in 0..CSM_CASCADE_COUNT {
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("aster csm cascade {i} depth")),
+                size: wgpu::Extent3d {
+                    width: CSM_SHADOW_RESOLUTION,
+                    height: CSM_SHADOW_RESOLUTION,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+            csm_depth_textures.push(tex);
+            csm_depth_views.push(view);
+        }
+        let csm_depth_textures: [wgpu::Texture; CSM_CASCADE_COUNT] =
+            csm_depth_textures.try_into().unwrap();
+        let csm_depth_views: [wgpu::TextureView; CSM_CASCADE_COUNT] =
+            csm_depth_views.try_into().unwrap();
+        let csm_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("aster csm sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -931,91 +982,91 @@ impl WgpuRenderDevice {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let shadow_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster shadow uniform"),
-            contents: bytemuck::bytes_of(&ShadowUniform::zeroed()),
+        let csm_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("aster csm uniform"),
+            contents: bytemuck::bytes_of(&CsmUniform {
+                cascade_vps: [IDENTITY_MAT4; CSM_CASCADE_COUNT],
+                cascade_splits: [0.0; 4],
+            }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("aster forward bind group layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+
+        // Group 0: camera + lighting + CSM
+        let scene_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("aster scene bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 7,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster forward bind group"),
-            layout: &bind_group_layout,
+            label: Some("aster scene bind group"),
+            layout: &scene_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -1023,37 +1074,204 @@ impl WgpuRenderDevice {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: model_uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&default_texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&default_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
                     resource: lighting_uniform.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: csm_uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&csm_depth_views[0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&csm_depth_views[1]),
+                },
+                wgpu::BindGroupEntry {
                     binding: 5,
-                    resource: wgpu::BindingResource::TextureView(&shadow_depth_view),
+                    resource: wgpu::BindingResource::TextureView(&csm_depth_views[2]),
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: shadow_uniform.as_entire_binding(),
+                    resource: wgpu::BindingResource::Sampler(&csm_sampler),
                 },
             ],
         });
+
+        // Group 1: material textures
+        let material_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("aster material bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+        // Default normal map (flat normal 128,128,255,255 = (0,0,1) in tangent space)
+        let default_normal_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("aster default normal texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let default_normal_texture_view =
+            default_normal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &default_normal_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[128, 128, 255, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // Default metallic-roughness-AO texture (R=AO=1, G=roughness=0.5, B=metallic=0)
+        let default_mra_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("aster default MRA texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let default_mra_texture_view =
+            default_mra_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &default_mra_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255, 128, 0, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let default_material_bind_group =
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("aster default material bind group"),
+                layout: &material_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&default_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&default_normal_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&default_mra_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&default_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(&default_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Sampler(&default_sampler),
+                    },
+                ],
+            });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("aster forward pipeline layout"),
-            bind_group_layouts: &[Some(&bind_group_layout)],
+            bind_group_layouts: &[Some(&scene_bind_group_layout), Some(&material_bind_group_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1231,14 +1449,6 @@ impl WgpuRenderDevice {
                     count: None,
                 }],
             });
-        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster shadow bind group"),
-            layout: &shadow_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: shadow_uniform.as_entire_binding(),
-            }],
-        });
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("aster shadow pipeline layout"),
@@ -1544,8 +1754,15 @@ impl WgpuRenderDevice {
             camera_uniform,
             lighting_uniform,
             _default_texture: default_texture,
-            _default_texture_view: default_texture_view,
+            default_texture_view,
+            _default_normal_texture: default_normal_texture,
+            default_normal_texture_view,
+            _default_mra_texture: default_mra_texture,
+            default_mra_texture_view,
             _default_sampler: default_sampler,
+            material_bind_group_layout,
+            default_material_bind_group,
+            material_gpu: HashMap::new(),
             vertex_buffer,
             index_buffer,
             instance_buffer,
@@ -1562,19 +1779,19 @@ impl WgpuRenderDevice {
             grid_bind_group,
             grid_vertex_buffer,
             grid_vertex_count,
-            _shadow_depth: shadow_depth,
-            shadow_depth_view,
-            _shadow_sampler: shadow_sampler,
-            shadow_uniform,
+            csm_depth_views,
+            _csm_depth_textures: csm_depth_textures,
+            _csm_sampler: csm_sampler,
+            csm_uniform,
             shadow_pipeline,
-            shadow_bind_group,
+            shadow_bind_group_layout,
             material_cache: HashMap::new(),
             skybox_pipeline,
             skybox_bind_group,
             skybox_uniform,
             _skybox_default_cubemap: skybox_default_cubemap,
-            skybox_default_cubemap_view,
-            skybox_sampler,
+            _skybox_default_cubemap_view: skybox_default_cubemap_view,
+            _skybox_sampler: skybox_sampler,
             destroy_queue: Vec::new(),
         };
         renderer.upload_debug_meshes();
@@ -1760,21 +1977,22 @@ impl WgpuRenderDevice {
     }
 
     /// Groups render objects by mesh name for batched instanced rendering.
-    fn mesh_batches_from_world(&self, world: &RenderWorld) -> Vec<(String, Vec<Instance>)> {
+    fn mesh_batches_from_world(&self, world: &RenderWorld) -> Vec<(String, Vec<Instance>, String)> {
         let batch_capacity = (world.objects.len()
             + usize::from(!world.sprites.is_empty())
             + usize::from(!world.particles.is_empty()))
         .min(32);
-        let mut batches: HashMap<&str, Vec<Instance>> = HashMap::with_capacity(batch_capacity);
+        let mut batches: HashMap<(String, String), Vec<Instance>> = HashMap::with_capacity(batch_capacity);
         for object in &world.objects {
             let (color, metallic, roughness, emissive) = self.pbr_for_material(&object.material);
             let t = object.transform;
             let mesh = if object.mesh.is_empty() {
-                "debug/cube"
+                "debug/cube".to_string()
             } else {
-                object.mesh.as_str()
+                object.mesh.clone()
             };
-            batches.entry(mesh).or_default().push(Instance {
+            let mat = object.material.clone();
+            batches.entry((mesh, mat)).or_default().push(Instance {
                 offset: [t.translation.x, t.translation.y, t.translation.z],
                 scale: [
                     t.scale.x.max(0.05),
@@ -1814,7 +2032,7 @@ impl WgpuRenderDevice {
                 }
             });
             batches
-                .entry("debug/plane")
+                .entry(("debug/plane".to_string(), String::new()))
                 .or_default()
                 .extend(sprite_instances);
         }
@@ -1840,13 +2058,13 @@ impl WgpuRenderDevice {
                 })
                 .collect();
             batches
-                .entry("debug/plane")
+                .entry(("debug/plane".to_string(), String::new()))
                 .or_default()
                 .extend(particle_instances);
         }
         batches
             .into_iter()
-            .map(|(mesh, instances)| (mesh.to_owned(), instances))
+            .map(|((mesh, mat), instances)| (mesh, instances, mat))
             .collect()
     }
 
@@ -1890,6 +2108,9 @@ impl RenderDevice for WgpuRenderDevice {
         let lighting = lighting_uniform_from_world(world);
         self.queue
             .write_buffer(&self.lighting_uniform, 0, bytemuck::bytes_of(&lighting));
+        let csm = csm_uniform_from_world(world, aspect);
+        self.queue
+            .write_buffer(&self.csm_uniform, 0, bytemuck::bytes_of(&csm));
         let skybox = skybox_uniform_from_world(world);
         self.queue
             .write_buffer(&self.skybox_uniform, 0, bytemuck::bytes_of(&skybox));
@@ -1924,6 +2145,37 @@ impl RenderDevice for WgpuRenderDevice {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("aster surface render world encoder"),
                 });
+            // CSM shadow passes
+            for cascade_idx in 0..CSM_CASCADE_COUNT {
+                let cascade_vp = ShadowUniform {
+                    light_view_projection: csm.cascade_vps[cascade_idx],
+                };
+                let cascade_buf =
+                    self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(&format!("aster csm cascade {cascade_idx} uniform")),
+                        contents: bytemuck::bytes_of(&cascade_vp),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    });
+                let cascade_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("aster csm cascade {cascade_idx} bind group")),
+                    layout: &self.shadow_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: cascade_buf.as_entire_binding(),
+                    }],
+                });
+                encode_shadow_pass(
+                    &mut encoder,
+                    &self.csm_depth_views[cascade_idx],
+                    &self.shadow_pipeline,
+                    &cascade_bg,
+                    &self.vertex_buffer,
+                    &self.index_buffer,
+                    &self.instance_buffer,
+                    &batches,
+                    &self.mesh_cache,
+                );
+            }
             encode_skybox_pass(
                 &mut encoder,
                 &view,
@@ -1937,6 +2189,8 @@ impl RenderDevice for WgpuRenderDevice {
                 self.surface_depth_view.as_ref(),
                 &self.pipeline,
                 &self.camera_bind_group,
+                &self.default_material_bind_group,
+                &self.material_gpu,
                 &self.mesh_cache,
                 &self.vertex_buffer,
                 &self.index_buffer,
@@ -1967,6 +2221,36 @@ impl RenderDevice for WgpuRenderDevice {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("aster render world encoder"),
             });
+        // CSM shadow passes
+        for cascade_idx in 0..CSM_CASCADE_COUNT {
+            let cascade_vp = ShadowUniform {
+                light_view_projection: csm.cascade_vps[cascade_idx],
+            };
+            let cascade_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("aster csm cascade {cascade_idx} uniform")),
+                contents: bytemuck::bytes_of(&cascade_vp),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let cascade_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("aster csm cascade {cascade_idx} bind group")),
+                layout: &self.shadow_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: cascade_buf.as_entire_binding(),
+                }],
+            });
+            encode_shadow_pass(
+                &mut encoder,
+                &self.csm_depth_views[cascade_idx],
+                &self.shadow_pipeline,
+                &cascade_bg,
+                &self.vertex_buffer,
+                &self.index_buffer,
+                &self.instance_buffer,
+                &batches,
+                &self.mesh_cache,
+            );
+        }
         encode_skybox_pass(
             &mut encoder,
             &target.color_view,
@@ -1980,6 +2264,8 @@ impl RenderDevice for WgpuRenderDevice {
             target.depth_view.as_ref(),
             &self.pipeline,
             &self.camera_bind_group,
+            &self.default_material_bind_group,
+            &self.material_gpu,
             &self.mesh_cache,
             &self.vertex_buffer,
             &self.index_buffer,
@@ -2032,7 +2318,7 @@ impl RenderDevice for WgpuRenderDevice {
             handle,
             GpuImage {
                 _texture: texture,
-                _view: view,
+                view: view,
                 _desc: desc,
             },
         );
@@ -2068,7 +2354,7 @@ impl RenderDevice for WgpuRenderDevice {
             handle,
             GpuImage {
                 _texture: texture,
-                _view: view,
+                view: view,
                 _desc: desc,
             },
         );
@@ -2134,7 +2420,7 @@ impl RenderDevice for WgpuRenderDevice {
             handle,
             GpuImage {
                 _texture: texture,
-                _view: view,
+                view: view,
                 _desc: desc,
             },
         );
@@ -2187,6 +2473,68 @@ impl RenderDevice for WgpuRenderDevice {
         WgpuRenderDevice::register_material_params(
             self, name, base_color, metallic, roughness, emissive,
         );
+    }
+
+    fn register_material_textures(
+        &mut self,
+        name: &str,
+        textures: &RenderMaterialTextures,
+    ) {
+        let view_for = |handle: &Option<ImageHandle>| -> &wgpu::TextureView {
+            match handle {
+                Some(h) => match self.images.get(&h.raw()) {
+                    Some(img) => &img.view,
+                    None => &self.default_texture_view,
+                },
+                None => &self.default_texture_view,
+            }
+        };
+        let base_color_view = view_for(&textures.base_color);
+        let normal_view = if textures.normal.is_some() {
+            view_for(&textures.normal)
+        } else {
+            &self.default_normal_texture_view
+        };
+        let mra_view = if textures.metallic_roughness.is_some() {
+            view_for(&textures.metallic_roughness)
+        } else {
+            &self.default_mra_texture_view
+        };
+        let emissive_view = view_for(&textures.emissive);
+        let occlusion_view = view_for(&textures.occlusion);
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("aster material bind group: {name}")),
+            layout: &self.material_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(base_color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(normal_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(mra_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(emissive_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(occlusion_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&self._default_sampler),
+                },
+            ],
+        });
+        self.material_gpu
+            .insert(name.to_owned(), MaterialGpuData { bind_group });
     }
 }
 
@@ -2278,11 +2626,13 @@ fn encode_batched_forward_pass<'a>(
     depth_view: Option<&wgpu::TextureView>,
     pipeline: &wgpu::RenderPipeline,
     camera_bind_group: &wgpu::BindGroup,
+    default_material_bind_group: &wgpu::BindGroup,
+    material_gpu: &HashMap<String, MaterialGpuData>,
     mesh_cache: &'a HashMap<String, MeshBuffers>,
     default_vertex_buffer: &'a wgpu::Buffer,
     default_index_buffer: &'a wgpu::Buffer,
     instance_buffer: &wgpu::Buffer,
-    batches: &[(String, u32)],
+    batches: &[(String, u32, String)],
 ) {
     let color_attachment = Some(wgpu::RenderPassColorAttachment {
         view: color_view,
@@ -2313,10 +2663,15 @@ fn encode_batched_forward_pass<'a>(
     pass.set_bind_group(0, camera_bind_group, &[]);
 
     let mut instance_offset = 0u32;
-    for (mesh_name, count) in batches {
+    for (mesh_name, count, material_name) in batches {
         if *count == 0 {
             continue;
         }
+        let mat_bg = material_gpu
+            .get(material_name)
+            .map(|m| &m.bind_group)
+            .unwrap_or(default_material_bind_group);
+        pass.set_bind_group(1, mat_bg, &[]);
         let buffers = mesh_cache.get(mesh_name);
         let (vertex_buf, index_buf, index_count) = match buffers {
             Some(b) => (&b.vertex_buffer, &b.index_buffer, b.index_count),
@@ -2334,28 +2689,106 @@ fn encode_batched_forward_pass<'a>(
     }
 }
 
-fn shadow_uniform_from_world(world: &RenderWorld) -> ShadowUniform {
-    let light_dir = engine_core::math::Vec3::new(-0.5, -1.0, -0.25).normalized();
-    let center = world
-        .camera
-        .as_ref()
-        .map(|c| c.transform.translation)
-        .unwrap_or(engine_core::math::Vec3::ZERO);
-    let shadow_size = 10.0;
-    let distance = 15.0;
-    let light_pos = center - light_dir * distance;
+fn csm_uniform_from_world(world: &RenderWorld, aspect: f32) -> CsmUniform {
+    let light_dir = world
+        .lights
+        .iter()
+        .find(|l| l.kind == RenderLightKind::Directional)
+        .map(|l| l.transform.translation.normalized())
+        .unwrap_or_else(|| engine_core::math::Vec3::new(-0.5, -1.0, -0.25).normalized());
 
-    let up = if light_dir.x.abs() < 0.99 {
-        engine_core::math::Vec3::new(0.0, 1.0, 0.0)
-    } else {
-        engine_core::math::Vec3::new(0.0, 0.0, 1.0)
+    let cam = match &world.camera {
+        Some(c) => c,
+        None => {
+            return CsmUniform {
+                cascade_vps: [IDENTITY_MAT4; CSM_CASCADE_COUNT],
+                cascade_splits: [0.0; 4],
+            };
+        }
     };
-    let view = look_at_rh(light_pos, center, up);
-    let proj = orthographic_rh(shadow_size, 1.0, 0.1, distance * 2.0);
-    let vp = mul_mat4(&proj, &view);
 
-    ShadowUniform {
-        light_view_projection: vp,
+    let cam_pos = cam.transform.translation;
+    let cam_forward = engine_core::math::Vec3::new(
+        -cam.transform.rotation.x * 2.0 * cam.transform.rotation.w,
+        -cam.transform.rotation.y * 2.0 * cam.transform.rotation.w,
+        -cam.transform.rotation.z * 2.0 * cam.transform.rotation.w,
+    )
+    .normalized();
+
+    let fov_rad = cam.vertical_fov_degrees.to_radians();
+    let tan_half_fov = (fov_rad * 0.5).tan();
+
+    let mut cascade_vps = [IDENTITY_MAT4; CSM_CASCADE_COUNT];
+    let mut cascade_splits = [0.0f32; 4];
+
+    for i in 0..CSM_CASCADE_COUNT {
+        let near = if i == 0 { cam.near } else { CSM_CASCADE_SPLITS[i - 1] };
+        let far = CSM_CASCADE_SPLITS[i];
+        cascade_splits[i] = far;
+
+        let half_height_near = tan_half_fov * near;
+        let half_width_near = half_height_near * aspect;
+        let half_height_far = tan_half_fov * far;
+        let half_width_far = half_height_far * aspect;
+
+        let near_center = cam_pos + cam_forward * near;
+        let far_center = cam_pos + cam_forward * far;
+
+        let right = engine_core::math::Vec3::new(0.0, 1.0, 0.0)
+            .cross(cam_forward)
+            .normalized();
+        let up = cam_forward.cross(right);
+
+        let corners = [
+            near_center + right * half_width_near + up * half_height_near,
+            near_center - right * half_width_near + up * half_height_near,
+            near_center - right * half_width_near - up * half_height_near,
+            near_center + right * half_width_near - up * half_height_near,
+            far_center + right * half_width_far + up * half_height_far,
+            far_center - right * half_width_far + up * half_height_far,
+            far_center - right * half_width_far - up * half_height_far,
+            far_center + right * half_width_far - up * half_height_far,
+        ];
+
+        let mut center = engine_core::math::Vec3::ZERO;
+        for corner in &corners {
+            center = center + *corner;
+        }
+        center = center * (1.0 / 8.0);
+
+        let up = if light_dir.x.abs() < 0.99 {
+            engine_core::math::Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            engine_core::math::Vec3::new(0.0, 0.0, 1.0)
+        };
+        let light_view = look_at_rh(center - light_dir * 50.0, center, up);
+
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut min_y = f32::MAX;
+        let mut max_y = f32::MIN;
+        let mut min_z = f32::MAX;
+        let mut max_z = f32::MIN;
+        for corner in &corners {
+            let p = mul_mat4_vec3(&light_view, *corner);
+            min_x = min_x.min(p.x);
+            max_x = max_x.max(p.x);
+            min_y = min_y.min(p.y);
+            max_y = max_y.max(p.y);
+            min_z = min_z.min(p.z);
+            max_z = max_z.max(p.z);
+        }
+
+        let z_padding = 10.0;
+        let light_proj = orthographic_rh_custom(
+            min_x, max_x, min_y, max_y, min_z - z_padding, max_z + z_padding,
+        );
+        cascade_vps[i] = mul_mat4(&light_proj, &light_view);
+    }
+
+    CsmUniform {
+        cascade_vps,
+        cascade_splits,
     }
 }
 
@@ -2367,7 +2800,7 @@ fn encode_shadow_pass(
     vertex_buffer: &wgpu::Buffer,
     index_buffer: &wgpu::Buffer,
     instance_buffer: &wgpu::Buffer,
-    batches: &[(String, u32)],
+    batches: &[(String, u32, String)],
     mesh_cache: &HashMap<String, MeshBuffers>,
 ) {
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2389,7 +2822,7 @@ fn encode_shadow_pass(
     pass.set_bind_group(0, bind_group, &[]);
 
     let mut instance_offset = 0u32;
-    for (mesh_name, count) in batches {
+    for (mesh_name, count, _) in batches {
         if *count == 0 {
             continue;
         }
@@ -2854,6 +3287,35 @@ fn mul_mat4(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     result
 }
 
+fn mul_mat4_vec3(m: &[[f32; 4]; 4], v: engine_core::math::Vec3) -> engine_core::math::Vec3 {
+    let x = m[0][0] * v.x + m[1][0] * v.y + m[2][0] * v.z + m[3][0];
+    let y = m[0][1] * v.x + m[1][1] * v.y + m[2][1] * v.z + m[3][1];
+    let z = m[0][2] * v.x + m[1][2] * v.y + m[2][2] * v.z + m[3][2];
+    engine_core::math::Vec3::new(x, y, z)
+}
+
+fn orthographic_rh_custom(
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    near: f32,
+    far: f32,
+) -> [[f32; 4]; 4] {
+    let range_inv = 1.0 / (near - far);
+    [
+        [2.0 / (right - left), 0.0, 0.0, 0.0],
+        [0.0, 2.0 / (top - bottom), 0.0, 0.0],
+        [0.0, 0.0, range_inv, 0.0],
+        [
+            -(right + left) / (right - left),
+            -(top + bottom) / (top - bottom),
+            near * range_inv,
+            1.0,
+        ],
+    ]
+}
+
 fn mesh_name(mesh: &DebugMesh) -> String {
     match mesh {
         DebugMesh::Cube => "debug/cube".to_string(),
@@ -3123,13 +3585,10 @@ fn generate_grid() -> Vec<Vertex> {
 }
 
 const FORWARD_SHADER: &str = r#"
+// Group 0: scene-level uniforms
 struct CameraUniform {
     view_projection: mat4x4<f32>,
     camera_position: vec4<f32>,
-};
-
-struct ModelUniform {
-    model: mat4x4<f32>,
 };
 
 struct ForwardLight {
@@ -3145,18 +3604,26 @@ struct LightingUniform {
     lights: array<ForwardLight, 8>,
 };
 
-@group(0) @binding(0) var<uniform> camera: CameraUniform;
-@group(0) @binding(1) var<uniform> model: ModelUniform;
-@group(0) @binding(2) var material_texture: texture_2d<f32>;
-@group(0) @binding(3) var material_sampler: sampler;
-@group(0) @binding(4) var<uniform> lighting: LightingUniform;
-@group(0) @binding(5) var shadow_map: texture_depth_2d;
-@group(0) @binding(6) var shadow_sampler: sampler_comparison;
-@group(0) @binding(7) var<uniform> shadow: ShadowUniform;
-
-struct ShadowUniform {
-    light_view_projection: mat4x4<f32>,
+struct CsmUniform {
+    cascade_vps: array<mat4x4<f32>, 3>,
+    cascade_splits: vec4<f32>,
 };
+
+@group(0) @binding(0) var<uniform> camera: CameraUniform;
+@group(0) @binding(1) var<uniform> lighting: LightingUniform;
+@group(0) @binding(2) var<uniform> csm: CsmUniform;
+@group(0) @binding(3) var csm_shadow_0: texture_depth_2d;
+@group(0) @binding(4) var csm_shadow_1: texture_depth_2d;
+@group(0) @binding(5) var csm_shadow_2: texture_depth_2d;
+@group(0) @binding(6) var csm_sampler: sampler_comparison;
+
+// Group 1: material textures
+@group(1) @binding(0) var base_color_tex: texture_2d<f32>;
+@group(1) @binding(1) var normal_tex: texture_2d<f32>;
+@group(1) @binding(2) var metallic_roughness_tex: texture_2d<f32>;
+@group(1) @binding(3) var emissive_tex: texture_2d<f32>;
+@group(1) @binding(4) var occlusion_tex: texture_2d<f32>;
+@group(1) @binding(5) var mat_sampler: sampler;
 
 struct VsIn {
     @location(0) position: vec3<f32>,
@@ -3180,6 +3647,8 @@ struct VsOut {
     @location(4) metallic: f32,
     @location(5) roughness: f32,
     @location(6) emissive: vec3<f32>,
+    @location(7) world_tangent: vec3<f32>,
+    @location(8) world_bitangent: vec3<f32>,
 };
 
 const PI: f32 = 3.14159265359;
@@ -3217,6 +3686,49 @@ fn aces_tonemap(color: vec3<f32>) -> vec3<f32> {
     return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
 }
 
+fn sample_csm_shadow(world_pos: vec3<f32>, view_depth: f32) -> f32 {
+    var cascade_idx = 2u;
+    if (view_depth < csm.cascade_splits.x) {
+        cascade_idx = 0u;
+    } else if (view_depth < csm.cascade_splits.y) {
+        cascade_idx = 1u;
+    }
+
+    var shadow_coord: vec4<f32>;
+    if (cascade_idx == 0u) {
+        shadow_coord = csm.cascade_vps[0] * vec4<f32>(world_pos, 1.0);
+    } else if (cascade_idx == 1u) {
+        shadow_coord = csm.cascade_vps[1] * vec4<f32>(world_pos, 1.0);
+    } else {
+        shadow_coord = csm.cascade_vps[2] * vec4<f32>(world_pos, 1.0);
+    }
+
+    let ndc = shadow_coord.xyz / shadow_coord.w;
+    let uv = ndc.xy * 0.5 + 0.5;
+    let depth = ndc.z;
+
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth < 0.0 || depth > 1.0) {
+        return 1.0;
+    }
+
+    let bias = 0.0005;
+    var shadow_factor = 0.0;
+    let texel = 1.0 / 2048.0;
+    for (var dx = -1; dx <= 1; dx++) {
+        for (var dy = -1; dy <= 1; dy++) {
+            let offset = vec2<f32>(f32(dx), f32(dy)) * texel;
+            if (cascade_idx == 0u) {
+                shadow_factor += textureSampleCompare(csm_shadow_0, csm_sampler, uv + offset, depth - bias);
+            } else if (cascade_idx == 1u) {
+                shadow_factor += textureSampleCompare(csm_shadow_1, csm_sampler, uv + offset, depth - bias);
+            } else {
+                shadow_factor += textureSampleCompare(csm_shadow_2, csm_sampler, uv + offset, depth - bias);
+            }
+        }
+    }
+    return shadow_factor / 9.0;
+}
+
 @vertex
 fn vs_main(input: VsIn) -> VsOut {
     var out: VsOut;
@@ -3225,20 +3737,28 @@ fn vs_main(input: VsIn) -> VsOut {
         + 2.0 * cross(input.rotation.xyz, cross(input.rotation.xyz, scaled_position)
         + input.rotation.w * scaled_position);
     let world_pos = rotated_position + input.offset;
-    let world_pos4 = model.model * vec4<f32>(world_pos, 1.0);
-    out.position = camera.view_projection * world_pos4;
-    let normal_mat = mat3x3<f32>(
-        model.model[0].xyz,
-        model.model[1].xyz,
-        model.model[2].xyz,
-    );
+    out.position = camera.view_projection * vec4<f32>(world_pos, 1.0);
+
     let rotated_normal = input.normal
         + 2.0 * cross(input.rotation.xyz, cross(input.rotation.xyz, input.normal)
         + input.rotation.w * input.normal);
-    out.world_normal = normalize(normal_mat * rotated_normal);
+    let n = normalize(rotated_normal);
+
+    // Compute tangent and bitangent from UV derivatives (flat plane approximation)
+    // For general meshes, tangents should come from vertex data; this is a fallback.
+    var t = vec3<f32>(1.0, 0.0, 0.0);
+    if (abs(dot(n, t)) > 0.99) {
+        t = vec3<f32>(0.0, 1.0, 0.0);
+    }
+    let b = normalize(cross(n, t));
+    let tt = normalize(cross(b, n));
+
+    out.world_normal = n;
+    out.world_tangent = tt;
+    out.world_bitangent = b;
     out.uv = input.uv;
     out.color = input.color;
-    out.world_position = world_pos4.xyz;
+    out.world_position = world_pos;
     out.metallic = input.metallic;
     out.roughness = input.roughness;
     out.emissive = input.emissive;
@@ -3247,25 +3767,39 @@ fn vs_main(input: VsIn) -> VsOut {
 
 @fragment
 fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
-    let n = normalize(input.world_normal);
-    let v = normalize(camera.camera_position.xyz - input.world_position);
-    let tex_color = textureSample(material_texture, material_sampler, input.uv);
+    // Sample material textures
+    let tex_color = textureSample(base_color_tex, mat_sampler, input.uv);
+    let normal_sample = textureSample(normal_tex, mat_sampler, input.uv).rgb;
+    let mra = textureSample(metallic_roughness_tex, mat_sampler, input.uv);
+    let emissive_tex_color = textureSample(emissive_tex, mat_sampler, input.uv).rgb;
+    let ao = textureSample(occlusion_tex, mat_sampler, input.uv).r;
+
+    // Base color: vertex tint * texture
     let base_color = input.color.rgb * tex_color.rgb;
-    let roughness = clamp(input.roughness, 0.04, 1.0);
-    let metallic = clamp(input.metallic, 0.0, 1.0);
+
+    // PBR parameters: per-instance fallback * texture modulation
+    let metallic = clamp(input.metallic * mra.b, 0.0, 1.0);
+    let roughness = clamp(input.roughness * mra.g, 0.04, 1.0);
+
+    // Normal mapping: reconstruct TBN and transform sampled normal
+    let tbn_t = normalize(input.world_tangent);
+    let tbn_b = normalize(input.world_bitangent);
+    let tbn_n = normalize(input.world_normal);
+    let tbn = mat3x3<f32>(tbn_t, tbn_b, tbn_n);
+    let tangent_normal = normalize(normal_sample * 2.0 - 1.0);
+    let n = normalize(tbn * tangent_normal);
+
+    let v = normalize(camera.camera_position.xyz - input.world_position);
 
     let f0 = mix(vec3<f32>(0.04), base_color, metallic);
 
-    var color = lighting.ambient.rgb * base_color;
+    // Ambient with occlusion
+    var color = lighting.ambient.rgb * base_color * ao;
 
-    let shadow_coord = shadow.light_view_projection * vec4<f32>(input.world_position, 1.0);
-    let shadow_ndc = shadow_coord.xyz / shadow_coord.w;
-    let shadow_uv = shadow_ndc.xy * 0.5 + 0.5;
-    var shadow_factor = 1.0;
-    if (shadow_uv.x >= 0.0 && shadow_uv.x <= 1.0 && shadow_uv.y >= 0.0 && shadow_uv.y <= 1.0
-        && shadow_ndc.z >= 0.0 && shadow_ndc.z <= 1.0) {
-        shadow_factor = textureSampleCompare(shadow_map, shadow_sampler, shadow_uv, shadow_ndc.z - 0.0005);
-    }
+    // CSM shadow
+    let view_pos = camera.view_projection * vec4<f32>(input.world_position, 1.0);
+    let view_depth = view_pos.z / view_pos.w;
+    let shadow_factor = sample_csm_shadow(input.world_position, view_depth);
 
     for (var i: u32 = 0u; i < lighting.params.x; i = i + 1u) {
         let light = lighting.lights[i];
@@ -3318,7 +3852,8 @@ fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
         color = color + radiance * attenuation * spot;
     }
 
-    color = color + input.emissive * base_color;
+    // Emissive: per-instance factor * emissive texture
+    color = color + input.emissive * emissive_tex_color;
 
     color = aces_tonemap(color);
 

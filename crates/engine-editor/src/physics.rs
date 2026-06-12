@@ -70,6 +70,7 @@ impl PhysicsSync {
                         linear_damping: rb_data.linear_damping,
                         angular_damping: rb_data.angular_damping,
                         gravity_scale: if rb_data.use_gravity { 1.0 } else { 0.0 },
+                        ..RigidbodyDesc::default()
                     };
                     let new_body = physics.backend_mut().create_body(&desc)?;
                     self.body_map.insert(object.id, (new_body, body_kind));
@@ -96,6 +97,9 @@ impl PhysicsSync {
                         is_trigger: collider_data.is_trigger,
                         layer: object.layer,
                         mask: collider_data.mask,
+                        friction_combine: engine_physics::CombineMode::Average,
+                        restitution_combine: engine_physics::CombineMode::Average,
+                        active_contact_events: false,
                     };
                     let collider_handle = physics.backend_mut().add_collider(body, &desc)?;
                     self.collider_map.insert((object.id, idx), collider_handle);

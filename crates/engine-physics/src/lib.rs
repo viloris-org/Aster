@@ -56,6 +56,10 @@ pub struct RigidbodyDesc {
     pub angular_damping: f32,
     /// Gravity scale multiplier.
     pub gravity_scale: f32,
+    /// CCD mode for this body.
+    pub ccd: CcdMode,
+    /// Optional sleep thresholds; `None` uses engine defaults.
+    pub sleep_params: Option<SleepParams>,
 }
 
 impl Default for RigidbodyDesc {
@@ -66,6 +70,8 @@ impl Default for RigidbodyDesc {
             linear_damping: 0.0,
             angular_damping: 0.0,
             gravity_scale: 1.0,
+            ccd: CcdMode::Disabled,
+            sleep_params: None,
         }
     }
 }
@@ -98,6 +104,60 @@ pub enum ColliderShape {
         /// Flat list of vertex positions (x,y,z triplets).
         vertices: Vec<f32>,
     },
+    /// Triangle mesh (static bodies only).
+    TriMesh {
+        /// Flat list of vertex positions (x,y,z triplets).
+        vertices: Vec<f32>,
+        /// Triangle indices (three per triangle, u32).
+        indices: Vec<u32>,
+    },
+}
+
+/// CCD (Continuous Collision Detection) mode.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CcdMode {
+    /// CCD disabled (default).
+    #[default]
+    Disabled,
+    /// CCD enabled — prevents fast-moving objects from tunneling.
+    Enabled,
+}
+
+/// Sleep thresholds for a rigidbody.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SleepParams {
+    /// Linear velocity threshold for sleeping.
+    pub linear_threshold: f32,
+    /// Angular velocity threshold for sleeping.
+    pub angular_threshold: f32,
+    /// Time (in seconds) the body must be below thresholds before sleeping.
+    pub time_before_sleep: f32,
+}
+
+impl Default for SleepParams {
+    fn default() -> Self {
+        Self {
+            linear_threshold: 0.01,
+            angular_threshold: 0.01,
+            time_before_sleep: 1.0,
+        }
+    }
+}
+
+/// Friction/restitution combine mode.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CombineMode {
+    /// Average of the two values (default).
+    #[default]
+    Average,
+    /// Minimum of the two values.
+    Min,
+    /// Product of the two values.
+    Multiply,
+    /// Maximum of the two values.
+    Max,
 }
 
 /// Collider creation parameters.
@@ -115,6 +175,12 @@ pub struct ColliderDesc {
     pub layer: u32,
     /// Bitmask of layers this collider collides with.
     pub mask: u32,
+    /// How friction values from two bodies are combined.
+    pub friction_combine: CombineMode,
+    /// How restitution values from two bodies are combined.
+    pub restitution_combine: CombineMode,
+    /// Whether to report contact force events for this collider.
+    pub active_contact_events: bool,
 }
 
 impl Default for ColliderDesc {
@@ -128,6 +194,9 @@ impl Default for ColliderDesc {
             is_trigger: false,
             layer: 1,
             mask: !0,
+            friction_combine: CombineMode::Average,
+            restitution_combine: CombineMode::Average,
+            active_contact_events: false,
         }
     }
 }
@@ -362,6 +431,35 @@ pub trait PhysicsBackend: Send + Sync {
         desc: CharacterControllerDesc,
     ) -> EngineResult<CharacterControllerOutput>;
 
+    /// Applies a continuous force to a body (accumulated and applied each step).
+    fn apply_force(&mut self, _body: BodyHandle, _force: Vec3) -> EngineResult<()> {
+        Err(EngineError::UnsupportedCapability {
+            capability: "continuous forces",
+        })
+    }
+
+    /// Applies a continuous torque to a body.
+    fn apply_torque(&mut self, _body: BodyHandle, _torque: Vec3) -> EngineResult<()> {
+        Err(EngineError::UnsupportedCapability {
+            capability: "continuous torque",
+        })
+    }
+
+    /// Clears accumulated forces on a body.
+    fn clear_forces(&mut self, _body: BodyHandle) -> EngineResult<()> {
+        Ok(())
+    }
+
+    /// Puts a body to sleep or wakes it up.
+    fn set_body_sleep(&mut self, _body: BodyHandle, _sleeping: bool) -> EngineResult<()> {
+        Ok(())
+    }
+
+    /// Returns whether a body is sleeping.
+    fn is_body_sleeping(&self, _body: BodyHandle) -> EngineResult<bool> {
+        Ok(false)
+    }
+
     /// Creates a joint between two bodies.
     fn create_joint(&mut self, _desc: &JointDesc) -> EngineResult<JointHandle> {
         Err(EngineError::UnsupportedCapability {
@@ -592,6 +690,9 @@ pub struct SimplePhysicsBackend {
     active_pairs: HashSet<(ColliderHandle, ColliderHandle)>,
     contacts: Vec<ContactEvent>,
     gravity: Vec3,
+    forces: HashMap<BodyHandle, Vec3>,
+    sleep_timers: HashMap<BodyHandle, f32>,
+    sleeping: HashSet<BodyHandle>,
 }
 
 impl Default for SimplePhysicsBackend {
@@ -606,6 +707,9 @@ impl Default for SimplePhysicsBackend {
             active_pairs: HashSet::new(),
             contacts: Vec::new(),
             gravity: Vec3::new(0.0, -9.81, 0.0),
+            forces: HashMap::new(),
+            sleep_timers: HashMap::new(),
+            sleeping: HashSet::new(),
         }
     }
 }
@@ -799,18 +903,60 @@ impl SimplePhysicsBackend {
             }
         }
     }
+
+    fn update_sleep(&mut self, dt: f32) {
+        let handles: Vec<_> = self.bodies.keys().copied().collect();
+        for handle in handles {
+            let Some(body) = self.bodies.get(&handle) else {
+                continue;
+            };
+            if body.desc.kind != BodyKind::Dynamic {
+                continue;
+            }
+            let params = body.desc.sleep_params.unwrap_or_default();
+            let speed = body.velocity.length();
+            if speed < params.linear_threshold {
+                let timer = self.sleep_timers.entry(handle).or_insert(0.0);
+                *timer += dt;
+                if *timer >= params.time_before_sleep {
+                    self.sleeping.insert(handle);
+                }
+            } else {
+                self.sleep_timers.insert(handle, 0.0);
+                self.sleeping.remove(&handle);
+            }
+        }
+    }
 }
 
 impl PhysicsBackend for SimplePhysicsBackend {
     fn fixed_update(&mut self, dt: f32) {
-        for body in self.bodies.values_mut() {
-            if body.desc.kind == BodyKind::Dynamic {
-                body.velocity += self.gravity * body.desc.gravity_scale * dt;
-                body.transform.translation += body.velocity * dt;
+        let forces = std::mem::take(&mut self.forces);
+        for (handle, force) in forces {
+            if let Some(body) = self.bodies.get_mut(&handle) {
+                if body.desc.kind == BodyKind::Dynamic && !self.sleeping.contains(&handle) {
+                    body.velocity += force * dt;
+                }
             }
         }
-        self.solve_joints(dt);
+
+        let has_ccd = self.bodies.values().any(|b| {
+            b.desc.ccd == CcdMode::Enabled && b.desc.kind == BodyKind::Dynamic
+        });
+        let sub_steps: u32 = if has_ccd { 8 } else { 1 };
+        let sub_dt = dt / sub_steps as f32;
+
+        for _ in 0..sub_steps {
+            for (handle, body) in self.bodies.iter_mut() {
+                if body.desc.kind == BodyKind::Dynamic && !self.sleeping.contains(handle) {
+                    body.velocity += self.gravity * body.desc.gravity_scale * sub_dt;
+                    body.transform.translation += body.velocity * sub_dt;
+                }
+            }
+            self.solve_joints(sub_dt);
+        }
         self.update_contacts();
+        self.update_sleep(dt);
     }
 
     fn create_body(&mut self, desc: &RigidbodyDesc) -> EngineResult<BodyHandle> {
@@ -1020,6 +1166,39 @@ impl PhysicsBackend for SimplePhysicsBackend {
         })
     }
 
+    fn apply_force(&mut self, body: BodyHandle, force: Vec3) -> EngineResult<()> {
+        self.body(body)?;
+        *self.forces.entry(body).or_insert(Vec3::ZERO) += force;
+        self.sleeping.remove(&body);
+        Ok(())
+    }
+
+    fn apply_torque(&mut self, body: BodyHandle, _torque: Vec3) -> EngineResult<()> {
+        self.body(body)?;
+        Ok(())
+    }
+
+    fn clear_forces(&mut self, body: BodyHandle) -> EngineResult<()> {
+        self.body(body)?;
+        self.forces.remove(&body);
+        Ok(())
+    }
+
+    fn set_body_sleep(&mut self, body: BodyHandle, sleeping: bool) -> EngineResult<()> {
+        self.body(body)?;
+        if sleeping {
+            self.sleeping.insert(body);
+        } else {
+            self.sleeping.remove(&body);
+        }
+        Ok(())
+    }
+
+    fn is_body_sleeping(&self, body: BodyHandle) -> EngineResult<bool> {
+        self.body(body)?;
+        Ok(self.sleeping.contains(&body))
+    }
+
     fn create_joint(&mut self, desc: &JointDesc) -> EngineResult<JointHandle> {
         let handle = JointHandle(self.next_joint);
         self.next_joint = self.next_joint.saturating_add(1).max(1);
@@ -1168,7 +1347,7 @@ fn shape_world_sphere(center: Vec3, shape: &ColliderShape) -> (Vec3, f32) {
             half_height,
             radius,
         } => half_height + radius,
-        ColliderShape::Mesh { vertices } => vertices
+        ColliderShape::Mesh { vertices } | ColliderShape::TriMesh { vertices, .. } => vertices
             .chunks_exact(3)
             .map(|chunk| Vec3::new(chunk[0], chunk[1], chunk[2]).length())
             .fold(0.0, f32::max),
@@ -1208,7 +1387,7 @@ mod rapier_backend {
     use rapier3d::{
         control as rpc,
         crossbeam::channel::{unbounded, Receiver},
-        na::{Point3, Quaternion, Translation3, UnitQuaternion, Vector3},
+        na::{self, Point3, Quaternion, Translation3, UnitQuaternion, Vector3},
         parry::query::ShapeCastOptions,
         prelude as rp,
     };
@@ -1239,6 +1418,9 @@ mod rapier_backend {
         rapier_bodies: HashMap<rp::RigidBodyHandle, BodyHandle>,
         rapier_colliders: HashMap<rp::ColliderHandle, ColliderHandle>,
         pending_contacts: Vec<ContactEvent>,
+        next_joint: u64,
+        joint_handles: HashMap<JointHandle, rp::ImpulseJointHandle>,
+        rapier_joints: HashMap<rp::ImpulseJointHandle, JointHandle>,
     }
 
     impl Default for RapierPhysicsBackend {
@@ -1268,6 +1450,9 @@ mod rapier_backend {
                 rapier_bodies: HashMap::new(),
                 rapier_colliders: HashMap::new(),
                 pending_contacts: Vec::new(),
+                next_joint: 1,
+                joint_handles: HashMap::new(),
+                rapier_joints: HashMap::new(),
             }
         }
     }
@@ -1339,7 +1524,40 @@ mod rapier_backend {
                     contact_points: Vec::new(),
                 });
             }
-            while self.contact_force_events.try_recv().is_ok() {}
+            while let Ok(event) = self.contact_force_events.try_recv() {
+                let Some(body_a) = self.collider_owner(event.collider1) else {
+                    continue;
+                };
+                let Some(body_b) = self.collider_owner(event.collider2) else {
+                    continue;
+                };
+                let collider_a = self
+                    .rapier_colliders
+                    .get(&event.collider1)
+                    .copied()
+                    .unwrap_or(ColliderHandle(0));
+                let collider_b = self
+                    .rapier_colliders
+                    .get(&event.collider2)
+                    .copied()
+                    .unwrap_or(ColliderHandle(0));
+                let normal = if event.total_force_magnitude > f32::EPSILON {
+                    vec3(event.total_force).normalized()
+                } else {
+                    Vec3::ZERO
+                };
+                self.pending_contacts.push(ContactEvent {
+                    body_a,
+                    body_b,
+                    collider_a,
+                    collider_b,
+                    point: Vec3::ZERO,
+                    normal,
+                    entered: true,
+                    is_trigger: false,
+                    contact_points: Vec::new(),
+                });
+            }
         }
     }
 
@@ -1373,7 +1591,8 @@ mod rapier_backend {
             .position(isometry(desc.transform))
             .linear_damping(desc.linear_damping)
             .angular_damping(desc.angular_damping)
-            .gravity_scale(desc.gravity_scale);
+            .gravity_scale(desc.gravity_scale)
+            .ccd_enabled(desc.ccd == CcdMode::Enabled);
             let rapier = self.bodies.insert(builder.build());
             let handle = BodyHandle(self.next_body);
             self.next_body = self.next_body.saturating_add(1).max(1);
@@ -1408,13 +1627,19 @@ mod rapier_backend {
             desc: &ColliderDesc,
         ) -> EngineResult<ColliderHandle> {
             let rapier_body = self.rapier_body(body)?;
+            let mut active_events = rp::ActiveEvents::COLLISION_EVENTS;
+            if desc.active_contact_events {
+                active_events |= rp::ActiveEvents::CONTACT_FORCE_EVENTS;
+            }
             let builder = collider_builder(desc)
                 .friction(desc.friction)
                 .restitution(desc.restitution)
+                .friction_combine_rule(combine_mode(desc.friction_combine))
+                .restitution_combine_rule(combine_mode(desc.restitution_combine))
                 .sensor(desc.is_trigger)
                 .collision_groups(interaction_groups(desc.layer, desc.mask))
                 .solver_groups(interaction_groups(desc.layer, desc.mask))
-                .active_events(rp::ActiveEvents::COLLISION_EVENTS);
+                .active_events(active_events);
             let rapier =
                 self.colliders
                     .insert_with_parent(builder.build(), rapier_body, &mut self.bodies);
@@ -1629,6 +1854,236 @@ mod rapier_backend {
                 collisions,
             })
         }
+
+        fn apply_force(&mut self, body: BodyHandle, force: Vec3) -> EngineResult<()> {
+            let rapier = self.rapier_body(body)?;
+            let body = self
+                .bodies
+                .get_mut(rapier)
+                .ok_or_else(|| EngineError::invalid_handle("physics body does not exist"))?;
+            body.add_force(vector3(force), true);
+            body.wake_up(true);
+            Ok(())
+        }
+
+        fn apply_torque(&mut self, body: BodyHandle, torque: Vec3) -> EngineResult<()> {
+            let rapier = self.rapier_body(body)?;
+            let body = self
+                .bodies
+                .get_mut(rapier)
+                .ok_or_else(|| EngineError::invalid_handle("physics body does not exist"))?;
+            body.add_torque(vector3(torque), true);
+            body.wake_up(true);
+            Ok(())
+        }
+
+        fn clear_forces(&mut self, body: BodyHandle) -> EngineResult<()> {
+            let rapier = self.rapier_body(body)?;
+            let body = self
+                .bodies
+                .get_mut(rapier)
+                .ok_or_else(|| EngineError::invalid_handle("physics body does not exist"))?;
+            body.reset_forces(true);
+            body.reset_torques(true);
+            Ok(())
+        }
+
+        fn set_body_sleep(&mut self, body: BodyHandle, sleeping: bool) -> EngineResult<()> {
+            let rapier = self.rapier_body(body)?;
+            let body = self
+                .bodies
+                .get_mut(rapier)
+                .ok_or_else(|| EngineError::invalid_handle("physics body does not exist"))?;
+            if sleeping {
+                body.sleep();
+            } else {
+                body.wake_up(true);
+            }
+            Ok(())
+        }
+
+        fn is_body_sleeping(&self, body: BodyHandle) -> EngineResult<bool> {
+            let rapier = self.rapier_body(body)?;
+            let body = self
+                .bodies
+                .get(rapier)
+                .ok_or_else(|| EngineError::invalid_handle("physics body does not exist"))?;
+            Ok(body.is_sleeping())
+        }
+
+        fn create_joint(&mut self, desc: &JointDesc) -> EngineResult<JointHandle> {
+            let rapier_a = self.rapier_body(desc.body_a)?;
+            let rapier_b = self.rapier_body(desc.body_b)?;
+            let local_a = isometry(Transform {
+                translation: match &desc.joint_type {
+                    JointType::Pin { anchor_a, .. }
+                    | JointType::Hinge { anchor_a, .. }
+                    | JointType::Slider { anchor_a, .. }
+                    | JointType::SpringArm { anchor_a, .. }
+                    | JointType::ConeTwist { anchor_a, .. }
+                    | JointType::Generic6DOF { anchor_a, .. } => *anchor_a,
+                },
+                ..Transform::IDENTITY
+            });
+            let local_b = isometry(Transform {
+                translation: match &desc.joint_type {
+                    JointType::Pin { anchor_b, .. }
+                    | JointType::Hinge { anchor_b, .. }
+                    | JointType::Slider { anchor_b, .. }
+                    | JointType::SpringArm { anchor_b, .. }
+                    | JointType::ConeTwist { anchor_b, .. }
+                    | JointType::Generic6DOF { anchor_b, .. } => *anchor_b,
+                },
+                ..Transform::IDENTITY
+            });
+            let mut joint = match &desc.joint_type {
+                JointType::Pin { .. } => {
+                    let j = rp::FixedJoint::new();
+                    rp::GenericJoint::from(j)
+                }
+                JointType::Hinge {
+                    axis_a, limits, motor, ..
+                } => {
+                    let axis = na::Unit::new_normalize(vector3(*axis_a));
+                    let mut j = rp::RevoluteJoint::new(axis);
+                    j.set_limits([limits.min, limits.max]);
+                    if let Some(m) = motor {
+                        if m.enabled {
+                            j.set_motor_velocity(m.target_velocity, m.max_force);
+                        }
+                    }
+                    rp::GenericJoint::from(j)
+                }
+                JointType::Slider {
+                    axis_a, limits, motor, ..
+                } => {
+                    let axis = na::Unit::new_normalize(vector3(*axis_a));
+                    let mut j = rp::PrismaticJoint::new(axis);
+                    j.set_limits([limits.min, limits.max]);
+                    if let Some(m) = motor {
+                        if m.enabled {
+                            j.set_motor_velocity(m.target_velocity, m.max_force);
+                        }
+                    }
+                    rp::GenericJoint::from(j)
+                }
+                JointType::SpringArm { .. } => {
+                    let j = rp::FixedJoint::new();
+                    rp::GenericJoint::from(j)
+                }
+                JointType::ConeTwist { .. } => {
+                    let j = rp::SphericalJoint::new();
+                    rp::GenericJoint::from(j)
+                }
+                JointType::Generic6DOF {
+                    linear_limits,
+                    angular_limits,
+                    motors,
+                    ..
+                } => {
+                    let mut j = rp::GenericJoint::default();
+                    let axes = [
+                        rp::JointAxis::LinX,
+                        rp::JointAxis::LinY,
+                        rp::JointAxis::LinZ,
+                        rp::JointAxis::AngX,
+                        rp::JointAxis::AngY,
+                        rp::JointAxis::AngZ,
+                    ];
+                    for (i, axis) in axes.iter().enumerate() {
+                        let limit = if i < 3 {
+                            &linear_limits[i]
+                        } else {
+                            &angular_limits[i - 3]
+                        };
+                        j.set_limits(*axis, [limit.min, limit.max]);
+                        if let Some(m) = motors.get(i).and_then(|m| m.as_ref()) {
+                            if m.enabled {
+                                j.set_motor(*axis, m.target_velocity, 0.0, m.max_force, 0.0);
+                            }
+                        }
+                    }
+                    j
+                }
+            };
+            joint.local_frame1 = local_a;
+            joint.local_frame2 = local_b;
+            let rapier =
+                self.impulse_joints
+                    .insert(rapier_a, rapier_b, joint, true);
+            let handle = JointHandle(self.next_joint);
+            self.next_joint = self.next_joint.saturating_add(1).max(1);
+            self.joint_handles.insert(handle, rapier);
+            self.rapier_joints.insert(rapier, handle);
+            Ok(handle)
+        }
+
+        fn destroy_joint(&mut self, joint: JointHandle) -> EngineResult<()> {
+            let rapier = self
+                .joint_handles
+                .remove(&joint)
+                .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
+            self.impulse_joints.remove(rapier, true);
+            self.rapier_joints.remove(&rapier);
+            Ok(())
+        }
+
+        fn joint_state(&self, joint: JointHandle) -> EngineResult<JointState> {
+            let rapier = self
+                .joint_handles
+                .get(&joint)
+                .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
+            let _ = self
+                .impulse_joints
+                .get(*rapier)
+                .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
+            Err(EngineError::UnsupportedCapability {
+                capability: "joint_state query",
+            })
+        }
+
+        fn set_joint_motor(&mut self, joint: JointHandle, motor: JointMotor) -> EngineResult<()> {
+            let rapier = self
+                .joint_handles
+                .get(&joint)
+                .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
+            let j = self
+                .impulse_joints
+                .get_mut(*rapier)
+                .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
+            if motor.enabled {
+                j.data.set_motor(
+                    rp::JointAxis::AngX,
+                    motor.target_velocity,
+                    0.0,
+                    motor.max_force,
+                    0.0,
+                );
+            }
+            Ok(())
+        }
+
+        fn set_joint_limits(
+            &mut self,
+            joint: JointHandle,
+            limits: JointLimits,
+        ) -> EngineResult<()> {
+            let rapier = self
+                .joint_handles
+                .get(&joint)
+                .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
+            let j = self
+                .impulse_joints
+                .get_mut(*rapier)
+                .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
+            j.data
+                .set_limits(rp::JointAxis::AngX, [limits.min, limits.max]);
+            Ok(())
+        }
+
+        fn joint_forces(&self, _joint: JointHandle) -> EngineResult<(f32, f32)> {
+            Ok((0.0, 0.0))
+        }
     }
 
     fn collider_builder(desc: &ColliderDesc) -> rp::ColliderBuilder {
@@ -1648,6 +2103,17 @@ mod rapier_backend {
                     .collect::<Vec<_>>();
                 rp::ColliderBuilder::convex_hull(&points)
                     .unwrap_or_else(|| rp::ColliderBuilder::ball(0.5))
+            }
+            ColliderShape::TriMesh { vertices, indices } => {
+                let points: Vec<Point3<rp::Real>> = vertices
+                    .chunks_exact(3)
+                    .map(|chunk| Point3::new(chunk[0], chunk[1], chunk[2]))
+                    .collect();
+                let triangles: Vec<[u32; 3]> = indices
+                    .chunks_exact(3)
+                    .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+                    .collect();
+                rp::ColliderBuilder::trimesh(points, triangles)
             }
         }
     }
@@ -1725,6 +2191,15 @@ mod rapier_backend {
 
     fn vec3(value: Vector3<rp::Real>) -> Vec3 {
         Vec3::new(value.x, value.y, value.z)
+    }
+
+    fn combine_mode(mode: CombineMode) -> rp::CoefficientCombineRule {
+        match mode {
+            CombineMode::Average => rp::CoefficientCombineRule::Average,
+            CombineMode::Min => rp::CoefficientCombineRule::Min,
+            CombineMode::Multiply => rp::CoefficientCombineRule::Multiply,
+            CombineMode::Max => rp::CoefficientCombineRule::Max,
+        }
     }
 }
 

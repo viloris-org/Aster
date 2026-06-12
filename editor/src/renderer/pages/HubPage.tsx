@@ -544,6 +544,7 @@ interface ProviderMeta {
   display_name: string;
   requires_api_key: boolean;
   requires_endpoint: boolean;
+  endpoint_configurable: boolean;
   default_endpoint: string | null;
   models: ModelInfo[];
 }
@@ -675,9 +676,8 @@ function CopilotSettingsSection() {
   }, []);
 
   const showApiKey = currentMeta?.requires_api_key ?? (settings.provider !== 'ollama' && settings.provider !== 'stub');
-  // MiMo and GLM have auto-determined endpoints based on region/billing config
-  const endpointAutoDetermined = settings.provider === 'mimo' || settings.provider === 'glm';
-  const showEndpoint = settings.provider !== 'stub' && !endpointAutoDetermined;
+  const showEndpoint = currentMeta?.endpoint_configurable
+    ?? (settings.provider === 'ollama' || settings.provider === 'custom');
   const endpointRequired = settings.provider === 'custom';
 
   if (!loaded) return null;
@@ -692,11 +692,10 @@ function CopilotSettingsSection() {
           <div className="settings-label">{t('settings_provider')}</div>
           <div className="settings-desc">{t('settings_provider_desc')}</div>
         </div>
-        <div className="settings-control">
+        <div className="settings-control settings-control-compact">
           <select
             value={settings.provider}
             onChange={(e) => handleProviderChange(e.target.value as CopilotSettingsData['provider'])}
-            style={{ minWidth: 200 }}
           >
             {providerOptions.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -721,7 +720,6 @@ function CopilotSettingsSection() {
                 setSettings(s => ({ ...s, api_key: e.target.value || null }));
                 setKeyChanged(true);
               }}
-              style={{ minWidth: 200 }}
             />
           </div>
         </div>
@@ -764,7 +762,6 @@ function CopilotSettingsSection() {
               value={settings.api_endpoint ?? ''}
               placeholder={currentMeta?.default_endpoint ?? 'https://api.example.com/v1'}
               onChange={(e) => setSettings(s => ({ ...s, api_endpoint: e.target.value || null }))}
-              style={{ minWidth: 200 }}
             />
           </div>
         </div>
@@ -778,7 +775,7 @@ function CopilotSettingsSection() {
               <div className="settings-label">{t('settings_billing_mode')}</div>
               <div className="settings-desc">{t('settings_mimo_billing_desc')}</div>
             </div>
-            <div className="settings-control">
+            <div className="settings-control settings-control-compact">
               <select
                 value={settings.mimo_config?.billing ?? 'subscription'}
                 onChange={(e) => setSettings(s => ({
@@ -789,37 +786,37 @@ function CopilotSettingsSection() {
                     region: s.mimo_config?.region ?? 'china',
                   }
                 }))}
-                style={{ minWidth: 150 }}
               >
                 <option value="subscription">{t('settings_token_plan')}</option>
                 <option value="api">{t('settings_pay_as_you_go')}</option>
               </select>
             </div>
           </div>
-          <div className="settings-row">
-            <div>
-              <div className="settings-label">{t('settings_region')}</div>
-              <div className="settings-desc">{t('settings_region_desc')}</div>
+          {(settings.mimo_config?.billing ?? 'subscription') === 'subscription' && (
+            <div className="settings-row">
+              <div>
+                <div className="settings-label">{t('settings_region')}</div>
+                <div className="settings-desc">{t('settings_region_desc')}</div>
+              </div>
+              <div className="settings-control settings-control-compact">
+                <select
+                  value={settings.mimo_config?.region ?? 'china'}
+                  onChange={(e) => setSettings(s => ({
+                    ...s,
+                    mimo_config: {
+                      ...s.mimo_config,
+                      billing: s.mimo_config?.billing ?? 'subscription',
+                      region: e.target.value as 'china' | 'singapore' | 'europe',
+                    }
+                  }))}
+                >
+                  <option value="china">{t('settings_region_china')}</option>
+                  <option value="singapore">{t('settings_region_singapore')}</option>
+                  <option value="europe">{t('settings_region_europe')}</option>
+                </select>
+              </div>
             </div>
-            <div className="settings-control">
-              <select
-                value={settings.mimo_config?.region ?? 'china'}
-                onChange={(e) => setSettings(s => ({
-                  ...s,
-                  mimo_config: {
-                    ...s.mimo_config,
-                    billing: s.mimo_config?.billing ?? 'subscription',
-                    region: e.target.value as 'china' | 'singapore' | 'europe',
-                  }
-                }))}
-                style={{ minWidth: 150 }}
-              >
-                <option value="china">{t('settings_region_china')}</option>
-                <option value="singapore">{t('settings_region_singapore')}</option>
-                <option value="europe">{t('settings_region_europe')}</option>
-              </select>
-            </div>
-          </div>
+          )}
         </>
       )}
 
@@ -831,7 +828,7 @@ function CopilotSettingsSection() {
               <div className="settings-label">{t('settings_billing_mode')}</div>
               <div className="settings-desc">{t('settings_glm_billing_desc')}</div>
             </div>
-            <div className="settings-control">
+            <div className="settings-control settings-control-compact">
               <select
                 value={settings.glm_config?.billing ?? 'subscription'}
                 onChange={(e) => setSettings(s => ({
@@ -842,7 +839,6 @@ function CopilotSettingsSection() {
                     region: s.glm_config?.region ?? 'bigmodel',
                   }
                 }))}
-                style={{ minWidth: 150 }}
               >
                 <option value="subscription">{t('settings_subscription')}</option>
                 <option value="api">{t('settings_pay_as_you_go')}</option>
@@ -854,7 +850,7 @@ function CopilotSettingsSection() {
               <div className="settings-label">{t('settings_region')}</div>
               <div className="settings-desc">{t('settings_glm_region_desc')}</div>
             </div>
-            <div className="settings-control">
+            <div className="settings-control settings-control-compact">
               <select
                 value={settings.glm_config?.region ?? 'bigmodel'}
                 onChange={(e) => setSettings(s => ({
@@ -865,7 +861,6 @@ function CopilotSettingsSection() {
                     region: e.target.value as 'bigmodel' | 'zai',
                   }
                 }))}
-                style={{ minWidth: 150 }}
               >
                 <option value="bigmodel">{t('settings_bigmodel_china')}</option>
                 <option value="zai">{t('settings_zai_international')}</option>
@@ -882,21 +877,20 @@ function CopilotSettingsSection() {
             <div className="settings-label">{t('settings_max_tokens')}</div>
             <div className="settings-desc">{t('settings_max_tokens_desc')}</div>
           </div>
-          <div className="settings-control">
+          <div className="settings-control settings-control-compact">
             <input
               type="number"
               value={settings.max_tokens}
               min={256}
               max={128000}
               onChange={(e) => setSettings(s => ({ ...s, max_tokens: parseInt(e.target.value) || 4096 }))}
-              style={{ width: 100 }}
             />
           </div>
         </div>
       )}
 
       {/* Save button */}
-      <div className="settings-row">
+      <div className="settings-row settings-actions">
         <div />
         <div className="settings-control">
           <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
@@ -927,74 +921,72 @@ function SettingsPage({
       <div className="hub-page-header">
         <h2>{t('hub_settings_title')}</h2>
       </div>
-      <div className="hub-scroll" style={{ maxWidth: 520 }}>
-        {/* Theme */}
-        <div className="settings-section">
-          <div className="settings-section-title">{t('settings_appearance')}</div>
-          <div className="settings-row">
-            <div>
-              <div className="settings-label">{t('settings_theme')}</div>
-              <div className="settings-desc">{t('settings_theme_desc')}</div>
-            </div>
-            <div className="settings-control">
-              <div className="theme-selector">
-                {[
-                  { id: 'dark', label: t('settings_theme_dark') },
-                  { id: 'light', label: t('settings_theme_light') },
-                  { id: 'system', label: t('settings_theme_system') },
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    className={`theme-option ${theme === opt.id ? 'active' : ''}`}
-                    onClick={() => onSetTheme(opt.id)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+      <div className="hub-scroll settings-scroll">
+        <div className="settings-content">
+          {/* Theme */}
+          <div className="settings-section">
+            <div className="settings-section-title">{t('settings_appearance')}</div>
+            <div className="settings-row">
+              <div>
+                <div className="settings-label">{t('settings_theme')}</div>
+                <div className="settings-desc">{t('settings_theme_desc')}</div>
+              </div>
+              <div className="settings-control settings-control-compact">
+                <div className="theme-selector">
+                  {[
+                    { id: 'dark', label: t('settings_theme_dark') },
+                    { id: 'light', label: t('settings_theme_light') },
+                    { id: 'system', label: t('settings_theme_system') },
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      className={`theme-option ${theme === opt.id ? 'active' : ''}`}
+                      onClick={() => onSetTheme(opt.id)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Language */}
-        <div className="settings-section">
-          <div className="settings-section-title">{t('settings_language')}</div>
-          <div className="settings-row">
-            <div>
-              <div className="settings-label">{t('settings_editor_language')}</div>
-              <div className="settings-desc">{t('settings_language_desc')}</div>
-            </div>
-            <div className="settings-control" style={{ display: 'flex', gap: 4 }}>
-              {[
-                { id: 'en', label: t('settings_language_en') },
-                { id: 'zh', label: t('settings_language_zh') },
-                { id: 'ja', label: t('settings_language_ja') },
-                { id: 'ko', label: t('settings_language_ko') },
-                { id: 'es', label: t('settings_language_es') },
-                { id: 'zh_hant', label: t('settings_language_zh_hant') },
-              ].map(opt => (
-                <button
-                  key={opt.id}
-                  className={`lang-btn ${locale === opt.id ? 'active' : ''}`}
-                  onClick={() => onSetLocale(opt.id)}
-                >
-                  {opt.label}
-                </button>
-              ))}
+          {/* Language */}
+          <div className="settings-section">
+            <div className="settings-section-title">{t('settings_language')}</div>
+            <div className="settings-row">
+              <div>
+                <div className="settings-label">{t('settings_editor_language')}</div>
+                <div className="settings-desc">{t('settings_language_desc')}</div>
+              </div>
+              <div className="settings-control settings-control-compact">
+                <select value={locale} onChange={(e) => onSetLocale(e.target.value)}>
+                  {[
+                    { id: 'en', label: t('settings_language_en') },
+                    { id: 'zh', label: t('settings_language_zh') },
+                    { id: 'ja', label: t('settings_language_ja') },
+                    { id: 'ko', label: t('settings_language_ko') },
+                    { id: 'es', label: t('settings_language_es') },
+                    { id: 'zh_hant', label: t('settings_language_zh_hant') },
+                  ].map(opt => (
+                    <option key={opt.id} value={opt.id}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* AI Provider */}
-        <CopilotSettingsSection />
+          {/* AI Provider */}
+          <CopilotSettingsSection />
 
-        {/* About */}
-        <div className="settings-section">
-          <div className="settings-section-title">{t('settings_about')}</div>
-          <div className="settings-row">
-            <div>
-              <div className="settings-label">{t('settings_about_name')}</div>
-              <div className="settings-desc">{t_fmt('settings_about_version', { version: '0.1.0' })}</div>
+          {/* About */}
+          <div className="settings-section">
+            <div className="settings-section-title">{t('settings_about')}</div>
+            <div className="settings-row">
+              <div>
+                <div className="settings-label">{t('settings_about_name')}</div>
+                <div className="settings-desc">{t_fmt('settings_about_version', { version: '0.1.0' })}</div>
+              </div>
             </div>
           </div>
         </div>

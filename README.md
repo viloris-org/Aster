@@ -50,7 +50,7 @@ bun tauri dev
 - **Asset pipeline** — drop glTF/PNG into the project panel. File watcher triggers
   import, hot reload pushes updates live.
 - **Pluggable rendering** — swap backends without touching engine code. Ships with
-  WGPU; Vulkan in progress.
+  WGPU.
 - **Headless runtime** — the same engine runs in servers, CI pipelines, or automated
   builds. No window required.
 - **Zero unsafe code** — every crate uses `#![forbid(unsafe_code)]`. Safe by
@@ -67,7 +67,6 @@ Aster/
 │   ├── engine-assets/       # Database, importers, hot reload
 │   ├── engine-render/       # Render graph, device trait
 │   ├── engine-render-wgpu/  # WGPU backend
-│   ├── engine-render-vulkan/# Vulkan backend (WIP)
 │   ├── engine-physics/      # Physics (rapier3d)
 │   ├── engine-audio/        # Audio pipeline
 │   ├── engine-core/         # IDs, errors, math, config

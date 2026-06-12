@@ -6,7 +6,6 @@ members = [
     "crates/engine-assets",
     "crates/engine-render",
     "crates/engine-render-wgpu",
-    "crates/engine-render-vulkan",
     "crates/engine-physics",
     "crates/engine-audio",
     "crates/engine-editor",
