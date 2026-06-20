@@ -94,10 +94,19 @@ impl fmt::Debug for ComponentStorage {
 }
 
 impl ComponentStorage {
-    /// Inserts a native component for an entity.
+    /// Inserts or replaces a native component for an entity.
     pub fn insert<C: Component>(&mut self, entity: Entity, component: C) {
         let type_id = std::any::TypeId::of::<C>();
         let component_list = self.entries.entry(entity).or_default();
+        if let Some(&index) = self.type_index.get(&(entity, type_id)) {
+            if let Some(entry) = component_list.get_mut(index) {
+                *entry = ComponentEntry {
+                    component: Box::new(component),
+                    started: false,
+                };
+                return;
+            }
+        }
         let index = component_list.len();
         component_list.push(ComponentEntry {
             component: Box::new(component),
@@ -191,7 +200,7 @@ impl World {
         self.allocator.is_live(entity.handle())
     }
 
-    /// Inserts a component for a live entity.
+    /// Inserts or replaces a component for a live entity.
     pub fn insert_component<C: Component>(
         &mut self,
         entity: Entity,
@@ -236,6 +245,10 @@ mod tests {
     }
 
     impl Component for Counter {
+        fn update(&mut self) {
+            self.updates += 1;
+        }
+
         fn as_any_mut(&mut self) -> &mut dyn Any {
             self
         }
@@ -250,5 +263,21 @@ mod tests {
         world.component_mut::<Counter>(entity).unwrap().updates += 1;
 
         assert_eq!(world.component_mut::<Counter>(entity).unwrap().updates, 1);
+    }
+
+    #[test]
+    fn replacing_native_component_keeps_lookup_and_lifecycle_single_valued() {
+        let mut world = World::default();
+        let entity = world.spawn().unwrap();
+        world
+            .insert_component(entity, Counter { updates: 7 })
+            .unwrap();
+        world
+            .insert_component(entity, Counter { updates: 11 })
+            .unwrap();
+
+        world.run_lifecycle(Lifecycle::Update);
+
+        assert_eq!(world.component_mut::<Counter>(entity).unwrap().updates, 12);
     }
 }
