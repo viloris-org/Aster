@@ -18,6 +18,25 @@ interface CommandPaletteProps {
   commands: CommandDef[];
 }
 
+const overlayClass = 'fixed inset-0 z-[10000] flex justify-center bg-black/50 pt-[15vh] backdrop-blur-[4px] animate-[fadeIn_100ms_ease]';
+const paletteClass = 'flex max-h-[420px] w-[560px] flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-surface)] shadow-[var(--shadow-lg)] animate-[slideUp_120ms_ease]';
+const searchRowClass = 'border-b border-[var(--border)] px-3 py-2.5';
+const searchInputClass = 'w-full rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]';
+const listClass = 'flex-1 overflow-y-auto py-1';
+const groupClass = 'mb-0.5';
+const categoryClass = 'px-3.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]';
+const itemLabelClass = 'flex-1';
+const shortcutClass = 'ml-4 font-[var(--font-mono)] text-[11px] text-[var(--text-muted)] group-hover:text-white/70 group-[.selected]:text-white/70';
+const emptyClass = 'p-6 text-center text-[13px] text-[var(--text-muted)]';
+
+function itemClass(selected: boolean, disabled?: boolean): string {
+  return [
+    'group flex w-full cursor-pointer items-center justify-between border-0 bg-transparent px-3.5 py-1.5 text-left font-[var(--font-sans)] text-[13px] text-[var(--text-primary)] hover:bg-[var(--accent)] hover:text-white',
+    selected ? 'selected bg-[var(--accent)] text-white' : '',
+    disabled ? 'pointer-events-none opacity-35' : '',
+  ].filter(Boolean).join(' ');
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function CommandPalette({ isOpen, onClose, commands }: CommandPaletteProps) {
@@ -52,7 +71,7 @@ export default function CommandPalette({ isOpen, onClose, commands }: CommandPal
   // Scroll selected item into view
   useEffect(() => {
     if (!listRef.current) return;
-    const items = listRef.current.querySelectorAll('.command-palette-item');
+    const items = listRef.current.querySelectorAll('[data-command-palette-item]');
     const selected = items[safeIndex] as HTMLElement | undefined;
     if (selected) {
       selected.scrollIntoView({ block: 'nearest' });
@@ -103,12 +122,12 @@ export default function CommandPalette({ isOpen, onClose, commands }: CommandPal
   let itemIndex = -1;
 
   return (
-    <div className="command-palette-overlay" onClick={onClose}>
-      <div className="command-palette" onClick={e => e.stopPropagation()}>
-        <div className="command-palette-search-row">
+    <div className={overlayClass} onClick={onClose}>
+      <div className={paletteClass} onClick={e => e.stopPropagation()}>
+        <div className={searchRowClass}>
           <input
             ref={inputRef}
-            className="command-palette-search"
+            className={searchInputClass}
             type="text"
             placeholder={t('cmd_search_placeholder')}
             value={query}
@@ -119,24 +138,25 @@ export default function CommandPalette({ isOpen, onClose, commands }: CommandPal
             onKeyDown={handleKeyDown}
           />
         </div>
-        <div ref={listRef} className="command-palette-list">
+        <div ref={listRef} className={listClass}>
           {Object.entries(grouped).map(([category, items]) => (
-            <div key={category} className="command-palette-group">
-              <div className="command-palette-category">{category}</div>
+            <div key={category} className={groupClass}>
+              <div className={categoryClass}>{category}</div>
               {items.map(cmd => {
                 itemIndex++;
                 const idx = itemIndex;
                 return (
                   <button
                     key={cmd.id}
-                    className={`command-palette-item ${idx === safeIndex ? 'selected' : ''} ${cmd.disabled ? 'disabled' : ''}`}
+                    className={itemClass(idx === safeIndex, cmd.disabled)}
+                    data-command-palette-item
                     disabled={cmd.disabled}
                     onMouseEnter={() => setSelectedIndex(idx)}
                     onClick={() => handleItemClick(cmd)}
                   >
-                    <span className="command-palette-item-label">{cmd.label}</span>
+                    <span className={itemLabelClass}>{cmd.label}</span>
                     {cmd.shortcut && (
-                      <span className="command-palette-shortcut">{cmd.shortcut}</span>
+                      <span className={shortcutClass}>{cmd.shortcut}</span>
                     )}
                   </button>
                 );
@@ -144,7 +164,7 @@ export default function CommandPalette({ isOpen, onClose, commands }: CommandPal
             </div>
           ))}
           {filtered.length === 0 && (
-            <p className="command-palette-empty">{t('cmd_no_results')}</p>
+            <p className={emptyClass}>{t('cmd_no_results')}</p>
           )}
         </div>
       </div>

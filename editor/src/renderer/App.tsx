@@ -5,6 +5,7 @@ import QuestPage from './pages/QuestPage';
 import { rpc } from './api';
 import { promoteQuest } from './quest';
 import { I18nProvider, useTranslation } from './i18n';
+import { buttonClass } from './uiClasses';
 
 interface DesktopIntegration {
   desktop_environment: string;
@@ -45,8 +46,8 @@ export interface QuestEditorArtifact {
 
 function AppFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="app-frame">
-      <div className="app-frame-content">{children}</div>
+    <div className="flex h-full min-h-0 w-full flex-col bg-[var(--bg-base)]">
+      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
     </div>
   );
 }
@@ -54,8 +55,8 @@ function AppFrame({ children }: { children: React.ReactNode }) {
 function LoadingScreen() {
   const { t } = useTranslation();
   return (
-    <div className="loading-screen">
-      <div className="spinner" />
+    <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--text-secondary)]">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border-light)] border-t-[var(--accent)]" />
       <span>{t('loading')}</span>
     </div>
   );
@@ -63,11 +64,11 @@ function LoadingScreen() {
 
 function StartupErrorScreen({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <div className="startup-error-screen">
-      <div className="startup-error-panel">
-        <h1>Aster Editor could not start</h1>
-        <p>{message}</p>
-        <button type="button" onClick={onRetry}>Retry</button>
+    <div className="grid h-full place-items-center p-6 text-[var(--text-secondary)]">
+      <div className="flex w-[min(420px,100%)] flex-col gap-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-surface)] p-5">
+        <h1 className="text-base font-semibold text-[var(--text-primary)]">Aster Editor could not start</h1>
+        <p className="break-anywhere leading-[1.5]">{message}</p>
+        <button type="button" className={buttonClass('primary')} onClick={onRetry}>Retry</button>
       </div>
     </div>
   );

@@ -84,6 +84,118 @@ const ACTIVE_STATUSES: QuestStatus[] = [
   'blocked',
 ];
 
+function cn(...classes: Array<string | false | null | undefined>): string {
+  return classes.filter(Boolean).join(' ');
+}
+
+const buttonBase = 'inline-flex h-[30px] cursor-pointer items-center gap-[6px] rounded-[5px] border border-[#d9d9d6] bg-white px-[10px] text-[11px] font-semibold text-[#303236] hover:border-[#b8c6e6] hover:bg-[#f8fbff] hover:text-[#1d4ed8] disabled:cursor-default disabled:opacity-40';
+const sectionHeadingButton = buttonBase;
+const primaryButton = 'border-[#2563eb] bg-[#2563eb] text-white hover:border-[#2563eb] hover:bg-[#2563eb] hover:text-white';
+const mutedText = 'm-0 text-[12px] text-[#9ca3af]';
+const panelSection = '[&_section]:mb-5 [&_section]:border-b [&_section]:border-[#eeeeeb] [&_section]:pb-4 [&_h2]:mb-[10px] [&_h2]:mt-0 [&_h2]:flex [&_h2]:items-center [&_h2]:justify-between [&_h2]:gap-[10px] [&_h2]:text-[12px] [&_h2]:font-medium [&_h2]:text-[#5f646d] [&_h2_b]:text-[11px] [&_h2_b]:font-medium [&_h2_b]:text-[#9ca3af]';
+const artifactRowClass = 'box-border grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)] items-center gap-[9px] border-0 bg-transparent py-2 text-left text-[#4b5563] disabled:cursor-default disabled:opacity-50 [&_small]:mt-[3px] [&_small]:block [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[11px] [&_small]:text-[#8b9099] [&_span]:min-w-0 [&_strong]:block [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[12px] [&_strong]:font-medium [&_strong]:text-[#303236]';
+const fileRowClass = 'box-border grid min-h-[34px] w-full grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-[9px] border-0 bg-transparent py-[7px] text-left text-[#4b5563] hover:bg-[#f7f7f5] [&_small]:mt-[3px] [&_small]:block [&_small]:text-[10px] [&_small]:text-[#8b9099] [&_span]:min-w-0 [&_strong]:block [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[12px] [&_strong]:font-medium [&_strong]:text-[#4b5563] [&>b]:text-[11px] [&>b]:font-mono [&>b]:text-[#059669] [&>b_i]:not-italic [&>b_i]:text-[#dc2626]';
+const validationRowClass = cn(fileRowClass, 'cursor-pointer font-[inherit] [&>b]:text-[8px] [&>b]:uppercase [&_svg]:text-[#4ade80]');
+const selectableFileRowClass = cn(fileRowClass, 'cursor-pointer grid-cols-[18px_16px_minmax(0,1fr)_auto] [&_input]:m-0 [&_input]:h-[13px] [&_input]:w-[13px]');
+const transactionRowClass = cn(selectableFileRowClass, 'min-h-[46px] py-[9px] [&_small]:whitespace-normal [&_strong]:text-[#111827]');
+const documentPanelClass = 'flex min-h-0 flex-col p-[14px] [&_textarea]:box-border [&_textarea]:min-h-0 [&_textarea]:w-full [&_textarea]:flex-1 [&_textarea]:resize-none [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-[#e5e5e2] [&_textarea]:bg-white [&_textarea]:px-[26px] [&_textarea]:py-[22px] [&_textarea]:font-mono [&_textarea]:text-[11px] [&_textarea]:leading-[1.75] [&_textarea]:text-[#202124] [&_textarea]:outline-none [&_textarea:disabled]:text-[#94a3b8] [&_textarea:disabled]:opacity-75 [&_textarea:focus]:border-[#3b5d91]';
+const issueClass = 'flex items-start gap-2 rounded-md border border-[#713f12] bg-[rgba(120,53,15,0.12)] px-3 py-[11px] text-[9px] leading-[1.5] text-[#fcd34d] [&>button:last-child]:ml-auto [&>button:last-child]:cursor-pointer [&>button:last-child]:rounded [&>button:last-child]:border [&>button:last-child]:border-[#854d0e] [&>button:last-child]:bg-transparent [&>button:last-child]:px-2 [&>button:last-child]:py-[5px] [&>button:last-child]:text-[8px] [&>button:last-child]:font-bold [&>button:last-child]:text-[#fde68a] [&_svg]:shrink-0';
+const clearIssueClass = 'border-[#14532d] bg-[rgba(20,83,45,0.14)] text-[#86efac]';
+const issueOpenClass = 'flex min-w-0 flex-1 cursor-pointer items-start gap-2 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit hover:underline hover:underline-offset-2';
+const reviewActionButtonClass = 'h-[30px] cursor-pointer rounded-[5px] border border-[#365986] bg-[rgba(37,99,235,0.12)] px-[10px] text-[9px] font-bold text-[#bfdbfe] disabled:cursor-default disabled:opacity-40';
+const decisionButtonClass = 'inline-flex h-8 cursor-pointer items-center gap-[6px] rounded-[5px] border border-[var(--border-light)] bg-[var(--bg-surface)] px-[11px] text-[9px] font-bold text-[var(--text-secondary)] disabled:cursor-default disabled:opacity-40';
+
+const questClasses = {
+  shell: 'grid h-screen w-screen grid-rows-[48px_minmax(0,1fr)_24px] overflow-hidden bg-[#fbfbfa] font-[Inter,var(--font-sans)] text-[#202124]',
+  globalHeader: 'grid grid-cols-[220px_minmax(0,1fr)_auto] items-center border-b border-[#e6e6e3] bg-[rgba(255,255,255,0.94)] text-[#242629] max-[900px]:grid-cols-[150px_minmax(0,1fr)_auto] [&_nav]:flex [&_nav]:h-full [&_nav]:items-stretch [&_nav]:gap-0.5',
+  brand: 'flex items-baseline gap-2 px-4 [&_span]:text-[13px] [&_span]:font-extrabold [&_span]:text-[#2563eb] [&_strong]:text-[11px] [&_strong]:text-[#4b5563]',
+  topNavButton: 'cursor-pointer border-0 border-b-2 border-transparent bg-transparent px-[14px] text-[11px] font-semibold text-[#4b5563] disabled:cursor-default disabled:opacity-40 max-[900px]:px-[7px]',
+  topNavButtonActive: 'border-b-[#2563eb] text-[#111827]',
+  globalActions: 'flex gap-[6px] pr-[10px]',
+  layout: 'grid min-h-0 grid-cols-[280px_minmax(0,1fr)] bg-[#fbfbfa] max-[900px]:grid-cols-[220px_minmax(0,1fr)]',
+  sidebar: 'grid grid-rows-[auto_minmax(0,auto)_minmax(0,auto)_1fr] overflow-y-auto border-r border-[#e5e5e2] bg-[#f7f7f5] text-[#222326]',
+  sidebarHeading: 'flex min-h-[88px] items-center justify-between px-3 py-[14px]',
+  newButton: 'grid h-[38px] w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-[#dededb] bg-white px-[11px] text-left text-[13px] text-[#191b1f] shadow-[0_1px_2px_rgba(15,23,42,0.04)] disabled:cursor-default disabled:opacity-40 [&_kbd]:font-mono [&_kbd]:text-[10px] [&_kbd]:text-[#8a8f98] [&_svg]:text-[#2563eb]',
+  sidebarFooter: 'self-end grid gap-1 p-3 [&_button]:h-8 [&_button]:rounded-[7px] [&_button]:border-0 [&_button]:bg-transparent [&_button]:text-left [&_button]:text-[12px] [&_button]:text-[#4b5563]',
+  home: 'flex min-h-0 flex-col items-center justify-center bg-[#fbfbfa] px-8 pb-[90px] pt-10 text-[#202124]',
+  orb: 'mb-[26px] grid h-[60px] w-[60px] place-items-center rounded-full border border-[#eeeeeb] bg-white text-[#d6d8dd] shadow-[0_8px_30px_rgba(15,23,42,0.05)]',
+  startLine: 'mb-7 flex flex-wrap items-center justify-center gap-[9px] text-[12px] text-[#6b7280] [&_b]:font-medium [&_b]:text-[#34373d] [&_span]:font-medium',
+  promptBox: 'w-[min(800px,calc(100vw-360px))] min-w-[min(800px,calc(100vw-360px))] rounded-lg border border-[#dededb] bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)] max-[900px]:w-[min(680px,calc(100vw-280px))] max-[900px]:min-w-0 [&_footer]:flex [&_footer]:h-[42px] [&_footer]:items-center [&_footer]:justify-between [&_footer]:pb-2 [&_footer]:pl-[13px] [&_footer]:pr-[9px] [&_footer_div]:flex [&_footer_div]:gap-4 [&_footer_div]:text-[12px] [&_footer_div]:text-[#5f646d] [&_textarea]:box-border [&_textarea]:h-[94px] [&_textarea]:w-full [&_textarea]:resize-none [&_textarea]:border-0 [&_textarea]:bg-transparent [&_textarea]:px-[14px] [&_textarea]:pb-2 [&_textarea]:pt-[14px] [&_textarea]:font-[Inter,var(--font-sans)] [&_textarea]:text-[14px] [&_textarea]:leading-[1.5] [&_textarea]:text-[#202124] [&_textarea]:outline-none [&_textarea::placeholder]:text-[#a3a7ae]',
+  promptSubmit: 'grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-[7px] border-0 bg-[#8c8f94] text-white hover:enabled:bg-[#2563eb] disabled:cursor-default disabled:opacity-45',
+  introCard: 'mt-16 grid w-[min(640px,calc(100vw-440px))] grid-cols-[96px_minmax(0,1fr)] gap-[18px] rounded-lg border border-dashed border-[#e3e5e8] bg-white p-3 text-[#4b5563] max-[900px]:w-[min(680px,calc(100vw-280px))] max-[900px]:grid-cols-1 max-[900px]:min-w-0 [&>svg]:h-[70px] [&>svg]:w-24 [&>svg]:rounded-md [&>svg]:bg-[#eef7f0] [&>svg]:p-4 [&>svg]:text-[#a8d8b5] [&_p]:m-0 [&_p]:text-[12px] [&_p]:leading-[1.5] [&_p]:text-[#8b9099] [&_strong]:mb-2 [&_strong]:mt-1 [&_strong]:block [&_strong]:text-[14px] [&_strong]:text-[#202124]',
+  workspace: 'grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-white',
+  header: 'flex min-h-[78px] items-center justify-between gap-[18px] border-b border-[#e6e6e3] bg-white px-[18px] py-[10px] max-[900px]:flex-col max-[900px]:items-start [&_h1]:mb-[3px] [&_h1]:mt-1 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h1]:text-[#202124] [&_p]:m-0 [&_p]:max-w-[820px] [&_p]:text-[11px] [&_p]:leading-[1.45] [&_p]:text-[#6b7280]',
+  projectLine: 'flex items-center gap-[5px] font-mono text-[10px] text-[#8b9099] [&_svg]:w-[9px]',
+  titleEdit: 'my-[7px] flex items-center gap-[6px] [&_button]:inline-flex [&_button]:h-[30px] [&_button]:cursor-pointer [&_button]:items-center [&_button]:gap-[5px] [&_button]:rounded-[5px] [&_button]:border [&_button]:border-[var(--border-light)] [&_button]:bg-[var(--bg-surface)] [&_button]:px-[9px] [&_button]:text-[9px] [&_button]:font-semibold [&_button]:text-[var(--text-secondary)] [&_button:disabled]:cursor-default [&_button:disabled]:opacity-40 [&_input]:h-[31px] [&_input]:w-[min(520px,50vw)] [&_input]:rounded-[5px] [&_input]:border [&_input]:border-[#35558a] [&_input]:bg-[#0d0e12] [&_input]:px-[10px] [&_input]:text-[15px] [&_input]:font-bold [&_input]:text-[#f1f5f9] [&_input]:outline-none',
+  headerActions: 'flex flex-wrap items-center justify-end gap-[6px] max-[900px]:justify-start',
+  cockpit: 'grid min-h-0 grid-cols-[minmax(420px,1fr)_minmax(380px,44%)] overflow-hidden bg-white max-[900px]:grid-cols-1 max-[900px]:grid-rows-[minmax(0,1fr)_minmax(360px,44vh)]',
+  runStream: 'grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_52px] border-r border-[#e6e6e3] bg-[#fbfbfa] max-[900px]:border-b max-[900px]:border-r-0',
+  streamPrompt: 'mx-[22px] mb-2 mt-4 rounded-[7px] border border-[#e5e5e2] bg-[#f1f1ef] px-3 py-[9px] text-[13px] text-[#202124]',
+  streamList: 'min-h-0 overflow-auto px-[22px] pb-[22px]',
+  streamEntry: 'grid grid-cols-[16px_minmax(0,1fr)] gap-[9px] my-[6px] [&>div]:min-w-0 [&>div]:rounded-[5px] [&>div]:border [&>div]:border-[#e3e3df] [&>div]:bg-white [&>div]:px-[10px] [&>div]:py-2 [&_details]:mt-[6px] [&_details]:text-[10px] [&_details]:text-[#6b7280] [&_header]:flex [&_header]:items-center [&_header]:justify-between [&_header]:gap-[10px] [&_pre]:mt-[7px] [&_pre]:max-h-[260px] [&_pre]:overflow-auto [&_pre]:rounded-[5px] [&_pre]:bg-[#f7f7f5] [&_pre]:p-[9px] [&_pre]:font-mono [&_pre]:text-[10px] [&_pre]:leading-[1.55] [&_pre]:text-[#4b5563] [&_small]:mt-1 [&_small]:block [&_small]:text-[11px] [&_small]:text-[#8b9099] [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[12px] [&_strong]:font-medium [&_strong]:text-[#202124] [&_summary]:cursor-pointer [&_time]:shrink-0 [&_time]:font-mono [&_time]:text-[10px] [&_time]:text-[#9ca3af]',
+  nextEntry: '[&>div]:border-[#d7d7d3] [&_time]:font-bold [&_time]:text-[#111827]',
+  liveEntry: '[&>div]:border-[#c7d7f4] [&>div]:bg-[#f8fbff] [&_time]:font-bold [&_time]:text-[#2563eb]',
+  timelineDot: 'relative mt-4 h-[9px] w-[9px] rounded-full border border-[#b8bec7] bg-white after:absolute after:left-1 after:top-[10px] after:h-[calc(100%+34px)] after:w-px after:bg-[#e0e0dc] after:content-[""]',
+  timelineDotLast: 'after:hidden',
+  timelineDotNext: 'border-[#111827]',
+  timelineDotLive: 'border-[#2563eb] shadow-[0_0_0_3px_rgba(37,99,235,0.12)]',
+  reviewChip: 'ml-6 mt-3 inline-flex w-max cursor-pointer items-center gap-[6px] rounded-md border border-[#dededb] bg-white px-[10px] py-[7px] text-[12px] text-[#059669] [&_span]:text-[#dc2626]',
+  steerBar: 'grid grid-cols-[118px_minmax(0,1fr)_34px] items-center gap-3 border-t border-[#e6e6e3] bg-white px-3 py-2 text-[11px] text-[#8b9099] [&_input]:min-w-0 [&_input]:border-0 [&_input]:bg-transparent [&_input]:text-[12px] [&_input]:text-[#8b9099] [&_input]:outline-none [&_select]:h-7 [&_select]:min-w-0 [&_select]:rounded-[5px] [&_select]:border [&_select]:border-[#e6e6e3] [&_select]:bg-transparent [&_select]:px-[6px] [&_select]:text-[11px] [&_select]:text-[#4b5563] [&_select]:outline-none',
+  sendButton: 'grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-[5px] border border-[#2563eb] bg-[#2563eb] text-white disabled:cursor-default disabled:opacity-45',
+  rightPanel: 'grid min-h-0 min-w-0 grid-rows-[37px_minmax(0,1fr)] bg-white',
+  panelTabs: 'flex min-w-0 border-b border-[#e6e6e3] bg-[#fbfbfa]',
+  panelTab: 'inline-flex cursor-pointer items-center gap-[6px] border-0 border-r border-[#e6e6e3] border-b-2 border-b-transparent bg-transparent px-[13px] text-[12px] text-[#5f646d]',
+  panelTabActive: 'border-b-[#111827] bg-white text-[#111827]',
+  overview: cn('min-h-0 overflow-auto p-4', panelSection),
+  sectionHeading: 'flex items-center justify-between gap-3 py-[15px] [&>div:first-child]:flex [&>div:first-child]:flex-col [&>div:first-child]:gap-1 [&>div:last-child]:flex [&>div:last-child]:gap-[7px] [&_span]:text-[8px] [&_span]:font-extrabold [&_span]:tracking-[0.12em] [&_span]:text-[#64748b] [&_strong]:text-[11px] [&_strong]:text-[var(--text-secondary)]',
+  artifactViewer: 'min-h-0 overflow-auto p-4 [&>div_span]:text-[11px] [&>div_span]:capitalize [&>div_span]:text-[#8b9099] [&_h2]:my-[6px] [&_h2]:text-[16px] [&_h2]:text-[#202124] [&_header]:mb-[18px] [&_header]:flex [&_header]:justify-between [&_header]:gap-2 [&_p]:m-0 [&_p]:font-mono [&_p]:text-[11px] [&_p]:text-[#6b7280] [&_pre]:mt-[7px] [&_pre]:max-h-[260px] [&_pre]:overflow-auto [&_pre]:rounded-[5px] [&_pre]:bg-[#f7f7f5] [&_pre]:p-[9px] [&_pre]:font-mono [&_pre]:text-[10px] [&_pre]:leading-[1.55] [&_pre]:text-[#4b5563]',
+  knowledge: cn('grid gap-[14px] overflow-auto p-[14px]', panelSection),
+  review: cn('min-h-0 overflow-auto p-4', panelSection),
+  reviewEmpty: 'flex h-full min-h-[360px] flex-col items-center justify-center gap-2 text-[var(--text-muted)]',
+  reviewSummary: 'mb-[18px] grid grid-cols-[72px_minmax(0,1fr)] gap-4 rounded-lg border border-[#e5e5e2] bg-[#fbfbfa] p-3 [&_div]:flex [&_div]:flex-col [&_div]:gap-[5px] [&_p]:m-0 [&_p]:text-[12px] [&_p]:leading-[1.6] [&_p]:text-[#4b5563] [&_span]:text-[8px] [&_span]:font-extrabold [&_span]:tracking-[0.12em] [&_span]:text-[#64748b] [&_strong]:text-[12px] [&_strong]:uppercase [&_strong]:text-[#059669]',
+  reviewMetrics: 'grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-2 [&_div]:min-h-[58px] [&_div]:rounded-md [&_div]:border [&_div]:border-[var(--border)] [&_div]:bg-[#131419] [&_div]:p-[10px] [&_span]:block [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[8px] [&_span]:uppercase [&_span]:text-[var(--text-muted)] [&_strong]:mt-[7px] [&_strong]:block [&_strong]:font-mono [&_strong]:text-[13px] [&_strong]:text-[#e5e7eb]',
+  metricNote: 'mb-0 mt-2 text-[9px] leading-[1.5] text-[var(--text-muted)]',
+  reviewActions: 'flex flex-wrap gap-2',
+  decisionRow: 'flex flex-wrap gap-2',
+  decisionHistory: 'mt-[10px] grid gap-[6px] [&>div]:flex [&>div]:items-center [&>div]:gap-2 [&_button]:h-7 [&_button]:cursor-pointer [&_button]:rounded-[5px] [&_button]:border [&_button]:border-[#dc2626] [&_button]:bg-white [&_button]:px-[9px] [&_button]:text-[10px] [&_button]:text-[#b91c1c] [&_small]:flex-1 [&_small]:rounded-[5px] [&_small]:border [&_small]:border-[var(--border-light)] [&_small]:bg-[var(--bg-surface)] [&_small]:px-2 [&_small]:py-[7px] [&_small]:text-[10px] [&_small]:text-[var(--text-muted)]',
+  footer: 'flex items-center justify-between border-t border-[#eeeeeb] bg-[#fbfbfa] px-[10px] font-mono text-[8px] text-[#8b9099]',
+  errorToast: 'fixed right-4 top-[58px] z-[80] grid w-[min(360px,calc(100vw-32px))] cursor-pointer grid-cols-[18px_minmax(0,1fr)_14px] items-center gap-[10px] rounded-lg border border-[#fecaca] bg-[#fff7f7] px-3 py-[11px] text-left text-[#991b1b] shadow-[0_16px_42px_rgba(15,23,42,0.16)] [&_small]:block [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[10px] [&_small]:text-[#7f1d1d] [&_span]:min-w-0 [&_strong]:mb-0.5 [&_strong]:block [&_strong]:text-[12px]',
+  errorModal: 'fixed inset-0 z-[90] grid place-items-center bg-[rgba(15,23,42,0.28)] p-6 [&>div]:grid [&>div]:max-h-[min(520px,calc(100vh-48px))] [&>div]:w-[min(680px,100%)] [&>div]:grid-rows-[auto_minmax(0,1fr)_auto] [&>div]:rounded-lg [&>div]:border [&>div]:border-[#e5e7eb] [&>div]:bg-white [&>div]:text-[#111827] [&>div]:shadow-[0_24px_80px_rgba(15,23,42,0.22)] [&_footer]:flex [&_footer]:items-center [&_footer]:justify-end [&_footer]:gap-[10px] [&_footer]:border-t [&_footer]:border-[#f1f5f9] [&_footer]:px-[14px] [&_footer]:py-3 [&_header]:flex [&_header]:items-center [&_header]:justify-between [&_header]:gap-[10px] [&_header]:border-b [&_header]:border-[#f1f5f9] [&_header]:px-[14px] [&_header]:py-3 [&_header_span]:flex [&_header_span]:items-center [&_header_span]:gap-2 [&_header_span]:text-[13px] [&_header_span]:font-bold [&_header_span]:text-[#991b1b] [&_pre]:m-0 [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:bg-[#f8fafc] [&_pre]:p-[14px] [&_pre]:font-mono [&_pre]:text-[11px] [&_pre]:leading-[1.6] [&_pre]:text-[#334155]',
+  modalButton: 'inline-flex h-[30px] cursor-pointer items-center gap-[6px] rounded-[5px] border border-[#d1d5db] bg-white px-[10px] text-[11px] font-semibold text-[#374151]',
+  group: 'px-3 pb-[10px] pt-[6px] [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:px-1 [&>header]:pb-2 [&>header]:pt-[7px] [&>header]:text-[12px] [&>header]:font-medium [&>header]:text-[#7a7f89] [&>header_b]:text-[10px] [&>header_b]:text-[#9ca3af] [&>p]:px-[22px] [&>p]:py-2 [&>p]:text-[11px] [&>p]:text-[#9ca3af]',
+  groupButton: 'mb-0.5 grid w-full cursor-pointer grid-cols-[8px_minmax(0,1fr)] items-start gap-[9px] rounded-[7px] border border-transparent bg-transparent px-[7px] py-2 text-left text-[#3a3d43] hover:border-[#e0e7ff] hover:bg-[#eef4ff] [&_div]:min-w-0 [&_small]:block [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[10px] [&_small]:text-[#8b9099] [&_strong]:mb-1 [&_strong]:block [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[12px] [&_strong]:font-medium [&_strong]:text-[#303236]',
+  groupButtonActive: 'border-[#e0e7ff] bg-[#eef4ff]',
+  knowledgeRow: 'grid gap-2 rounded-md border border-[var(--border-light)] bg-[var(--bg-surface)] p-[10px] [&_footer]:flex [&_footer]:items-center [&_footer]:justify-start [&_footer]:gap-2 [&_footer_button]:inline-flex [&_footer_button]:h-7 [&_footer_button]:cursor-pointer [&_footer_button]:items-center [&_footer_button]:gap-[5px] [&_footer_button]:rounded-[5px] [&_footer_button]:border [&_footer_button]:border-[var(--border-light)] [&_footer_button]:bg-white [&_footer_button]:px-[9px] [&_footer_button]:text-[10px] [&_footer_button]:text-[var(--text-secondary)] [&_header]:flex [&_header]:items-center [&_header]:justify-between [&_header]:gap-2 [&_header_b]:font-mono [&_header_b]:text-[9px] [&_header_b]:text-[var(--text-muted)] [&_header_span]:text-[10px] [&_header_span]:font-bold [&_header_span]:uppercase [&_header_span]:text-[var(--text-secondary)] [&_p]:m-0 [&_p]:text-[12px] [&_p]:leading-[1.45] [&_p]:text-[var(--text-primary)] [&_small]:text-[10px] [&_small]:text-[var(--text-muted)]',
+};
+
+function statusTextClass(status: QuestStatus | string): string {
+  if (status === 'completed' || status === 'approved') return 'text-[#16a34a]';
+  if (status === 'running' || status === 'applying' || status === 'validating' || status === 'repairing') return 'text-[#7c3aed]';
+  if (status === 'ready_for_review') return 'text-[#0891b2]';
+  if (status === 'waiting_for_user' || status === 'clarifying' || status === 'pending') return 'text-[#d97706]';
+  if (status === 'blocked' || status === 'rejected' || status === 'canceled' || status === 'failed' || status === 'stale' || status === 'missing') return 'text-[#dc2626]';
+  if (status === 'archived') return 'text-[#64748b]';
+  return 'text-[#64748b]';
+}
+
+function statusDotClass(status: QuestStatus): string {
+  if (status === 'completed') return 'bg-[#22c55e]';
+  if (status === 'running' || status === 'applying' || status === 'validating' || status === 'repairing') return 'bg-[#8b5cf6] shadow-[0_0_7px_#8b5cf6]';
+  if (status === 'ready_for_review') return 'bg-[#22d3ee]';
+  if (status === 'waiting_for_user' || status === 'clarifying') return 'bg-[#f59e0b]';
+  if (status === 'blocked' || status === 'rejected' || status === 'canceled') return 'bg-[#ef4444]';
+  if (status === 'archived') return 'bg-[#475569]';
+  return 'bg-[#94a3b8]';
+}
+
+function progressItemClass(status: 'done' | 'current' | 'pending'): string {
+  return cn(
+    'grid grid-cols-[18px_minmax(0,1fr)] items-start gap-2 text-[#6b7280] [&>span]:mt-px [&>span]:grid [&>span]:h-[13px] [&>span]:w-[13px] [&>span]:place-items-center [&>span]:rounded-full [&>span]:border [&>span]:border-[#8b9099] [&>span]:bg-white [&_p]:m-0 [&_p]:text-[12px] [&_p]:leading-[1.35]',
+    status === 'done' && '[&>span]:border-[#d1d5db] [&>span]:bg-[#d1d5db] [&>span]:text-white [&_p]:text-[#a0a4ab]',
+    status === 'current' && '[&>span]:border-[#111827] [&_p]:text-[#202124]',
+  );
+}
+
 function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
@@ -761,17 +873,18 @@ export default function QuestPage({
   ]);
 
   return (
-    <div className="quest-shell">
-      <header className="quest-global-header">
-        <div className="quest-brand">
+    <div className={questClasses.shell}>
+      <header className={questClasses.globalHeader}>
+        <div className={questClasses.brand}>
           <span>Aster</span>
           <strong>Quests</strong>
         </div>
         <nav>
-          <button className="active">Quests</button>
+          <button className={cn(questClasses.topNavButton, questClasses.topNavButtonActive)}>Quests</button>
         </nav>
-        <div className="quest-global-actions">
+        <div className={questClasses.globalActions}>
           <button
+            className={buttonBase}
             onClick={() => selected && onOpenEditor(
               selected.project.path,
               artifactFor('intent', 'Quest intent', selected.intent_path),
@@ -780,37 +893,37 @@ export default function QuestPage({
           >
             <IconCode /> Open Editor
           </button>
-          <button onClick={onCloseProject} title="Close project"><IconX /></button>
+          <button className={buttonBase} onClick={onCloseProject} title="Close project"><IconX /></button>
         </div>
       </header>
 
-      <div className="quest-layout">
-        <aside className="quest-sidebar">
-          <div className="quest-sidebar-heading">
-            <button className="quest-new-button" onClick={() => setSelected(null)} disabled={!currentProjectPath}>
+      <div className={questClasses.layout}>
+        <aside className={questClasses.sidebar}>
+          <div className={questClasses.sidebarHeading}>
+            <button className={questClasses.newButton} onClick={() => setSelected(null)} disabled={!currentProjectPath}>
               <IconPlus /> New Quest <kbd>Ctrl N</kbd>
             </button>
           </div>
 
           <QuestGroup label="Quests" quests={visibleQuests.active} selectedId={selected?.id} onSelect={selectQuest} />
           <QuestGroup label="Completed" quests={visibleQuests.history} selectedId={selected?.id} onSelect={selectQuest} />
-          <div className="quest-sidebar-footer">
+          <div className={questClasses.sidebarFooter}>
             <button onClick={() => setPanel('knowledge')}>Knowledge <b>{knowledge.filter(entry => entry.status === 'pending').length}</b></button>
             <button disabled>Marketplace</button>
           </div>
         </aside>
 
         {!selected ? (
-          <main className="quest-home">
-            <div className="quest-orb"><IconSparkles size={28} /></div>
-            <h1>Quest on, hands off</h1>
-            <div className="quest-start-line">
+          <main className={questClasses.home}>
+            <div className={questClasses.orb}><IconSparkles size={28} /></div>
+            <h1 className="m-0 mb-3 text-[clamp(28px,3vw,40px)] font-[650] leading-[1.1] text-[#202124]">Quest on, hands off</h1>
+            <div className={questClasses.startLine}>
               <span>Start in</span>
               <b>{currentProjectPath ? 'Aster' : 'No project'}</b>
               <span>Local</span>
               <span>main</span>
             </div>
-            <div className="quest-prompt-box">
+            <div className={questClasses.promptBox}>
               <textarea
                 value={goal}
                 onChange={event => setGoal(event.target.value)}
@@ -822,12 +935,12 @@ export default function QuestPage({
                   <span>AI required</span>
                   <span>tool-created spec</span>
                 </div>
-                <button onClick={create} disabled={busy || !goal.trim() || !currentProjectPath} title="Create Quest">
-                  {busy ? <IconLoader className="spin-icon" /> : <IconSend />}
+                <button className={questClasses.promptSubmit} onClick={create} disabled={busy || !goal.trim() || !currentProjectPath} title="Create Quest">
+                  {busy ? <IconLoader className="animate-spin" /> : <IconSend />}
                 </button>
               </footer>
             </div>
-            <div className="quest-intro-card">
+            <div className={questClasses.introCard}>
               <IconSparkles />
               <div>
                 <strong>Meet Quest Mode</strong>
@@ -836,10 +949,10 @@ export default function QuestPage({
             </div>
           </main>
         ) : (
-          <main className="quest-workspace">
-            <header className="quest-header">
+          <main className={questClasses.workspace}>
+            <header className={questClasses.header}>
               <div>
-                <div className="quest-project-line">
+                <div className={questClasses.projectLine}>
                   <span>{selected.project.name}</span>
                   <IconChevronRight />
                   <span>{selected.id}</span>
@@ -851,7 +964,7 @@ export default function QuestPage({
                   )}
                 </div>
                 {renaming ? (
-                  <div className="quest-title-edit">
+                  <div className={questClasses.titleEdit}>
                     <input
                       value={titleDraft}
                       onChange={event => setTitleDraft(event.target.value)}
@@ -872,17 +985,18 @@ export default function QuestPage({
                 )}
                 <p>{selected.goal}</p>
               </div>
-              <div className="quest-header-actions">
-                <span className={`quest-status status-${selected.status}`}>{selected.status}</span>
-                {!renaming && <button onClick={() => setRenaming(true)} disabled={busy}><IconEdit /> Rename</button>}
-                <button onClick={() => onOpenEditor(
+              <div className={questClasses.headerActions}>
+                <span className={cn('rounded-full border border-current px-2 py-[5px] text-[8px] font-extrabold uppercase', statusTextClass(selected.status))}>{selected.status}</span>
+                {!renaming && <button className={buttonBase} onClick={() => setRenaming(true)} disabled={busy}><IconEdit /> Rename</button>}
+                <button className={buttonBase} onClick={() => onOpenEditor(
                   selected.project.path,
                   artifactFor('intent', 'Quest intent', selected.intent_path),
                 )}><IconCode /> Open Editor</button>
-                <button onClick={branchSelectedQuest} disabled={busy}><IconSparkles /> Branch</button>
-                <button onClick={exportSelectedQuest} disabled={busy}>Export</button>
+                <button className={buttonBase} onClick={branchSelectedQuest} disabled={busy}><IconSparkles /> Branch</button>
+                <button className={buttonBase} onClick={exportSelectedQuest} disabled={busy}>Export</button>
                 {action && (
                   <button
+                    className={buttonBase}
                     onClick={() => action.label === 'Resume'
                       ? continueSelectedQuest('Resume Quest from current evidence')
                       : transition(action.next)}
@@ -892,37 +1006,37 @@ export default function QuestPage({
                   </button>
                 )}
                 {selected.status === 'ready_for_review' && (
-                  <button onClick={rejectSelectedQuest} disabled={busy}>Reject</button>
+                  <button className={buttonBase} onClick={rejectSelectedQuest} disabled={busy}>Reject</button>
                 )}
                 {!['archived', 'canceled', 'completed', 'running'].includes(selected.status) && (
-                  <button onClick={cancelSelectedQuest} disabled={busy}>Cancel</button>
+                  <button className={buttonBase} onClick={cancelSelectedQuest} disabled={busy}>Cancel</button>
                 )}
                 {!['archived', 'canceled', 'running'].includes(selected.status) && (
-                  <button onClick={() => transition('archived')} disabled={busy}>Archive</button>
+                  <button className={buttonBase} onClick={() => transition('archived')} disabled={busy}>Archive</button>
                 )}
                 {['archived', 'canceled', 'completed'].includes(selected.status) && (
-                  <button onClick={reopenSelectedQuest} disabled={busy}>Reopen</button>
+                  <button className={buttonBase} onClick={reopenSelectedQuest} disabled={busy}>Reopen</button>
                 )}
                 {selected.status === 'archived' && (
-                  <button className="danger" onClick={remove} disabled={busy}><IconTrash /> Delete</button>
+                  <button className={cn(buttonBase, 'hover:border-[#7f1d1d] hover:text-[#fecaca]')} onClick={remove} disabled={busy}><IconTrash /> Delete</button>
                 )}
               </div>
             </header>
 
-            <section className="quest-cockpit">
-              <div className="quest-run-stream">
-                <div className="quest-stream-prompt">{selected.goal}</div>
-                <div className="quest-stream-list">
-                  <article className="quest-stream-entry user-entry">
-                    <span className="timeline-kind kind-created" />
+            <section className={questClasses.cockpit}>
+              <div className={questClasses.runStream}>
+                <div className={questClasses.streamPrompt}>{selected.goal}</div>
+                <div className={questClasses.streamList}>
+                  <article className={questClasses.streamEntry}>
+                    <span className={questClasses.timelineDot} />
                     <div>
                       <header><strong>Quest goal accepted</strong><time>{formatTime(selected.created_at_ms)}</time></header>
                       <small>user prompt</small>
                     </div>
                   </article>
-                  {selected.events.map(event => (
-                    <article key={event.id} className="quest-stream-entry">
-                      <span className={`timeline-kind kind-${event.kind}`} />
+                  {selected.events.map((event, index) => (
+                    <article key={event.id} className={questClasses.streamEntry}>
+                      <span className={cn(questClasses.timelineDot, index === selected.events.length - 1 && 'after:hidden')} />
                       <div>
                         <header><strong>{event.summary}</strong><time>{formatTime(event.timestamp_ms)}</time></header>
                         <small>{event.kind.replaceAll('_', ' ')}</small>
@@ -935,16 +1049,16 @@ export default function QuestPage({
                       </div>
                     </article>
                   ))}
-                  <article className="quest-stream-entry next-action">
-                    <span className={`timeline-kind kind-${selected.status}`} />
+                  <article className={cn(questClasses.streamEntry, questClasses.nextEntry)}>
+                    <span className={cn(questClasses.timelineDot, questClasses.timelineDotNext)} />
                     <div>
                       <header><strong>{selected.next_action.label}</strong><time>next</time></header>
                       <small>{selected.next_action.reason}</small>
                     </div>
                   </article>
                   {['draft', 'specified'].includes(selected.status) && (
-                    <article className="quest-stream-entry next-action">
-                      <span className="timeline-kind kind-ready" />
+                    <article className={cn(questClasses.streamEntry, questClasses.nextEntry)}>
+                      <span className={cn(questClasses.timelineDot, questClasses.timelineDotNext)} />
                       <div>
                         <header><strong>Spec is ready for review</strong><time>next</time></header>
                         <small>edit the spec in the right panel, then approve and execute</small>
@@ -952,8 +1066,8 @@ export default function QuestPage({
                     </article>
                   )}
                   {executingQuestId === selected.id && (
-                    <article className="quest-stream-entry live">
-                      <span className="timeline-kind kind-running" />
+                    <article className={cn(questClasses.streamEntry, questClasses.liveEntry)}>
+                      <span className={cn(questClasses.timelineDot, questClasses.timelineDotLive, questClasses.timelineDotLast)} />
                       <div>
                         <header><strong>Quest execution is running</strong><time>live</time></header>
                         <small>waiting for workspace events and review bundle</small>
@@ -961,13 +1075,13 @@ export default function QuestPage({
                     </article>
                   )}
                   {selected.review && (
-                    <button className="quest-review-chip" onClick={() => setPanel('review')}>
+                    <button className={questClasses.reviewChip} onClick={() => setPanel('review')}>
                       <IconCheck /> Review +{selected.review.changed_files.reduce((sum, file) => sum + file.additions, 0)}
                       <span>-{selected.review.changed_files.reduce((sum, file) => sum + file.deletions, 0)}</span>
                     </button>
                   )}
                 </div>
-                <div className="quest-steer-bar">
+                <div className={questClasses.steerBar}>
                   <select
                     value={questInputMode}
                     onChange={event => setQuestInputMode(event.target.value as QuestInputMode)}
@@ -987,28 +1101,28 @@ export default function QuestPage({
                     placeholder="Steer this Quest, answer a clarification, or record a manual edit"
                     disabled={busy || !selected}
                   />
-                  <button onClick={submitQuestInput} disabled={busy || !questInput.trim()}>
+                  <button className={questClasses.sendButton} onClick={submitQuestInput} disabled={busy || !questInput.trim()}>
                     <IconSend />
                   </button>
                 </div>
               </div>
 
-              <aside className="quest-right-panel">
-                <div className="quest-panel-tabs">
-                  <button className={panel === 'overview' ? 'active' : ''} onClick={() => setPanel('overview')}><IconRefresh /> Overview</button>
-                  <button className={panel === 'intent' ? 'active' : ''} onClick={() => setPanel('intent')}><IconFile /> Intent</button>
-                  <button className={panel === 'spec' ? 'active' : ''} onClick={() => setPanel('spec')}><IconFile /> Spec</button>
-                  <button className={panel === 'review' ? 'active' : ''} onClick={() => setPanel('review')}><IconCheck /> Review</button>
-                  <button className={panel === 'knowledge' ? 'active' : ''} onClick={() => setPanel('knowledge')}><IconSparkles /> Knowledge</button>
+              <aside className={questClasses.rightPanel}>
+                <div className={questClasses.panelTabs}>
+                  <button className={cn(questClasses.panelTab, panel === 'overview' && questClasses.panelTabActive)} onClick={() => setPanel('overview')}><IconRefresh /> Overview</button>
+                  <button className={cn(questClasses.panelTab, panel === 'intent' && questClasses.panelTabActive)} onClick={() => setPanel('intent')}><IconFile /> Intent</button>
+                  <button className={cn(questClasses.panelTab, panel === 'spec' && questClasses.panelTabActive)} onClick={() => setPanel('spec')}><IconFile /> Spec</button>
+                  <button className={cn(questClasses.panelTab, panel === 'review' && questClasses.panelTabActive)} onClick={() => setPanel('review')}><IconCheck /> Review</button>
+                  <button className={cn(questClasses.panelTab, panel === 'knowledge' && questClasses.panelTabActive)} onClick={() => setPanel('knowledge')}><IconSparkles /> Knowledge</button>
                 </div>
 
                 {panel === 'overview' && (
-                  <div className="quest-overview">
+                  <div className={questClasses.overview}>
                     <section>
                       <h2>Progress</h2>
-                      <ol className="quest-progress">
+                      <ol className="m-0 grid list-none gap-[10px] p-0">
                         {progressItems(selected).map((item, index) => (
-                          <li key={`${item.title}-${index}`} className={item.status}>
+                          <li key={`${item.title}-${index}`} className={progressItemClass(item.status)}>
                             <span>{item.status === 'done' ? <IconCheck /> : null}</span>
                             <p>{item.title}</p>
                           </li>
@@ -1018,18 +1132,18 @@ export default function QuestPage({
 
                     <section>
                       <h2>Artifacts</h2>
-                      <button className="quest-artifact-row" onClick={() => { setArtifact(null); setPanel('intent'); }}>
+                      <button className={artifactRowClass} onClick={() => { setArtifact(null); setPanel('intent'); }}>
                         <IconFile /><span><strong>Quest intent</strong><small>{selected.intent_path}</small></span>
                       </button>
-                      <button className="quest-artifact-row" onClick={() => { setArtifact(null); setPanel('spec'); }}>
+                      <button className={artifactRowClass} onClick={() => { setArtifact(null); setPanel('spec'); }}>
                         <IconFile /><span><strong>Quest spec</strong><small>{selected.spec_path ?? 'not generated'}</small></span>
                       </button>
-                      <button className="quest-artifact-row" onClick={() => openArtifact({ kind: 'trace', label: 'Timeline trace', path: selected.trace_path })}>
+                      <button className={artifactRowClass} onClick={() => openArtifact({ kind: 'trace', label: 'Timeline trace', path: selected.trace_path })}>
                         <IconFile /><span><strong>Timeline trace</strong><small>{selected.trace_path}</small></span>
                       </button>
                       {selected.checkpoints.map(checkpoint => (
                         <button
-                          className="quest-artifact-row"
+                          className={artifactRowClass}
                           key={checkpoint.id}
                           onClick={() => openArtifact({ kind: 'checkpoint', label: checkpoint.label, path: checkpoint.artifact_path ?? checkpoint.id })}
                         >
@@ -1042,14 +1156,14 @@ export default function QuestPage({
                       ))}
                       {selected.review?.exploration_attempts.map(attempt => (
                         <button
-                          className="quest-artifact-row"
+                          className={artifactRowClass}
                           key={attempt.id}
                           onClick={() => openArtifact({ kind: 'exploration', label: attempt.label, path: attempt.artifact_path })}
                         >
                           <IconSparkles /><span><strong>{attempt.label}</strong><small>{attempt.outcome}{attempt.selected ? ' · selected' : ''}</small></span>
                         </button>
                       ))}
-                      <button className="quest-artifact-row" onClick={() => setPanel('review')} disabled={!selected.review}>
+                      <button className={artifactRowClass} onClick={() => setPanel('review')} disabled={!selected.review}>
                         <IconCheck /><span><strong>Review bundle</strong><small>{selected.review ? `${selected.review.changed_files.length} changed files` : 'not ready'}</small></span>
                       </button>
                     </section>
@@ -1058,21 +1172,21 @@ export default function QuestPage({
                       <h2>Changed files <b>{selected.review?.changed_files.length ?? 0}</b></h2>
                       {selected.review?.changed_files.map(file => (
                         <button
-                          className="quest-file-row"
+                          className={cn(fileRowClass, 'cursor-pointer')}
                           key={file.path}
                           onClick={() => openArtifact({ kind: 'changed_file', label: file.path, path: file.path })}
                         >
                           <IconFile /><span><strong>{file.path}</strong><small>{file.status}</small></span>
                           <b>+{file.additions} <i>-{file.deletions}</i></b>
                         </button>
-                      )) ?? <p className="quest-muted">No file changes yet</p>}
+                      )) ?? <p className={mutedText}>No file changes yet</p>}
                     </section>
 
                     <section>
                       <h2>Validation</h2>
                       {selected.review?.validations.map(validation => (
                         <button
-                          className="quest-validation quest-validation-action"
+                          className={validationRowClass}
                           key={validation.name}
                           onClick={() => openArtifact({ kind: 'validation', label: validation.name })}
                         >
@@ -1087,15 +1201,15 @@ export default function QuestPage({
                           </span>
                           <b>{validation.status}</b>
                         </button>
-                      )) ?? <p className="quest-muted">No validation evidence yet</p>}
+                      )) ?? <p className={mutedText}>No validation evidence yet</p>}
                     </section>
 
                     <section>
                       <h2>References</h2>
                       {selected.attached_knowledge.length === 0 ? (
-                        <p className="quest-muted">No Knowledge attached</p>
+                        <p className={mutedText}>No Knowledge attached</p>
                       ) : selected.attached_knowledge.map(entry => (
-                        <button className="quest-artifact-row" key={entry.id} onClick={() => setPanel('knowledge')}>
+                        <button className={artifactRowClass} key={entry.id} onClick={() => setPanel('knowledge')}>
                           <IconSparkles /><span><strong>{entry.category}</strong><small>{entry.content}</small></span>
                         </button>
                       ))}
@@ -1104,16 +1218,17 @@ export default function QuestPage({
                 )}
 
                 {panel === 'intent' && (
-                  <div className="quest-spec quest-panel-document">
-                    <div className="quest-section-heading">
+                  <div className={documentPanelClass}>
+                    <div className={questClasses.sectionHeading}>
                       <div><span>DURABLE INTENT</span><strong>Edit the task brief before execution or during revision</strong></div>
                       <div>
                         <button
+                          className={sectionHeadingButton}
                           onClick={() => onOpenEditor(selected.project.path, artifactFor('intent', 'Quest intent', selected.intent_path))}
                         >
                           <IconCode /> Open Editor
                         </button>
-                        <button onClick={saveIntent} disabled={busy || intentDraft === selected.intent}><IconEdit /> Save</button>
+                        <button className={sectionHeadingButton} onClick={saveIntent} disabled={busy || intentDraft === selected.intent}><IconEdit /> Save</button>
                       </div>
                     </div>
                     <textarea
@@ -1125,18 +1240,19 @@ export default function QuestPage({
                 )}
 
                 {panel === 'spec' && (
-                  <div className="quest-spec quest-panel-document">
-                    <div className="quest-section-heading">
+                  <div className={documentPanelClass}>
+                    <div className={questClasses.sectionHeading}>
                       <div><span>AI TOOL SPEC</span><strong>Review the model-created artifact before execution</strong></div>
                       <div>
                         <button
+                          className={sectionHeadingButton}
                           onClick={() => onOpenEditor(selected.project.path, artifactFor('spec', 'Quest spec', selected.spec_path ?? 'spec.md'))}
                         >
                           <IconCode /> Open Editor
                         </button>
-                        <button onClick={saveSpec} disabled={busy || specDraft === selected.spec}><IconEdit /> Save</button>
-                        <button className="primary" onClick={execute} disabled={busy || selected.status === 'archived'}>
-                          {busy ? <IconLoader className="spin-icon" /> : <IconPlay />} Approve &amp; execute
+                        <button className={sectionHeadingButton} onClick={saveSpec} disabled={busy || specDraft === selected.spec}><IconEdit /> Save</button>
+                        <button className={cn(sectionHeadingButton, primaryButton)} onClick={execute} disabled={busy || selected.status === 'archived'}>
+                          {busy ? <IconLoader className="animate-spin" /> : <IconPlay />} Approve &amp; execute
                         </button>
                       </div>
                     </div>
@@ -1149,10 +1265,10 @@ export default function QuestPage({
                 )}
 
                 {panel === 'artifact' && artifact && (
-                  <div className="quest-artifact-viewer">
+                  <div className={questClasses.artifactViewer}>
                     <header>
-                      <button onClick={() => setPanel('overview')}><IconChevronRight /> Overview</button>
-                      <button onClick={() => onOpenEditor(selected.project.path, artifactFor(artifact.kind, artifact.label, artifact.path))}><IconCode /> Open Editor</button>
+                      <button className={sectionHeadingButton} onClick={() => setPanel('overview')}><IconChevronRight /> Overview</button>
+                      <button className={sectionHeadingButton} onClick={() => onOpenEditor(selected.project.path, artifactFor(artifact.kind, artifact.label, artifact.path))}><IconCode /> Open Editor</button>
                     </header>
                     <div>
                       <span>{artifact.kind.replace('_', ' ')}</span>
@@ -1181,14 +1297,14 @@ export default function QuestPage({
                 )}
 
                 {panel === 'knowledge' && (
-                  <div className="quest-knowledge">
+                  <div className={questClasses.knowledge}>
                     <section>
                       <h2>
                         Pending knowledge <b>{knowledge.filter(entry => entry.status === 'pending').length}</b>
-                        <button onClick={revalidateKnowledgeEntries} disabled={busy}>Revalidate</button>
+                        <button className={sectionHeadingButton} onClick={revalidateKnowledgeEntries} disabled={busy}>Revalidate</button>
                       </h2>
                       {knowledge.filter(entry => entry.status === 'pending').length === 0 ? (
-                        <p className="quest-muted">No pending memory proposals</p>
+                        <p className={mutedText}>No pending memory proposals</p>
                       ) : knowledge.filter(entry => entry.status === 'pending').map(entry => (
                         <KnowledgeRow
                           key={entry.id}
@@ -1205,7 +1321,7 @@ export default function QuestPage({
                     <section>
                       <h2>Approved knowledge <b>{knowledge.filter(entry => entry.status === 'approved').length}</b></h2>
                       {knowledge.filter(entry => entry.status === 'approved').length === 0 ? (
-                        <p className="quest-muted">No approved project knowledge yet</p>
+                        <p className={mutedText}>No approved project knowledge yet</p>
                       ) : knowledge.filter(entry => entry.status === 'approved').map(entry => (
                         <KnowledgeRow
                           key={entry.id}
@@ -1223,22 +1339,22 @@ export default function QuestPage({
                 )}
 
                 {panel === 'review' && (
-                  <div className="quest-review">
+                  <div className={questClasses.review}>
                     {!selected.review ? (
-                      <div className="quest-review-empty">
+                      <div className={questClasses.reviewEmpty}>
                         <IconCheck size={24} />
                         <strong>No review bundle yet</strong>
                         <span>Approve the spec and execute the Quest first.</span>
                       </div>
                     ) : (
                       <>
-                        <div className="quest-review-summary">
+                        <div className={questClasses.reviewSummary}>
                           <div><span>RISK</span><strong>{selected.review.risk}</strong></div>
                           <p>{selected.review.summary}</p>
                         </div>
                         <section>
                           <h2>Capability metrics</h2>
-                          <div className="quest-review-metrics">
+                          <div className={questClasses.reviewMetrics}>
                             <div>
                               <span>First action</span>
                               <strong>{formatMetricDuration(selected.review.metrics?.intent_to_first_action_ms)}</strong>
@@ -1273,16 +1389,16 @@ export default function QuestPage({
                             </div>
                           </div>
                           {(selected.review.metrics?.notes ?? []).length > 0 && (
-                            <p className="quest-metric-note">{selected.review.metrics?.notes?.join(' ')}</p>
+                            <p className={questClasses.metricNote}>{selected.review.metrics?.notes?.join(' ')}</p>
                           )}
                         </section>
                         <section>
                           <h2>Unresolved issues</h2>
                           {(selected.review.findings ?? []).length > 0 ? (
                             (selected.review.findings ?? []).map(finding => (
-                              <div className="quest-issue" key={finding.id}>
+                              <div className={issueClass} key={finding.id}>
                                 <button
-                                  className="quest-issue-open"
+                                  className={issueOpenClass}
                                   onClick={() => openArtifact({
                                     kind: 'review_finding',
                                     label: finding.title,
@@ -1296,11 +1412,11 @@ export default function QuestPage({
                               </div>
                             ))
                           ) : selected.review.unresolved_issues.length === 0
-                            ? <div className="quest-issue clear"><IconCheck /> No unresolved issues</div>
+                            ? <div className={cn(issueClass, clearIssueClass)}><IconCheck /> No unresolved issues</div>
                             : selected.review.unresolved_issues.map(issue => (
-                              <div className="quest-issue" key={issue}>
+                              <div className={issueClass} key={issue}>
                                 <button
-                                  className="quest-issue-open"
+                                  className={issueOpenClass}
                                   onClick={() => openArtifact({ kind: 'review_finding', label: issue })}
                                 >
                                   <IconAlertCircle /> {issue}
@@ -1312,9 +1428,9 @@ export default function QuestPage({
                         <section>
                           <h2>Next actions</h2>
                           {(selected.review.next_actions ?? []).length === 0 ? (
-                            <p className="quest-muted">No guided next action is attached to this review.</p>
+                            <p className={mutedText}>No guided next action is attached to this review.</p>
                           ) : (
-                            <div className="quest-review-actions">
+                            <div className={questClasses.reviewActions}>
                               {(selected.review.next_actions ?? []).map(action => {
                                 const needsSelection = action.kind === 'apply_selected' || action.kind === 'discard_selected';
                                 const selectedActionDisabled = needsSelection
@@ -1323,6 +1439,7 @@ export default function QuestPage({
                                     : selectedReviewFiles.size === 0);
                                 return (
                                   <button
+                                    className={reviewActionButtonClass}
                                     key={action.id}
                                     onClick={() => runReviewAction(action)}
                                     disabled={busy || selectedActionDisabled}
@@ -1337,10 +1454,10 @@ export default function QuestPage({
                         <section>
                           <h2>Exploration attempts</h2>
                           {selected.review.exploration_attempts.length === 0 ? (
-                            <p className="quest-muted">No alternative attempts were preserved for this result.</p>
+                            <p className={mutedText}>No alternative attempts were preserved for this result.</p>
                           ) : selected.review.exploration_attempts.map(attempt => (
                             <button
-                              className="quest-artifact-row quest-exploration-row"
+                              className={cn(artifactRowClass, 'min-h-12 grid-cols-[18px_minmax(0,1fr)_auto] py-[9px] [&_small]:whitespace-normal [&>b]:text-[10px] [&>b]:uppercase [&>b]:text-[#2563eb]')}
                               key={attempt.id}
                               onClick={() => openArtifact({ kind: 'exploration', label: attempt.label, path: attempt.artifact_path })}
                             >
@@ -1365,7 +1482,7 @@ export default function QuestPage({
                                 };
                               }, { additions: 0, deletions: 0 });
                               return (
-                                <label className="quest-file-row quest-transaction-row" key={group.id}>
+                                <label className={transactionRowClass} key={group.id}>
                                   <input
                                     type="checkbox"
                                     checked={selectedReviewGroups.has(group.id)}
@@ -1392,9 +1509,9 @@ export default function QuestPage({
                               );
                             })
                           ) : selected.review.changed_files.length === 0 ? (
-                            <p className="quest-muted">No changed files can be applied.</p>
+                            <p className={mutedText}>No changed files can be applied.</p>
                           ) : selected.review.changed_files.map(file => (
-                            <label className="quest-file-row" key={file.path}>
+                            <label className={selectableFileRowClass} key={file.path}>
                               <input
                                 type="checkbox"
                                 checked={selectedReviewFiles.has(file.path)}
@@ -1418,9 +1535,9 @@ export default function QuestPage({
                         </section>
                         <section>
                           <h2>Final decision</h2>
-                          <div className="quest-decision-row">
+                          <div className={questClasses.decisionRow}>
                             <button
-                              className="primary"
+                              className={cn(decisionButtonClass, primaryButton)}
                               onClick={() => selected.review?.transaction_groups.length
                                 ? applySelectedQuest(undefined, Array.from(selectedReviewGroups))
                                 : applySelectedQuest(Array.from(selectedReviewFiles))
@@ -1430,12 +1547,14 @@ export default function QuestPage({
                               <IconCheck /> Apply selected
                             </button>
                             <button
+                              className={decisionButtonClass}
                               onClick={() => applySelectedQuest()}
                               disabled={busy || selected.status !== 'ready_for_review' || selected.review.changed_files.length === 0}
                             >
                               Apply all
                             </button>
                             <button
+                              className={decisionButtonClass}
                               onClick={() => selected.review?.transaction_groups.length
                                 ? discardSelectedQuest(undefined, Array.from(selectedReviewGroups))
                                 : discardSelectedQuest(Array.from(selectedReviewFiles))
@@ -1444,11 +1563,11 @@ export default function QuestPage({
                             >
                               <IconX /> Discard selected
                             </button>
-                            <button onClick={rejectSelectedQuest} disabled={busy || selected.status !== 'ready_for_review'}><IconX /> Reject result</button>
-                            <button onClick={reviseSelectedQuest} disabled={busy || !['ready_for_review', 'blocked', 'waiting_for_user'].includes(selected.status)}><IconRefresh /> Request revision</button>
+                            <button className={decisionButtonClass} onClick={rejectSelectedQuest} disabled={busy || selected.status !== 'ready_for_review'}><IconX /> Reject result</button>
+                            <button className={decisionButtonClass} onClick={reviseSelectedQuest} disabled={busy || !['ready_for_review', 'blocked', 'waiting_for_user'].includes(selected.status)}><IconRefresh /> Request revision</button>
                           </div>
                           {selected.decisions.length > 0 && (
-                            <div className="quest-decision-history">
+                            <div className={questClasses.decisionHistory}>
                               {selected.decisions.map(decision => (
                                 <div key={`${decision.kind}-${decision.timestamp_ms}`}>
                                   <small>{decision.kind.replace('_', ' ')} · {decision.summary}</small>
@@ -1471,12 +1590,12 @@ export default function QuestPage({
           </main>
         )}
       </div>
-      <footer className="quest-footer">
+      <footer className={questClasses.footer}>
         <span>Registry: Aster user data · cross-project</span>
         <span>{currentProjectPath ? `Current project: ${currentProjectPath}` : 'No project open'}</span>
       </footer>
       {error && (
-        <button className="quest-error-toast" onClick={() => setErrorOpen(true)} title="View error details">
+        <button className={questClasses.errorToast} onClick={() => setErrorOpen(true)} title="View error details">
           <IconAlertCircle />
           <span>
             <strong>Quest failed</strong>
@@ -1486,16 +1605,16 @@ export default function QuestPage({
         </button>
       )}
       {errorOpen && error && (
-        <div className="quest-error-modal" role="dialog" aria-modal="true" aria-label="Quest error details">
+        <div className={questClasses.errorModal} role="dialog" aria-modal="true" aria-label="Quest error details">
           <div>
             <header>
               <span><IconAlertCircle /> Quest error</span>
-              <button onClick={() => setErrorOpen(false)} title="Close"><IconX /></button>
+              <button className={questClasses.modalButton} onClick={() => setErrorOpen(false)} title="Close"><IconX /></button>
             </header>
             <pre>{error}</pre>
             <footer>
-              <button onClick={() => setError(null)}>Dismiss</button>
-              <button className="primary" onClick={() => setErrorOpen(false)}>Close</button>
+              <button className={questClasses.modalButton} onClick={() => setError(null)}>Dismiss</button>
+              <button className={cn(questClasses.modalButton, 'border-[#111827] bg-[#111827] text-white')} onClick={() => setErrorOpen(false)}>Close</button>
             </footer>
           </div>
         </div>
@@ -1516,11 +1635,11 @@ function QuestGroup({
   onSelect: (quest: QuestRecord) => void;
 }) {
   return (
-    <section className="quest-group">
+    <section className={questClasses.group}>
       <header><span>{label}</span><b>{quests.length}</b></header>
       {quests.map(quest => (
-        <button key={quest.id} className={selectedId === quest.id ? 'active' : ''} onClick={() => onSelect(quest)}>
-          <span className={`quest-list-status status-${quest.status}`} />
+        <button key={quest.id} className={cn(questClasses.groupButton, selectedId === quest.id && questClasses.groupButtonActive)} onClick={() => onSelect(quest)}>
+          <span className={cn('mt-[3px] h-[6px] w-[6px] rounded-full', statusDotClass(quest.status))} />
           <div>
             <strong>{quest.title}</strong>
             <small>{quest.project.name} · {formatTime(quest.updated_at_ms)}</small>
@@ -1550,14 +1669,14 @@ function KnowledgeRow({
   onRemove: () => void;
 }) {
   return (
-    <article className={`quest-knowledge-row status-${entry.status}`}>
+    <article className={questClasses.knowledgeRow}>
       <header>
         <span>{entry.category}</span>
-        <b>{entry.status}</b>
+        <b className={statusTextClass(entry.status)}>{entry.status}</b>
       </header>
       <p>{entry.content}</p>
       <small>{entry.source}</small>
-      <small className={`quest-knowledge-reference status-${entry.reference_status}`}>
+      <small className={statusTextClass(entry.reference_status)}>
         {entry.reference_status}: {entry.reference_summary}
       </small>
       <footer>

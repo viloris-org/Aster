@@ -18,12 +18,12 @@ const RHAI_COMMENT_BLOCK = /\/\*[\s\S]*?\*\//g;
 const RHAI_OPERATOR = /[+\-*/%=!<>&|^~]+/g;
 
 const RHAI_RULES: TokenRule[] = [
-  { pattern: RHAI_COMMENT_BLOCK, className: 'token-comment' },
-  { pattern: RHAI_COMMENT_SINGLE, className: 'token-comment' },
-  { pattern: RHAI_STRING, className: 'token-string' },
-  { pattern: RHAI_KEYWORDS, className: 'token-keyword' },
-  { pattern: RHAI_NUMBER, className: 'token-number' },
-  { pattern: RHAI_OPERATOR, className: 'token-operator' },
+  { pattern: RHAI_COMMENT_BLOCK, className: 'text-[#546E7A] italic' },
+  { pattern: RHAI_COMMENT_SINGLE, className: 'text-[#546E7A] italic' },
+  { pattern: RHAI_STRING, className: 'text-[#C3E88D]' },
+  { pattern: RHAI_KEYWORDS, className: 'text-[#C792EA] font-medium' },
+  { pattern: RHAI_NUMBER, className: 'text-[#F78C6C]' },
+  { pattern: RHAI_OPERATOR, className: 'text-[#89DDFF]' },
 ];
 
 // ─── Python ─────────────────────────────────────────────────────────────────
@@ -36,12 +36,12 @@ const PY_DECORATOR = /@\w+/g;
 const PY_OPERATOR = /[+\-*/%=!<>&|^~@]+/g;
 
 const PY_RULES: TokenRule[] = [
-  { pattern: PY_STRING, className: 'token-string' },
-  { pattern: PY_COMMENT, className: 'token-comment' },
-  { pattern: PY_DECORATOR, className: 'token-keyword' },
-  { pattern: PY_KEYWORDS, className: 'token-keyword' },
-  { pattern: PY_NUMBER, className: 'token-number' },
-  { pattern: PY_OPERATOR, className: 'token-operator' },
+  { pattern: PY_STRING, className: 'text-[#C3E88D]' },
+  { pattern: PY_COMMENT, className: 'text-[#546E7A] italic' },
+  { pattern: PY_DECORATOR, className: 'text-[#C792EA] font-medium' },
+  { pattern: PY_KEYWORDS, className: 'text-[#C792EA] font-medium' },
+  { pattern: PY_NUMBER, className: 'text-[#F78C6C]' },
+  { pattern: PY_OPERATOR, className: 'text-[#89DDFF]' },
 ];
 
 // ─── Common HTML escaping ───────────────────────────────────────────────────

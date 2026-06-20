@@ -2,7 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { rpc } from '../api';
 import { useTranslation } from '../i18n';
 import { IconFolder, IconFile, IconPlus, IconRefresh, IconEdit, IconCopy, IconTrash, assetIcon } from '../icons';
-import { projectPanelIconButtonClass, projectPanelSearchInputClass } from '../uiClasses';
+import {
+  contextMenuClass,
+  contextMenuDangerItemClass,
+  contextMenuItemClass,
+  contextMenuSeparatorClass,
+  projectPanelIconButtonClass,
+  projectPanelSearchInputClass,
+  projectTreeRenameInputClass,
+} from '../uiClasses';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +46,23 @@ interface TreeNode {
   children: TreeNode[];
   meta?: AssetMeta;
 }
+
+const projectPanelClass = 'flex h-full flex-col overflow-hidden text-xs';
+const projectToolbarClass = 'flex items-center justify-between border-b border-[var(--border)] px-1.5 py-[3px]';
+const projectToolbarLeftClass = 'flex items-center gap-0.5';
+const projectCountClass = 'px-1 text-[10px] text-[var(--text-muted)]';
+const projectSearchRowClass = 'border-b border-[var(--border)] px-1.5 py-1';
+const projectScrollClass = 'flex-1 overflow-y-auto py-0.5 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-sm [&::-webkit-scrollbar-thumb]:bg-[var(--border)]';
+const projectTreeItemClass = 'flex cursor-pointer items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap px-2 py-[3px] transition-[background] duration-[var(--transition-fast)] hover:bg-[var(--bg-hover)]';
+const projectTreeCaretClass = 'w-3 flex-shrink-0 text-center text-[8px] text-[var(--text-muted)]';
+const projectTreeIconClass = 'flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center text-[var(--text-muted)]';
+const projectTreeNameClass = 'min-w-0 flex-1 overflow-hidden text-ellipsis text-xs text-[var(--text-primary)]';
+const projectTreeDimmedClass = 'opacity-40';
+const projectTreeKindClass = 'flex-shrink-0 px-1 text-[9px] text-[var(--text-muted)]';
+const projectTreeEmptyClass = 'px-2 py-1.5 text-[11px] italic text-[var(--text-muted)]';
+const projectScriptInputClass = 'min-w-[100px] flex-1 rounded-[2px] border border-[var(--accent)] bg-[var(--bg-base)] px-1.5 py-[3px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none';
+const projectScriptSelectClass = 'cursor-pointer rounded-[2px] border border-[var(--border)] bg-[var(--bg-base)] px-1 py-0.5 font-[var(--font-mono)] text-[10px] text-[var(--text-primary)] outline-none';
+const projectPanelEmptyClass = 'p-4 text-center text-xs italic text-[var(--text-secondary)]';
 
 // ─── Build tree from flat asset list ────────────────────────────────────────
 
@@ -126,7 +151,7 @@ function TreeNodeItem({
   return (
     <>
       <div
-        className={`project-tree-item ${node.isDir ? 'project-tree-dir' : 'project-tree-file'}`}
+        className={projectTreeItemClass}
         style={{ paddingLeft: 8 + depth * 16 }}
         onClick={() => { if (hasChildren) setExpanded(!expanded); }}
         onDoubleClick={() => {
@@ -146,15 +171,15 @@ function TreeNodeItem({
         title={node.path}
       >
         {node.isDir ? (
-          <span className="project-tree-caret">{expanded ? '▼' : '▶'}</span>
+          <span className={projectTreeCaretClass}>{expanded ? '▼' : '▶'}</span>
         ) : (
-          <span className="project-tree-icon">
+          <span className={projectTreeIconClass}>
             {meta ? assetIcon(meta.kind) : <IconFile />}
           </span>
         )}
         {isRenaming ? (
           <input
-            className="project-tree-rename-input"
+            className={projectTreeRenameInputClass}
             value={renameText || ''}
             onChange={(e) => setRenameText?.(e.target.value)}
             onBlur={onRenameSubmit}
@@ -168,11 +193,11 @@ function TreeNodeItem({
           />
         ) : (
           <>
-            <span className={`project-tree-name ${!matchesSearch && childrenMatch ? 'project-tree-dimmed' : ''}`}>
+            <span className={`${projectTreeNameClass} ${!matchesSearch && childrenMatch ? projectTreeDimmedClass : ''}`}>
               {node.name}
             </span>
             {meta && (
-              <span className="project-tree-kind">{meta.kind}</span>
+              <span className={projectTreeKindClass}>{meta.kind}</span>
             )}
           </>
         )}
@@ -190,7 +215,7 @@ function TreeNodeItem({
             />
           ))}
           {search && node.children.length === 0 && (
-            <div className="project-tree-empty" style={{ paddingLeft: 24 + depth * 16 }}>
+            <div className={projectTreeEmptyClass} style={{ paddingLeft: 24 + depth * 16 }}>
               {node.name + '/'}
             </div>
           )}
@@ -333,10 +358,10 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
   }, [loadAssets]);
 
   return (
-    <div className="project-panel">
+    <div className={projectPanelClass}>
       {/* Toolbar */}
-      <div className="project-toolbar">
-        <div className="project-toolbar-left">
+      <div className={projectToolbarClass}>
+        <div className={projectToolbarLeftClass}>
           <button
             className={projectPanelIconButtonClass}
             onClick={loadAssets}
@@ -353,10 +378,10 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
               <IconPlus />
             </button>
             {createMenuOpen && (
-              <div className="context-menu" style={{ position: 'absolute', top: '100%', left: 0, zIndex: 100 }}>
-                <div className="context-menu-item" style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '4px 8px' }}>
+              <div className={`${contextMenuClass} absolute left-0 top-full z-[100]`}>
+                <div className={`${contextMenuItemClass} gap-1 px-2 py-1`}>
                   <input
-                    className="project-script-input"
+                    className={projectScriptInputClass}
                     type="text"
                     placeholder={t('project_script_name')}
                     value={scriptName}
@@ -370,7 +395,7 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
                     onClick={(e) => e.stopPropagation()}
                   />
                   <select
-                    className="project-script-select"
+                    className={projectScriptSelectClass}
                     value={scriptBackend}
                     onChange={(e) => setScriptBackend(e.target.value as 'rhai' | 'python')}
                     onClick={(e) => e.stopPropagation()}
@@ -384,12 +409,12 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
           </div>
         </div>
         {assets.length > 0 && (
-          <span className="project-count">{assets.length}</span>
+          <span className={projectCountClass}>{assets.length}</span>
         )}
       </div>
 
       {/* Search */}
-      <div className="project-search-row">
+      <div className={projectSearchRowClass}>
         <input
           className={projectPanelSearchInputClass}
           type="text"
@@ -400,11 +425,11 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
       </div>
 
       {/* Tree */}
-      <div className="project-scroll">
+      <div className={projectScrollClass}>
         {loading ? (
-          <p className="panel-empty">{t('loading')}</p>
+          <p className={projectPanelEmptyClass}>{t('loading')}</p>
         ) : tree.length === 0 ? (
-          <p className="panel-empty">{t('project_empty')}</p>
+          <p className={projectPanelEmptyClass}>{t('project_empty')}</p>
         ) : (
           tree.map((node, i) => (
             <TreeNodeItem
@@ -424,25 +449,25 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
       {/* Context Menu */}
       {contextMenu && (
         <div
-          className="context-menu"
+          className={`${contextMenuClass} fixed z-[1000]`}
           style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 1000 }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button className="context-menu-item" onClick={() => handleRenameStart(contextMenu.asset)}>
+          <button className={contextMenuItemClass} onClick={() => handleRenameStart(contextMenu.asset)}>
             <IconEdit size={12} /> {t('action_rename')}
           </button>
-          <button className="context-menu-item" onClick={() => handleCopyGuid(contextMenu.asset.guid)}>
+          <button className={contextMenuItemClass} onClick={() => handleCopyGuid(contextMenu.asset.guid)}>
             <IconCopy size={12} /> {t('action_copy_guid')}
           </button>
-          <button className="context-menu-item" onClick={() => handleReimport(contextMenu.asset.source_path)}>
+          <button className={contextMenuItemClass} onClick={() => handleReimport(contextMenu.asset.source_path)}>
             <IconRefresh size={12} /> {t('action_reimport')}
           </button>
-          <button className="context-menu-item" onClick={() => handleOpenInFileManager(contextMenu.asset.source_path)}>
+          <button className={contextMenuItemClass} onClick={() => handleOpenInFileManager(contextMenu.asset.source_path)}>
             <IconFolder size={12} /> {t('action_show_in_fm')}
           </button>
-          <div className="context-menu-sep" />
+          <div className={contextMenuSeparatorClass} />
           <button
-            className={`context-menu-item danger ${contextMenu.deleteConfirm ? 'confirming' : ''}`}
+            className={contextMenuDangerItemClass}
             onClick={() => handleDeleteAsset(contextMenu.asset.source_path)}
           >
             <IconTrash size={12} /> {contextMenu.deleteConfirm ? t('action_confirm_delete') : t('action_delete')}

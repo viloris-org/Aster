@@ -1,23 +1,173 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
-@import "./styles/base.css";
-@import "./styles/hub.css";
-@import "./styles/dialogs.css";
-@import "./styles/editor-shell.css";
-@import "./styles/project-panel.css";
-@import "./styles/copilot-panel.css";
-@import "./styles/menubar.css";
-@import "./styles/toolbar-extras.css";
-@import "./styles/console.css";
-@import "./styles/project-rename.css";
-@import "./styles/viewport-overlays.css";
-@import "./styles/inspector-select.css";
-@import "./styles/interaction.css";
-@import "./styles/camera-preview.css";
-@import "./styles/script-editor.css";
-@import "./styles/command-palette.css";
-@import "./styles/animations.css";
-@import "./styles/workbench.css";
-@import "./styles/ai-panel.css";
-@import "./styles/product-workspace.css";
-@import "./styles/quest.css";
+
+@theme inline {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-border: var(--border);
+  --color-border-light: var(--border-light);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-dim: var(--accent-dim);
+  --color-danger: var(--danger);
+  --color-danger-dim: var(--danger-dim);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-aster-sm: var(--radius-sm);
+  --radius-aster-md: var(--radius-md);
+  --radius-aster-lg: var(--radius-lg);
+  --radius-aster-xl: var(--radius-xl);
+  --shadow-aster-sm: var(--shadow-sm);
+  --shadow-aster-md: var(--shadow-md);
+  --shadow-aster-lg: var(--shadow-lg);
+}
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  :root {
+    --bg-base: #18181B;
+    --bg-surface: #232327;
+    --bg-hover: #2D2D32;
+    --bg-active: #2563EB;
+    --bg-primary: var(--bg-base);
+    --bg-secondary: var(--bg-surface);
+    --border: #36363B;
+    --border-light: #42424A;
+    --text-primary: #F4F4F5;
+    --text-secondary: #A1A1AA;
+    --text-muted: #71717A;
+    --accent: #60A5FA;
+    --accent-hover: #3B82F6;
+    --accent-dim: rgba(96, 165, 250, 0.15);
+    --danger: #EF4444;
+    --danger-dim: rgba(239, 68, 68, 0.12);
+    --warning: #F59E0B;
+    --info: #3B82F6;
+    --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --radius-xl: 14px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --shadow-lg: 0 8px 30px rgba(0,0,0,0.5);
+    --transition-fast: 120ms ease;
+    --transition-normal: 200ms ease;
+  }
+
+  [data-theme="light"] {
+    --bg-base: #F4F4F5;
+    --bg-surface: #FFFFFF;
+    --bg-hover: #E4E4E7;
+    --bg-active: #DBEAFE;
+    --border: #D4D4D8;
+    --border-light: #E4E4E7;
+    --text-primary: #18181B;
+    --text-secondary: #52525B;
+    --text-muted: #A1A1AA;
+    --accent: #3B82F6;
+    --accent-hover: #2563EB;
+    --accent-dim: rgba(59, 130, 246, 0.12);
+    --danger: #DC2626;
+    --danger-dim: rgba(220, 38, 38, 0.10);
+    --warning: #D97706;
+    --info: #2563EB;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.10);
+    --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
+  }
+
+  html {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-base);
+  }
+
+  body {
+    overflow: hidden;
+  }
+
+  #root {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-base);
+    overflow: hidden;
+    position: relative;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-light);
+  }
+
+  *:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  input[type="text"],
+  input[type="search"],
+  input[type="url"],
+  input[type="number"],
+  textarea {
+    cursor: text;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"],
+  select {
+    cursor: pointer;
+  }
+
+  button {
+    font-family: var(--font-sans);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

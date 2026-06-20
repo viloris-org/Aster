@@ -19,6 +19,7 @@ import {
   installInfoClass,
   installPathClass,
   installVersionClass,
+  locationInputRowClass,
   modalBodyClass,
   modalClass,
   modalCloseButtonClass,
@@ -45,7 +46,9 @@ import {
   templateCardIconClass,
   templateCardTitleClass,
   templateGridClass,
-  themeOptionClass,
+  warningPanelClass,
+  warningPanelIconClass,
+  warningPanelTextClass,
 } from '../uiClasses';
 import {
   IconProjects, IconInstalls, IconSettings, IconFolder, IconPlus, IconTrash, IconPlay,
@@ -91,8 +94,14 @@ interface Props {
 // ─── Avatar helper ──────────────────────────────────────────────────────────
 
 const AVATAR_COLORS = [
-  'avatar-blue', 'avatar-green', 'avatar-purple', 'avatar-orange',
-  'avatar-cyan', 'avatar-pink', 'avatar-red', 'avatar-teal',
+  'bg-linear-to-br from-[#3B82F6] to-[#1D4ED8]',
+  'bg-linear-to-br from-[#22C55E] to-[#15803D]',
+  'bg-linear-to-br from-[#A855F7] to-[#7C3AED]',
+  'bg-linear-to-br from-[#F59E0B] to-[#D97706]',
+  'bg-linear-to-br from-[#06B6D4] to-[#0891B2]',
+  'bg-linear-to-br from-[#EC4899] to-[#DB2777]',
+  'bg-linear-to-br from-[#EF4444] to-[#DC2626]',
+  'bg-linear-to-br from-[#14B8A6] to-[#0D9488]',
 ];
 
 function getAvatarClass(name: string): string {
@@ -107,6 +116,78 @@ function getInitials(name: string): string {
     .map(w => w.charAt(0).toUpperCase())
     .join('')
     .slice(0, 2) || '?';
+}
+
+const hubClass = 'flex h-full min-h-0 w-full bg-[var(--bg-base)]';
+const hubMainClass = 'flex min-w-0 flex-1 flex-col overflow-hidden';
+const hubPageHeaderClass = 'flex flex-shrink-0 items-center justify-between px-8 pt-6';
+const hubPageTitleClass = 'text-[22px] font-semibold text-[var(--text-primary)]';
+const hubPageActionsClass = 'flex items-center gap-2';
+const hubSearchBarClass = 'flex-shrink-0 px-8 pt-4 pb-3';
+const hubSearchClass = 'w-full max-w-[400px] rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-surface)] bg-[url(data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2714%27%20height=%2714%27%20viewBox=%270%200%2024%2024%27%20fill=%27none%27%20stroke=%27%2364748B%27%20stroke-width=%272%27%20stroke-linecap=%27round%27%20stroke-linejoin=%27round%27%3E%3Ccircle%20cx=%2711%27%20cy=%2711%27%20r=%278%27/%3E%3Cline%20x1=%2721%27%20y1=%2721%27%20x2=%2716.65%27%20y2=%2716.65%27/%3E%3C/svg%3E)] bg-[position:12px_center] bg-no-repeat py-2 pr-3 pl-[34px] font-[var(--font-sans)] text-[13px] text-[var(--text-primary)] outline-none transition-[border-color] duration-[120ms] ease-in placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]';
+const hubActionBarLabelClass = 'mr-1 text-[11px] text-[var(--text-muted)]';
+const hubScrollClass = 'flex-1 overflow-y-auto px-8 pb-6 [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-[3px] [&::-webkit-scrollbar-thumb]:bg-[var(--border)] [&::-webkit-scrollbar-track]:bg-transparent';
+const hubGridClass = 'grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5';
+const installListClass = 'flex flex-col gap-2';
+
+function hubActionBarClass(visible: boolean): string {
+  return [
+    'flex flex-shrink-0 items-center gap-1.5 overflow-hidden px-8 pb-2 transition-all duration-200 ease-in',
+    visible ? 'min-h-8' : 'min-h-0',
+  ].join(' ');
+}
+
+const sidebarClass = 'flex w-[220px] min-w-[220px] select-none flex-col border-r border-[var(--border)] bg-[var(--bg-surface)]';
+const logoClass = 'flex items-center gap-2.5 px-5 pt-7 pb-5 [&_svg]:shrink-0';
+const logoTitleClass = 'text-lg font-bold text-[var(--text-primary)]';
+const logoTaglineClass = 'text-[11px] font-normal text-[var(--text-muted)]';
+const navClass = 'flex flex-1 flex-col gap-0.5 px-2 py-2';
+const navItemBaseClass = 'flex w-full cursor-pointer items-center gap-2.5 rounded-[var(--radius-sm)] border-0 bg-transparent px-3 py-[9px] text-left font-[var(--font-sans)] text-[13px] transition-[background,color] duration-[120ms] ease-in [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:shrink-0 [&_svg]:opacity-70 [&_svg]:transition-opacity [&_svg]:duration-[120ms] [&_svg]:ease-in hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] hover:[&_svg]:opacity-100';
+const sidebarFooterClass = 'flex items-center justify-between border-t border-[var(--border)] px-4 pt-3 pb-4';
+const themeToggleLabelClass = 'text-xs text-[var(--text-secondary)]';
+const themeToggleGroupClass = 'flex overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)]';
+
+function navItemClass(active = false): string {
+  return [
+    navItemBaseClass,
+    active
+      ? 'bg-[var(--accent-dim)] text-[var(--accent)] [&_svg]:text-[var(--accent)] [&_svg]:opacity-100'
+      : 'text-[var(--text-secondary)]',
+  ].join(' ');
+}
+
+function themeToggleButtonClass(active: boolean): string {
+  return [
+    'cursor-pointer border-0 px-2 py-1 font-[var(--font-sans)] text-xs transition-all duration-[120ms] ease-in hover:text-[var(--text-primary)]',
+    active ? 'bg-[var(--accent)] text-white' : 'bg-transparent text-[var(--text-muted)]',
+  ].join(' ');
+}
+
+const settingsSectionClass = 'mb-7';
+const settingsScrollClass = `${hubScrollClass} pt-4`;
+const settingsContentClass = 'w-[min(780px,100%)]';
+const settingsRowBaseClass = 'grid min-h-14 grid-cols-[minmax(180px,1fr)_minmax(240px,320px)] items-center gap-8 py-[11px] max-[780px]:grid-cols-1 max-[780px]:gap-2.5';
+const settingsControlBaseClass = 'min-w-0 justify-self-end max-[780px]:w-full max-[780px]:justify-self-stretch';
+const settingsControlClass = `${settingsControlBaseClass} w-full`;
+const settingsControlCompactClass = `${settingsControlBaseClass} w-[200px]`;
+const settingsActionsControlClass = `${settingsControlClass} flex justify-end`;
+const themeSelectorClass = 'grid h-8 w-[200px] grid-cols-3 gap-0.5 overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] p-0.5 max-[780px]:w-full';
+const connectedTextClass = 'text-[var(--success)]';
+const errorTextClass = 'text-[var(--error)]';
+const endpointOptionalClass = 'opacity-60';
+
+function settingsRowClass(divided = false, extra = ''): string {
+  return [
+    settingsRowBaseClass,
+    divided ? 'border-t border-[var(--border)]' : '',
+    extra,
+  ].filter(Boolean).join(' ');
+}
+
+function themeOptionButtonClass(active: boolean): string {
+  return active
+    ? 'flex h-[26px] min-w-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-[3px] border-0 bg-[var(--accent)] px-2 font-[var(--font-sans)] text-xs leading-none text-white transition-colors duration-[120ms] ease-in'
+    : 'flex h-[26px] min-w-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-[3px] border-0 bg-transparent px-2 font-[var(--font-sans)] text-xs leading-none text-[var(--text-muted)] transition-colors duration-[120ms] ease-in hover:text-[var(--text-primary)]';
 }
 
 // ─── Sidebar ────────────────────────────────────────────────────────────────
@@ -138,26 +219,26 @@ function Sidebar({
   ];
 
   return (
-    <aside className="hub-sidebar">
+    <aside className={sidebarClass}>
       {/* Logo */}
-      <div className="hub-logo">
+      <div className={logoClass}>
         <AsterLogo />
         <div>
-          <h1>Aster</h1>
-          <span>{t('app_tagline')}</span>
+          <h1 className={logoTitleClass}>Aster</h1>
+          <span className={logoTaglineClass}>{t('app_tagline')}</span>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="hub-nav">
-        <button className="hub-nav-item" onClick={onOpenQuests}>
+      <nav className={navClass}>
+        <button className={navItemClass()} onClick={onOpenQuests}>
           <IconSparkles />
           Quests
         </button>
         {navItems.map(item => (
           <button
             key={item.id}
-            className={`hub-nav-item ${page === item.id ? 'active' : ''}`}
+            className={navItemClass(page === item.id)}
             onClick={() => onNavigate(item.id)}
           >
             {item.icon}
@@ -167,13 +248,13 @@ function Sidebar({
       </nav>
 
       {/* Theme Toggle */}
-      <div className="hub-sidebar-footer">
-        <span className="theme-toggle-label">{t('sidebar_theme')}</span>
-        <div className="theme-toggle-group">
+      <div className={sidebarFooterClass}>
+        <span className={themeToggleLabelClass}>{t('sidebar_theme')}</span>
+        <div className={themeToggleGroupClass}>
           {themeOptions.map(opt => (
             <button
               key={opt.id}
-              className={`theme-toggle-btn ${theme === opt.id ? 'active' : ''}`}
+              className={themeToggleButtonClass(theme === opt.id)}
               onClick={() => onSetTheme(opt.id)}
               title={opt.id.charAt(0).toUpperCase() + opt.id.slice(1)}
             >
@@ -296,7 +377,7 @@ function NewProjectDialog({ installs, onClose, onCreate }: NewProjectDialogProps
           {/* Location */}
           <div className={formGroupClass}>
             <label className={formLabelClass}>{t('dialog_location')}</label>
-            <div className="location-input-row">
+            <div className={locationInputRowClass}>
               <input
                 className={`${formInputClass} flex-1`}
                 type="text"
@@ -378,9 +459,9 @@ function ConfirmDeleteDialog({ path, onClose, onRemoveRecent }: ConfirmDeletePro
           <button className={modalCloseButtonClass} onClick={onClose}><IconX /></button>
         </div>
         <div className={modalBodyClass}>
-          <div className="delete-warning">
-            <IconAlertTriangle />
-            <div className="delete-warning-text">
+          <div className={warningPanelClass}>
+            <IconAlertTriangle className={warningPanelIconClass} />
+            <div className={warningPanelTextClass}>
               {t_fmt('dialog_confirm_message', { path })}
             </div>
           </div>
@@ -446,9 +527,9 @@ function ProjectsPage({
   return (
     <>
       {/* Header */}
-      <div className="hub-page-header">
-        <h2>{t('hub_projects_title')}</h2>
-        <div className="hub-page-actions">
+      <div className={hubPageHeaderClass}>
+        <h2 className={hubPageTitleClass}>{t('hub_projects_title')}</h2>
+        <div className={hubPageActionsClass}>
           <button className={buttonClass('primary', 'sm')} onClick={onNewProject}>
             <IconPlus /> {t('hub_new_project')}
           </button>
@@ -456,9 +537,9 @@ function ProjectsPage({
       </div>
 
       {/* Search */}
-      <div className="hub-search-bar">
+      <div className={hubSearchBarClass}>
         <input
-          className="hub-search"
+          className={hubSearchClass}
           type="text"
           placeholder={t('hub_search')}
           value={search}
@@ -467,10 +548,10 @@ function ProjectsPage({
       </div>
 
       {/* Action bar (shown when a project is selected) */}
-      <div className={`hub-action-bar ${selectedProject ? 'visible' : ''}`}>
+      <div className={hubActionBarClass(Boolean(selectedProject))}>
         {selectedProject && (
           <>
-            <span className="hub-action-bar-label">
+            <span className={hubActionBarLabelClass}>
               {selectedProject.name}
             </span>
             <button className={buttonClass('primary', 'sm')} onClick={() => onOpen(selectedProject.path)}>
@@ -484,7 +565,7 @@ function ProjectsPage({
       </div>
 
       {/* Project Cards */}
-      <div className="hub-scroll">
+      <div className={hubScrollClass}>
         {filtered.length === 0 ? (
           <div className={hubEmptyClass}>
             <div className={hubEmptyIconClass}><IconEmpty /></div>
@@ -501,7 +582,7 @@ function ProjectsPage({
             )}
           </div>
         ) : (
-          <div className="hub-grid">
+          <div className={hubGridClass}>
             {filtered.map(project => (
               <div
                 key={project.path}
@@ -543,10 +624,10 @@ function InstallsPage({ installs }: { installs: InstallInfo[] }) {
   const { t } = useTranslation();
   return (
     <>
-      <div className="hub-page-header">
-        <h2>{t('hub_installs_title')}</h2>
+      <div className={hubPageHeaderClass}>
+        <h2 className={hubPageTitleClass}>{t('hub_installs_title')}</h2>
       </div>
-      <div className="hub-scroll">
+      <div className={hubScrollClass}>
         {installs.length === 0 ? (
           <div className={hubEmptyClass}>
             <div className={hubEmptyIconClass}><IconPackage /></div>
@@ -554,7 +635,7 @@ function InstallsPage({ installs }: { installs: InstallInfo[] }) {
             <p className={hubEmptyTextClass}>{t('hub_installs_empty_desc')}</p>
           </div>
         ) : (
-          <div className="install-list">
+          <div className={installListClass}>
             {installs.map((inst, i) => (
               <div key={i} className={installCardClass}>
                 <div className={installIconClass}><IconPackage /></div>
@@ -736,16 +817,16 @@ function CopilotSettingsSection() {
   if (!loaded) return null;
 
   return (
-    <div className="settings-section">
+    <div className={settingsSectionClass}>
       <div className={settingsSectionTitleClass}>{t('settings_ai_provider')}</div>
 
       {/* Provider */}
-      <div className="settings-row">
+      <div className={settingsRowClass()}>
         <div>
           <div className={settingsLabelClass}>{t('settings_provider')}</div>
           <div className={settingsDescClass}>{t('settings_provider_desc')}</div>
         </div>
-        <div className="settings-control settings-control-compact">
+        <div className={settingsControlCompactClass}>
           <select
             className={settingsSelectClass}
             value={settings.provider}
@@ -760,12 +841,12 @@ function CopilotSettingsSection() {
 
       {/* API Key */}
       {showApiKey && (
-        <div className="settings-row">
+        <div className={settingsRowClass(true)}>
           <div>
             <div className={settingsLabelClass}>{t('settings_api_key')}</div>
             <div className={settingsDescClass}>{t('settings_api_key_desc')}</div>
           </div>
-          <div className="settings-control">
+          <div className={settingsControlClass}>
             <input
               className={settingsInputClass}
               type="password"
@@ -782,12 +863,12 @@ function CopilotSettingsSection() {
 
       {/* Codex OAuth */}
       {settings.provider === 'codex_oauth' && (
-        <div className="settings-row">
+        <div className={settingsRowClass(true)}>
           <div>
             <div className={settingsLabelClass}>{t('settings_chatgpt_account')}</div>
             <div className={settingsDescClass}>{t('settings_chatgpt_desc')}</div>
           </div>
-          <div className="settings-control" style={{ flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <div className={`${settingsControlClass} flex flex-col items-end gap-1`}>
             <button
               className={buttonClass('primary', 'sm')}
               onClick={codexConnected ? handleCodexLogout : handleCodexLogin}
@@ -795,23 +876,23 @@ function CopilotSettingsSection() {
             >
               {codexAuthBusy ? t('settings_waiting_auth') : codexConnected ? t('settings_sign_out') : t('settings_sign_in_chatgpt')}
             </button>
-            {codexConnected && <small style={{ color: 'var(--success)' }}>{t('settings_connected')}</small>}
+            {codexConnected && <small className={connectedTextClass}>{t('settings_connected')}</small>}
             {codexCode && <small>{t('settings_enter_code').replace('{code}', codexCode ?? '')}</small>}
-            {codexAuthError && <small style={{ color: 'var(--error)' }}>{codexAuthError}</small>}
+            {codexAuthError && <small className={errorTextClass}>{codexAuthError}</small>}
           </div>
         </div>
       )}
 
       {/* Endpoint */}
       {showEndpoint && (
-        <div className="settings-row">
+        <div className={settingsRowClass(true)}>
           <div>
             <div className={settingsLabelClass}>
-              {t('settings_endpoint')} {endpointRequired ? '' : <small style={{ opacity: 0.6 }}>{t('settings_endpoint_optional')}</small>}
+              {t('settings_endpoint')} {endpointRequired ? '' : <small className={endpointOptionalClass}>{t('settings_endpoint_optional')}</small>}
             </div>
             <div className={settingsDescClass}>{t('settings_endpoint_desc')}</div>
           </div>
-          <div className="settings-control">
+          <div className={settingsControlClass}>
             <input
               className={settingsInputClass}
               type="text"
@@ -826,12 +907,12 @@ function CopilotSettingsSection() {
       {/* MiMo Configuration */}
       {settings.provider === 'mimo' && (
         <>
-          <div className="settings-row">
+          <div className={settingsRowClass(true)}>
             <div>
               <div className={settingsLabelClass}>{t('settings_billing_mode')}</div>
               <div className={settingsDescClass}>{t('settings_mimo_billing_desc')}</div>
             </div>
-            <div className="settings-control settings-control-compact">
+            <div className={settingsControlCompactClass}>
               <select
                 className={settingsSelectClass}
                 value={settings.mimo_config?.billing ?? 'subscription'}
@@ -850,12 +931,12 @@ function CopilotSettingsSection() {
             </div>
           </div>
           {(settings.mimo_config?.billing ?? 'subscription') === 'subscription' && (
-            <div className="settings-row">
+            <div className={settingsRowClass(true)}>
               <div>
                 <div className={settingsLabelClass}>{t('settings_region')}</div>
                 <div className={settingsDescClass}>{t('settings_region_desc')}</div>
               </div>
-              <div className="settings-control settings-control-compact">
+              <div className={settingsControlCompactClass}>
                 <select
                   className={settingsSelectClass}
                   value={settings.mimo_config?.region ?? 'china'}
@@ -881,12 +962,12 @@ function CopilotSettingsSection() {
       {/* GLM Configuration */}
       {settings.provider === 'glm' && (
         <>
-          <div className="settings-row">
+          <div className={settingsRowClass(true)}>
             <div>
               <div className={settingsLabelClass}>{t('settings_billing_mode')}</div>
               <div className={settingsDescClass}>{t('settings_glm_billing_desc')}</div>
             </div>
-            <div className="settings-control settings-control-compact">
+            <div className={settingsControlCompactClass}>
               <select
                 className={settingsSelectClass}
                 value={settings.glm_config?.billing ?? 'subscription'}
@@ -904,12 +985,12 @@ function CopilotSettingsSection() {
               </select>
             </div>
           </div>
-          <div className="settings-row">
+          <div className={settingsRowClass(true)}>
             <div>
               <div className={settingsLabelClass}>{t('settings_region')}</div>
               <div className={settingsDescClass}>{t('settings_glm_region_desc')}</div>
             </div>
-            <div className="settings-control settings-control-compact">
+            <div className={settingsControlCompactClass}>
               <select
                 className={settingsSelectClass}
                 value={settings.glm_config?.region ?? 'bigmodel'}
@@ -932,12 +1013,12 @@ function CopilotSettingsSection() {
 
       {/* Max Tokens */}
       {settings.provider !== 'stub' && (
-        <div className="settings-row">
+        <div className={settingsRowClass(true)}>
           <div>
             <div className={settingsLabelClass}>{t('settings_max_tokens')}</div>
             <div className={settingsDescClass}>{t('settings_max_tokens_desc')}</div>
           </div>
-          <div className="settings-control settings-control-compact">
+          <div className={settingsControlCompactClass}>
             <input
               className={settingsInputClass}
               type="number"
@@ -951,9 +1032,9 @@ function CopilotSettingsSection() {
       )}
 
       {/* Save button */}
-      <div className="settings-row settings-actions">
+      <div className={settingsRowClass(true, 'min-h-0 pt-3 max-[780px]:[&>*:first-child]:hidden')}>
         <div />
-        <div className="settings-control">
+        <div className={settingsActionsControlClass}>
           <button className={buttonClass('primary', 'sm')} onClick={handleSave} disabled={saving}>
             {saving ? t('settings_saving') : saved ? t('settings_saved') : t('settings_save_ai')}
           </button>
@@ -979,21 +1060,21 @@ function SettingsPage({
   const { t, t_fmt } = useTranslation();
   return (
     <>
-      <div className="hub-page-header">
-        <h2>{t('hub_settings_title')}</h2>
+      <div className={hubPageHeaderClass}>
+        <h2 className={hubPageTitleClass}>{t('hub_settings_title')}</h2>
       </div>
-      <div className="hub-scroll settings-scroll">
-        <div className="settings-content">
+      <div className={settingsScrollClass}>
+        <div className={settingsContentClass}>
           {/* Theme */}
-          <div className="settings-section">
+          <div className={settingsSectionClass}>
             <div className={settingsSectionTitleClass}>{t('settings_appearance')}</div>
-            <div className="settings-row">
+            <div className={settingsRowClass()}>
               <div>
                 <div className={settingsLabelClass}>{t('settings_theme')}</div>
                 <div className={settingsDescClass}>{t('settings_theme_desc')}</div>
               </div>
-              <div className="settings-control settings-control-compact">
-                <div className="theme-selector">
+              <div className={settingsControlCompactClass}>
+                <div className={themeSelectorClass}>
                   {[
                     { id: 'dark', label: t('settings_theme_dark') },
                     { id: 'light', label: t('settings_theme_light') },
@@ -1001,7 +1082,7 @@ function SettingsPage({
                   ].map(opt => (
                     <button
                       key={opt.id}
-                      className={themeOptionClass(theme === opt.id)}
+                      className={themeOptionButtonClass(theme === opt.id)}
                       onClick={() => onSetTheme(opt.id)}
                     >
                       {opt.label}
@@ -1013,14 +1094,14 @@ function SettingsPage({
           </div>
 
           {/* Language */}
-          <div className="settings-section">
+          <div className={settingsSectionClass}>
             <div className={settingsSectionTitleClass}>{t('settings_language')}</div>
-            <div className="settings-row">
+            <div className={settingsRowClass()}>
               <div>
                 <div className={settingsLabelClass}>{t('settings_editor_language')}</div>
                 <div className={settingsDescClass}>{t('settings_language_desc')}</div>
               </div>
-              <div className="settings-control settings-control-compact">
+              <div className={settingsControlCompactClass}>
                 <select className={settingsSelectClass} value={locale} onChange={(e) => onSetLocale(e.target.value)}>
                   {[
                     { id: 'en', label: t('settings_language_en') },
@@ -1041,9 +1122,9 @@ function SettingsPage({
           <CopilotSettingsSection />
 
           {/* About */}
-          <div className="settings-section">
+          <div className={settingsSectionClass}>
             <div className={settingsSectionTitleClass}>{t('settings_about')}</div>
-            <div className="settings-row">
+            <div className={settingsRowClass()}>
               <div>
                 <div className={settingsLabelClass}>{t('settings_about_name')}</div>
                 <div className={settingsDescClass}>{t_fmt('settings_about_version', { version: '0.1.0' })}</div>
@@ -1130,7 +1211,7 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
   };
 
   return (
-    <div className="hub">
+    <div className={hubClass}>
       <Sidebar
         page={state.page}
         theme={state.theme}
@@ -1139,7 +1220,7 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
         onOpenQuests={onOpenQuests}
       />
 
-      <main className="hub-main">
+      <main className={hubMainClass}>
         {renderPage()}
       </main>
 

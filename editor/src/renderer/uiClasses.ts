@@ -88,6 +88,11 @@ export const templateCardIconClass = 'mb-2 block h-6 w-6 text-[var(--accent)]';
 export const templateCardTitleClass = 'mb-1 text-sm font-semibold text-[var(--text-primary)]';
 export const templateCardDescClass = 'text-[11px] leading-[1.4] text-[var(--text-muted)]';
 
+export const locationInputRowClass = 'flex items-center gap-2';
+export const warningPanelClass = 'mb-4 flex items-start gap-3 rounded-[var(--radius-md)] border border-[rgba(239,68,68,0.2)] bg-[var(--danger-dim)] px-3.5 py-3';
+export const warningPanelIconClass = 'mt-px flex-shrink-0 text-[var(--danger)]';
+export const warningPanelTextClass = 'text-[13px] leading-[1.5] text-[var(--text-primary)] [&_strong]:text-[var(--danger)]';
+
 export const installCardClass = 'flex items-center gap-3.5 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3.5 transition-[border-color] duration-[120ms] ease-in hover:border-[var(--border-light)]';
 export const installIconClass = 'flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--accent-dim)] text-[var(--accent)]';
 export const installInfoClass = 'min-w-0 flex-1';
@@ -128,6 +133,25 @@ export const projectMetaDotClass = 'h-[3px] w-[3px] rounded-full bg-[var(--text-
 export const projectFolderButtonClass = 'flex h-[30px] w-[30px] flex-shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] border border-transparent bg-transparent text-[var(--text-muted)] transition-all duration-[120ms] ease-in hover:border-[var(--border-light)] hover:bg-[var(--bg-base)] hover:text-[var(--text-primary)]';
 export const projectPanelIconButtonClass = 'flex h-[22px] w-[22px] cursor-pointer items-center justify-center rounded-[3px] border-0 bg-transparent text-[var(--text-secondary)] transition-all duration-[var(--transition-fast)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]';
 export const projectPanelSearchInputClass = 'w-full rounded-[3px] border border-[var(--border)] bg-[var(--bg-base)] bg-[url(data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2711%27%20height=%2711%27%20viewBox=%270%200%2024%2024%27%20fill=%27none%27%20stroke=%27%2364748B%27%20stroke-width=%272%27%20stroke-linecap=%27round%27%20stroke-linejoin=%27round%27%3E%3Ccircle%20cx=%2711%27%20cy=%2711%27%20r=%278%27/%3E%3Cline%20x1=%2721%27%20y1=%2721%27%20x2=%2716.65%27%20y2=%2716.65%27/%3E%3C/svg%3E)] bg-[position:6px_center] bg-no-repeat py-[3px] pr-2 pl-[22px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none transition-[border-color] duration-[var(--transition-fast)] focus:border-[var(--accent)]';
+export const projectTreeRenameInputClass = 'min-w-0 flex-1 rounded-[2px] border border-[var(--accent)] bg-[var(--bg-surface)] px-1 py-px font-[var(--font-sans)] text-xs text-[var(--text-primary)] outline-none';
+
+export const cameraPreviewContainerClass = 'py-2 text-center';
+export const cameraPreviewLabelClass = 'mb-1 text-[10px] uppercase tracking-[0.05em] text-[var(--text-muted)]';
+export const cameraPreviewCanvasClass = 'rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)]';
+
+export const viewportGridClass = 'pointer-events-none absolute inset-0 z-[1] opacity-60 bg-[linear-gradient(rgba(255,255,255,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.025)_1px,transparent_1px)] bg-[length:40px_40px]';
+export const orientationGizmoClass = 'pointer-events-none absolute top-2 right-2 z-[2] h-20 w-20 [&_svg]:pointer-events-auto [&_svg]:cursor-pointer [&_svg]:drop-shadow-[0_1px_3px_rgba(0,0,0,0.5)] [&_svg_text]:pointer-events-none [&_svg_text]:select-none';
+export const orientationGizmoAxisClass = 'cursor-pointer pointer-events-[bounding-box] hover:opacity-100';
+
+export const toolbarExtrasClass = 'flex h-full items-center gap-1';
+export const toolbarGroupClass = 'flex h-full items-center gap-0.5';
+export const toolbarGroupRelativeClass = `${toolbarGroupClass} relative`;
+export const toolbarSelectClass = 'cursor-pointer rounded-[2px] border border-[var(--border)] bg-[var(--bg-base)] px-1 py-0.5 font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none transition-[border-color] duration-[var(--transition-fast)] focus:border-[var(--accent)]';
+export const toolbarSeparatorClass = 'mx-1 h-4 w-px bg-[var(--border)]';
+export const contextMenuClass = 'min-w-[120px] rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-surface)] py-1 shadow-[var(--shadow-lg)] animate-[fadeIn_100ms_ease]';
+export const contextMenuItemClass = 'flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent px-3 py-[5px] text-left font-[var(--font-sans)] text-xs text-[var(--text-primary)] transition-[background,color] duration-[var(--transition-fast)] hover:bg-[var(--bg-hover)]';
+export const contextMenuDangerItemClass = `${contextMenuItemClass} text-[var(--danger)] hover:bg-[var(--danger-dim)]`;
+export const contextMenuSeparatorClass = 'mx-2 my-1 h-px bg-[var(--border)]';
 
 export const hubEmptyClass = 'col-span-full flex flex-col items-center justify-center px-8 py-16 text-center';
 export const hubEmptyIconClass = 'mb-4 h-12 w-12 text-[var(--text-muted)] opacity-50';

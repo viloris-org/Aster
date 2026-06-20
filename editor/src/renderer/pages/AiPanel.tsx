@@ -19,6 +19,47 @@ import {
   IconBrain,
 } from '../icons';
 
+const cls = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
+
+const panelIconButtonClass = 'flex h-[22px] w-[22px] cursor-pointer items-center justify-center rounded border-0 bg-transparent text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]';
+const contextTagClass = 'rounded-[10px] bg-[var(--bg-base)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]';
+const contextSelectedTagClass = 'bg-[var(--accent)] text-white';
+const contextKnowledgeTagClass = 'border border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.08)] text-[#86efac]';
+const compactSelectClass = 'max-w-40 cursor-pointer truncate whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-2 py-[3px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none hover:border-[var(--accent)] focus:border-[var(--accent)]';
+const evidenceToggleClass = 'flex w-fit cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-0 py-0 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)]';
+const toolCallBaseClass = 'flex items-center gap-1.5 rounded-md px-2.5 py-1 font-[var(--font-mono)] text-xs';
+const toolCallClass = (complete: boolean) => cls(toolCallBaseClass, complete ? 'border border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.1)] text-[#4ade80]' : 'border border-[rgba(59,130,246,0.2)] bg-[rgba(59,130,246,0.1)] text-[#60a5fa]');
+const messageClass = (role: AiMessage['role']) => cls('flex gap-2', role === 'user' && 'flex-row-reverse');
+const assistantMarkdownClass = [
+  '[&_h1]:my-[0.6em] [&_h1]:mb-[0.3em] [&_h1]:text-[1.2em] [&_h1]:font-semibold [&_h1]:leading-[1.3]',
+  '[&_h2]:my-[0.6em] [&_h2]:mb-[0.3em] [&_h2]:text-[1.1em] [&_h2]:font-semibold [&_h2]:leading-[1.3]',
+  '[&_h3]:my-[0.6em] [&_h3]:mb-[0.3em] [&_h3]:text-[1em] [&_h3]:font-semibold [&_h3]:leading-[1.3]',
+  '[&_h4]:my-[0.6em] [&_h4]:mb-[0.3em] [&_h4]:font-semibold [&_h4]:leading-[1.3]',
+  '[&_p]:my-[0.4em] [&_ul]:my-[0.4em] [&_ol]:my-[0.4em] [&_ul]:pl-[1.5em] [&_ol]:pl-[1.5em] [&_li]:my-[0.2em]',
+  '[&_code:not(pre_code)]:rounded [&_code:not(pre_code)]:bg-[var(--bg-tertiary,rgba(255,255,255,0.08))] [&_code:not(pre_code)]:px-[5px] [&_code:not(pre_code)]:py-px [&_code:not(pre_code)]:font-[var(--font-mono)] [&_code:not(pre_code)]:text-[0.9em]',
+  '[&_pre]:my-[0.5em] [&_pre]:overflow-x-auto [&_pre]:rounded-md',
+  '[&_blockquote]:my-[0.5em] [&_blockquote]:border-l-[3px] [&_blockquote]:border-[var(--border)] [&_blockquote]:py-[0.2em] [&_blockquote]:pr-[0.8em] [&_blockquote]:pl-[0.8em] [&_blockquote]:text-[var(--text-secondary)]',
+  '[&_a]:text-[var(--accent)] [&_a]:no-underline hover:[&_a]:underline',
+  '[&_table]:my-[0.5em] [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:text-[0.9em] [&_table]:whitespace-normal',
+  '[&_th]:border [&_th]:border-[var(--border)] [&_th]:bg-[var(--bg-tertiary,rgba(255,255,255,0.05))] [&_th]:px-2 [&_th]:py-1 [&_th]:align-top',
+  '[&_td]:border [&_td]:border-[var(--border)] [&_td]:px-2 [&_td]:py-1 [&_td]:align-top',
+  '[&_hr]:my-[0.8em] [&_hr]:border-0 [&_hr]:border-t [&_hr]:border-[var(--border)]',
+].join(' ');
+const messageContentClass = (role: AiMessage['role']) => cls('rounded-xl px-3 py-2 text-[13px] leading-normal', role === 'user' ? 'rounded-br bg-[#2563eb] text-white' : `rounded-bl bg-[var(--bg-secondary)] text-[var(--text-primary)] ${assistantMarkdownClass}`);
+const thinkingHeaderClass = 'flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent px-2.5 py-1.5 text-left font-[var(--font-sans)] text-[11px] font-medium text-[#a78bfa] hover:bg-[rgba(139,92,246,0.08)] [&_svg]:shrink-0 [&_svg]:opacity-70';
+const cardHeaderClass = 'flex w-full cursor-pointer items-center gap-1.5 border-0 bg-[var(--bg-secondary)] px-2.5 py-1.5 text-left text-[11px] text-[var(--text-secondary)]';
+const planItemStateClass = (state: 'allowed' | 'denied' | 'auto') => cls('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold', state === 'allowed' && 'bg-[rgba(16,185,129,0.12)] text-[#10b981]', state === 'denied' && 'bg-[rgba(239,68,68,0.1)] text-[#ef4444]', state === 'auto' && 'bg-[rgba(148,163,184,0.1)] text-[var(--text-muted)]');
+const traceResultClass = (result: string) => result === 'applied' ? 'text-[#10b981]' : 'text-[#ef4444]';
+const consoleLevelClass = (level: string) => cls('font-bold uppercase text-[var(--text-secondary)]', level === 'error' && 'text-[#ef4444]', (level === 'warn' || level === 'warning') && 'text-[#f59e0b]');
+const permissionStateClass = (allowed: boolean) => cls('text-[9px] font-semibold', allowed ? 'text-[#22c55e]' : 'text-[#f87171]');
+const permissionButtonClass = 'cursor-pointer rounded border border-[var(--border)] bg-[var(--bg-surface)] px-[7px] py-1 font-[var(--font-sans)] text-[9px] font-medium text-[var(--text-secondary)] hover:border-[#a78bfa] hover:text-[#c4b5fd]';
+const changeKindClass = (kind: CopilotOperation['permission_kind']) => cls('rounded-[3px] px-1 py-0.5 text-center font-[var(--font-mono)] text-[8px] font-bold', kind === 'write' && 'bg-[rgba(245,158,11,0.14)] text-[#f59e0b]', kind === 'read' && 'bg-[rgba(34,197,94,0.12)] text-[#22c55e]', kind === 'command' && 'bg-[rgba(96,165,250,0.14)] text-[#60a5fa]');
+const workflowStepClass = (active = false) => cls('rounded-[5px] px-[3px] py-1.5 text-[10px] font-medium text-[var(--text-muted)]', active && 'bg-[var(--accent-dim)] text-[var(--accent)]');
+const mentionItemClass = (active: boolean) => cls('flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-2.5 py-1.5 text-left font-[var(--font-sans)] text-xs text-[var(--text-primary)] hover:bg-[var(--accent-dim)]', active && 'bg-[var(--accent-dim)]');
+const messageStateClass = (state: 'queued' | 'interrupted') => cls('mt-1.5 w-fit rounded px-1.5 py-0.5 text-[9px] font-semibold', state === 'queued' ? 'bg-[rgba(245,158,11,0.12)] text-[#fbbf24]' : 'bg-[rgba(148,163,184,0.12)] text-[#94a3b8]');
+const workspaceTabClass = (active: boolean) => cls('min-w-[72px] cursor-pointer rounded border-0 bg-transparent px-2.5 text-[11px] text-[var(--text-secondary)]', active && 'bg-[var(--bg-active)] text-[var(--text-primary)]');
+const commonSpinnerClass = 'animate-spin';
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface CopilotOperation {
@@ -205,14 +246,14 @@ function ModelSelector() {
     }
   }, []);
 
-  if (loading) return <span className="ai-model-selector-loading"><IconLoader className="spin-icon" /></span>;
+  if (loading) return <span className="text-[var(--text-secondary)] [&_svg]:h-3 [&_svg]:w-3"><IconLoader className={commonSpinnerClass} /></span>;
 
   const known = models.some(m => m.id === currentModel);
 
   return (
-    <div className="ai-model-selector">
+    <div className="flex items-center">
       <select
-        className="ai-model-select"
+        className={compactSelectClass}
         value={known ? currentModel : currentModel ? '__custom__' : ''}
         title={discoveryError ?? t('model_available_title')}
         onChange={(e) => {
@@ -246,23 +287,23 @@ function ContextBar({ projectName, selectedEntity, sceneObjectCount, onSettingsC
 }) {
   const { t } = useTranslation();
   return (
-    <div className="ai-context-bar">
-      {projectName && <span className="ai-context-tag">{projectName}</span>}
-      <span className="ai-context-tag">{sceneObjectCount} {t('label_objects')}</span>
+    <div className="flex min-h-[42px] items-center gap-1.5 border-b border-[var(--border)] bg-[var(--bg-surface)] px-2.5 py-[7px]">
+      {projectName && <span className={contextTagClass}>{projectName}</span>}
+      <span className={contextTagClass}>{sceneObjectCount} {t('label_objects')}</span>
       {selectedEntity && (
-        <span className="ai-context-tag ai-context-selected">@ {selectedEntity}</span>
+        <span className={cls(contextTagClass, contextSelectedTagClass)}>@ {selectedEntity}</span>
       )}
       {attachedKnowledgeCount > 0 && (
-        <span className="ai-context-tag ai-context-knowledge">{attachedKnowledgeCount} Knowledge</span>
+        <span className={cls(contextTagClass, contextKnowledgeTagClass)}>{attachedKnowledgeCount} Knowledge</span>
       )}
       {conversationTurns > 0 && (
-        <span className="ai-context-tag ai-context-turns">{conversationTurns} {conversationTurns !== 1 ? t('label_turns') : t('label_turn')}</span>
+        <span className={cls(contextTagClass, "max-[1050px]:hidden")}>{conversationTurns} {conversationTurns !== 1 ? t('label_turns') : t('label_turn')}</span>
       )}
-      <div className="ai-context-actions">
-        <button className="ai-context-settings-btn" onClick={onNewChat} title={t('ai_new_chat')} aria-label={t('ai_new_chat')}>
+      <div className="ml-auto flex items-center gap-0.5">
+        <button className={panelIconButtonClass} onClick={onNewChat} title={t('ai_new_chat')} aria-label={t('ai_new_chat')}>
           <IconRefresh />
         </button>
-        <button className="ai-context-settings-btn" onClick={onSettingsClick} title={t('ai_settings')} aria-label={t('ai_settings')}>
+        <button className={panelIconButtonClass} onClick={onSettingsClick} title={t('ai_settings')} aria-label={t('ai_settings')}>
           <IconSettings />
         </button>
       </div>
@@ -279,23 +320,23 @@ function EntityContextCard({ entity }: { entity: EntityDetails }) {
   const comps = entity.components;
 
   return (
-    <div className="ai-entity-context-card">
-      <button className="ai-entity-context-header" onClick={() => setExpanded(!expanded)}>
+    <div className="border-b border-[var(--border)] bg-[var(--bg-hover)]">
+      <button className="flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent px-2.5 py-1.5 text-left font-[var(--font-sans)] text-xs text-[var(--text-primary)] hover:bg-[var(--bg-active)] [&_svg]:h-3 [&_svg]:w-3 [&_svg]:shrink-0 [&_svg]:opacity-60" onClick={() => setExpanded(!expanded)}>
         {expanded ? <IconChevronDown /> : <IconChevronRight />}
-        <span className="ai-entity-context-name">{entity.name}</span>
-        <span className="ai-entity-context-tag">{entity.tag || t('entity_untagged')}</span>
-        <span className="ai-entity-context-components">{comps.length} {comps.length !== 1 ? t('label_comps') : t('label_comp')}</span>
+        <span className="font-semibold text-[var(--accent)]">{entity.name}</span>
+        <span className="rounded-[3px] bg-[var(--bg-surface)] px-[5px] py-px text-[10px] text-[var(--text-muted)]">{entity.tag || t('entity_untagged')}</span>
+        <span className="ml-auto text-[10px] text-[var(--text-muted)]">{comps.length} {comps.length !== 1 ? t('label_comps') : t('label_comp')}</span>
       </button>
       {expanded && (
-        <div className="ai-entity-context-body">
-          <div className="ai-entity-context-row">
-            <span className="ai-entity-context-label">{t('prop_position')}</span>
-            <span className="ai-entity-context-value">
+        <div className="flex flex-col gap-[3px] py-1 pr-2.5 pb-2 pl-7">
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="min-w-[55px] text-[var(--text-muted)]">{t('prop_position')}</span>
+            <span className="font-[var(--font-mono)] text-[10px] text-[var(--text-secondary)]">
               {pos[0].toFixed(2)}, {pos[1].toFixed(2)}, {pos[2].toFixed(2)}
             </span>
           </div>
           {comps.map((c, i) => (
-            <div key={i} className="ai-entity-context-row">
+            <div key={i} className="flex items-center gap-1.5 text-[11px]">
               <span className={aiEntityContextCompBadgeClass}>{c.type}</span>
             </div>
           ))}
@@ -312,18 +353,18 @@ function ToolCallIndicator({ toolCalls }: { toolCalls: ActiveToolCall[] }) {
   const [expanded, setExpanded] = useState(false);
   const pending = toolCalls.some(tc => !tc.complete);
   return (
-    <div className="ai-tool-calls">
-      <button className="ai-evidence-toggle" onClick={() => setExpanded(open => !open)}>
+    <div className="mb-1.5 flex flex-col gap-1">
+      <button className={evidenceToggleClass} onClick={() => setExpanded(open => !open)}>
         {expanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
         <span>{pending ? t('queue_responding') : 'Evidence'}</span>
       </button>
       {expanded && toolCalls.map((tc, i) => (
-        <div key={i} className={`ai-tool-call ${tc.complete ? 'complete' : 'pending'}`}>
-          <span className="ai-tool-call-icon">{tc.complete ? '✓' : '⟳'}</span>
-          <span className="ai-tool-call-name">{tc.name}</span>
-          {!tc.complete && <span className="ai-tool-call-status">{t('tool_calling')}</span>}
+        <div key={i} className={toolCallClass(tc.complete)}>
+          <span className={cls("shrink-0 text-[11px]", !tc.complete && commonSpinnerClass)}>{tc.complete ? '✓' : '⟳'}</span>
+          <span className="font-semibold">{tc.name}</span>
+          {!tc.complete && <span className="opacity-70 italic">{t('tool_calling')}</span>}
           {tc.complete && tc.argumentsPreview && (
-            <span className="ai-tool-call-args">
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap opacity-80">
               {(() => {
                 try {
                   const args = JSON.parse(tc.argumentsPreview);
@@ -335,9 +376,9 @@ function ToolCallIndicator({ toolCalls }: { toolCalls: ActiveToolCall[] }) {
                     const display = typeof v === 'string' ? `"${v.slice(0, 30)}${v.length > 30 ? '...' : ''}"` : JSON.stringify(v);
                     return `${k}: ${display}`;
                   }).join(', ');
-                  return <span className="ai-tool-call-args-text" title={fullJson}>({preview})</span>;
+                  return <span className="text-[11px]" title={fullJson}>({preview})</span>;
                 } catch {
-                  return <span className="ai-tool-call-args-text">({t('tool_parsing')})</span>;
+                  return <span className="text-[11px]">({t('tool_parsing')})</span>;
                 }
               })()}
             </span>
@@ -353,15 +394,15 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
 
   return (
-    <div className={`ai-message ai-message-${msg.role}`}>
-      <div className="ai-message-avatar">
+    <div className={messageClass(msg.role)}>
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-xs">
         {msg.role === 'assistant' ? <IconBot /> : <span>U</span>}
       </div>
-      <div className="ai-message-body">
+      <div className="flex max-w-[85%] flex-col gap-1.5">
         {msg.thinking && (
-          <div className="ai-thinking-block">
+          <div className="mb-2 overflow-hidden rounded-[7px] border border-[rgba(139,92,246,0.2)] bg-[rgba(139,92,246,0.05)]">
             <button
-              className="ai-thinking-header"
+              className={thinkingHeaderClass}
               onClick={() => setThinkingExpanded(!thinkingExpanded)}
             >
               {thinkingExpanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
@@ -369,14 +410,14 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
                <span>{t('ai_thinking_process')}</span>
             </button>
             {thinkingExpanded && (
-              <div className="ai-thinking-content">{msg.thinking}</div>
+              <div className="whitespace-pre-wrap border-t border-[rgba(139,92,246,0.15)] px-2.5 py-2 text-xs leading-normal text-[var(--text-secondary)]">{msg.thinking}</div>
             )}
           </div>
         )}
         {msg.activeToolCalls && msg.activeToolCalls.length > 0 && (
           <ToolCallIndicator toolCalls={msg.activeToolCalls} />
         )}
-        <div className="ai-message-content">
+        <div className={messageContentClass(msg.role)}>
           {msg.role === 'assistant' ? (
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
@@ -386,9 +427,9 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
                   const codeString = String(children).replace(/\n$/, '');
                   if (match) {
                     return (
-                      <div className="ai-code-block">
+                      <div className="group relative my-[0.5em]">
                         <button
-                          className="ai-code-copy-btn"
+                          className="absolute top-1.5 right-1.5 z-[1] cursor-pointer rounded border border-[var(--border)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                           onClick={() => navigator.clipboard.writeText(codeString)}
                           title={t('btn_copy')}
                         >
@@ -415,8 +456,8 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
             msg.content
           )}
         </div>
-        {msg.queued && <div className="ai-message-state queued">{t('msg_queued')}</div>}
-        {msg.interrupted && <div className="ai-message-state interrupted">{t('msg_interrupted')}</div>}
+        {msg.queued && <div className={messageStateClass('queued')}>{t('msg_queued')}</div>}
+        {msg.interrupted && <div className={messageStateClass('interrupted')}>{t('msg_interrupted')}</div>}
         {msg.cards && msg.cards.map((card, i) => (
           <InlineCard key={i} card={card} />
         ))}
@@ -443,13 +484,13 @@ function InlineCard({ card }: { card: AiCard }) {
   const label = card.type === 'trace' || card.type === 'console' ? 'Evidence' : card.type;
 
   return (
-    <div className={`ai-card ai-card-${card.type}`}>
-      <button className="ai-card-header" onClick={() => setExpanded(!expanded)}>
+    <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+      <button className={cardHeaderClass} onClick={() => setExpanded(!expanded)}>
         {expanded ? <IconChevronDown /> : <IconChevronRight />}
-        <span className="ai-card-type">{label}</span>
+        <span className="capitalize">{label}</span>
       </button>
       {expanded && (
-        <div className="ai-card-body">
+        <div className="px-2.5 py-2">
           {card.type === 'plan' && <PlanCard data={card.data} />}
           {card.type === 'trace' && <TraceCard data={card.data} />}
           {card.type === 'console' && <ConsoleCard data={card.data} />}
@@ -466,7 +507,7 @@ function PlanCard({ data }: { data: CopilotPlan }) {
   const ctx = useContext(PlanApprovalContext);
 
   return (
-    <div className="ai-plan-card">
+    <div className="">
       {data.operations.map((op) => {
         const isRead = op.permission_kind === 'read';
         const isApproved = ctx?.approved.has(op.index);
@@ -474,17 +515,17 @@ function PlanCard({ data }: { data: CopilotPlan }) {
         const showControls = ctx?.active && !isRead;
 
         return (
-          <div key={op.index} className="ai-plan-item">
+          <div key={op.index} className="flex min-h-7 items-center gap-1.5 py-[5px] text-xs">
             <span className={aiPlanBadgeClass(op.requires_write ? 'write' : 'read')}>
               {op.permission_kind === 'read' ? 'R' : op.permission_kind === 'command' ? 'CMD' : 'W'}
             </span>
-            <span className="ai-plan-item-preview">{op.preview}</span>
+            <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{op.preview}</span>
             {showControls && (
-              <div className="ai-plan-item-actions">
+              <div className="flex shrink-0 items-center gap-1">
                 {isApproved ? (
-                  <span className="ai-plan-item-state allowed">{t('op_allowed_icon')}</span>
+                  <span className={planItemStateClass('allowed')}>{t('op_allowed_icon')}</span>
                 ) : isDenied ? (
-                  <span className="ai-plan-item-state denied">{t('op_denied_icon')}</span>
+                  <span className={planItemStateClass('denied')}>{t('op_denied_icon')}</span>
                 ) : (
                   <>
                     <button
@@ -506,7 +547,7 @@ function PlanCard({ data }: { data: CopilotPlan }) {
               </div>
             )}
             {isRead && (
-              <span className="ai-plan-item-state auto">{t('op_auto')}</span>
+              <span className={planItemStateClass('auto')}>{t('op_auto')}</span>
             )}
           </div>
         );
@@ -517,11 +558,11 @@ function PlanCard({ data }: { data: CopilotPlan }) {
 
 function TraceCard({ data }: { data: TraceEntry[] }) {
   return (
-    <div className="ai-trace-card">
+    <div className="">
       {data.map((entry, i) => (
-        <div key={i} className={`ai-trace-item ${entry.result === 'applied' ? 'success' : 'fail'}`}>
-          <span className="ai-trace-tool">{entry.tool}</span>
-          <span className="ai-trace-result">{entry.result}</span>
+        <div key={i} className="flex justify-between py-0.5 text-[11px]">
+          <span className="">{entry.tool}</span>
+          <span className={traceResultClass(entry.result)}>{entry.result}</span>
         </div>
       ))}
     </div>
@@ -530,12 +571,12 @@ function TraceCard({ data }: { data: TraceEntry[] }) {
 
 function ConsoleCard({ data }: { data: ConsoleEntry[] }) {
   return (
-    <div className="ai-console-card">
+    <div className="flex max-h-[220px] flex-col gap-1 overflow-auto">
       {data.map((entry, i) => (
-        <div key={i} className={`ai-console-item level-${entry.level}`}>
-          <span className="ai-console-level">{entry.level}</span>
-          <span className="ai-console-subsystem">{entry.subsystem}</span>
-          <span className="ai-console-message">{entry.message}</span>
+        <div key={i} className="grid grid-cols-[52px_86px_minmax(0,1fr)] items-start gap-1.5 border-b border-[var(--border)] py-1 text-[11px] last:border-b-0">
+          <span className={consoleLevelClass(entry.level)}>{entry.level}</span>
+          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-muted)]">{entry.subsystem}</span>
+          <span className="min-w-0 whitespace-pre-wrap break-anywhere">{entry.message}</span>
         </div>
       ))}
     </div>
@@ -544,7 +585,7 @@ function ConsoleCard({ data }: { data: ConsoleEntry[] }) {
 
 function ErrorCard({ data }: { data: string }) {
   return (
-    <div className="ai-error-card">
+    <div className="flex items-center gap-1.5 text-xs text-[#ef4444]">
       <IconAlertCircle />
       <span>{data}</span>
     </div>
@@ -553,11 +594,11 @@ function ErrorCard({ data }: { data: string }) {
 
 function EntityListCard({ data }: { data: Array<{ id: string; name: string }> }) {
   return (
-    <div className="ai-entity-list-card">
+    <div className="flex flex-col gap-0.5">
       {data.map((e) => (
-        <div key={e.id} className="ai-entity-item">
-          <span className="ai-entity-id">{e.id}</span>
-          <span className="ai-entity-name">{e.name}</span>
+        <div key={e.id} className="flex gap-2 text-xs">
+          <span className="font-mono text-[11px] text-[var(--text-secondary)]">{e.id}</span>
+          <span className="">{e.name}</span>
         </div>
       ))}
     </div>
@@ -569,15 +610,15 @@ function EntityListCard({ data }: { data: Array<{ id: string; name: string }> })
 function QuickActions({ onAction }: { onAction: (action: string) => void }) {
   const { t } = useTranslation();
   return (
-    <div className="ai-quick-actions">
-      <span className="ai-quick-actions-label">{t('ai_workspace_label')}</span>
-      <button className="ai-quick-btn" onClick={() => onAction('save')} title={t('command_save')} aria-label={t('command_save')}>
+    <div className="mb-2 flex items-center gap-1">
+      <span className="mr-auto text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]">{t('ai_workspace_label')}</span>
+      <button className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-base)] text-sm text-[var(--text-secondary)] hover:border-[var(--border-light)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => onAction('save')} title={t('command_save')} aria-label={t('command_save')}>
         <IconSave />
       </button>
-      <button className="ai-quick-btn" onClick={() => onAction('undo')} title={t('command_undo')} aria-label={t('command_undo')}>
+      <button className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-base)] text-sm text-[var(--text-secondary)] hover:border-[var(--border-light)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => onAction('undo')} title={t('command_undo')} aria-label={t('command_undo')}>
         <IconUndo />
       </button>
-      <button className="ai-quick-btn" onClick={() => onAction('play')} title={t('command_play')} aria-label={t('command_play')}>
+      <button className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-base)] text-sm text-[var(--text-secondary)] hover:border-[var(--border-light)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => onAction('play')} title={t('command_play')} aria-label={t('command_play')}>
         <IconPlay />
       </button>
     </div>
@@ -1258,7 +1299,7 @@ export default function AiPanel({
   }, [approved, completedBundle, denied, discardProposal, executeApproved, onWorkspaceStateChange, plan, status]);
 
   return (
-    <div className="ai-panel">
+    <div className="flex h-full flex-col overflow-hidden">
       <ContextBar
         projectName={projectName}
         selectedEntity={selectedEntityName}
@@ -1269,11 +1310,11 @@ export default function AiPanel({
         attachedKnowledgeCount={attachedKnowledge.length}
       />
 
-      {!chatOnly && (plan || completedBundle) && <div className="ai-workspace-tabs" role="tablist" aria-label="AI workspace">
+      {!chatOnly && (plan || completedBundle) && <div className="flex min-h-9 gap-1 border-b border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 [&_span]:min-w-4 [&_span]:rounded-lg [&_span]:bg-[rgba(167,139,250,0.16)] [&_span]:px-[5px] [&_span]:py-px [&_span]:text-[9px] [&_span]:text-[#a78bfa]" role="tablist" aria-label="AI workspace">
         {(['chat', 'changes'] as AiWorkspaceView[]).map(view => (
           <button
             key={view}
-            className={workspaceView === view ? 'active' : ''}
+            className={workspaceTabClass(workspaceView === view)}
             onClick={() => setWorkspaceView(view)}
             role="tab"
             aria-selected={workspaceView === view}
@@ -1293,29 +1334,29 @@ export default function AiPanel({
       <PlanApprovalContext.Provider value={planApprovalCtx}>
       <div
         ref={scrollRef}
-        className={`ai-messages ${!chatOnly && workspaceView !== 'chat' ? 'ai-workspace-detail' : ''}`}
+        className={cls("flex flex-1 flex-col gap-3 overflow-y-auto p-4", !chatOnly && workspaceView !== 'chat' && "bg-[var(--bg-base)] p-3")}
         aria-live="polite"
       >
         {!chatOnly && workspaceView === 'changes' && (
-          <div className="ai-changes-workspace">
-            <div className="ai-task-section-title">{t('changes_bundle_title')}</div>
+          <div className="flex flex-col gap-3">
+            <div className="mb-2.5 text-[10px] font-bold uppercase tracking-[0.07em] text-[var(--text-secondary)]">{t('changes_bundle_title')}</div>
             {!plan || plan.operations.length === 0 ? (
               completedBundle ? (
-                <div className="ai-completed-bundle">
-                  <div className="ai-completed-heading">
+                <div className="flex flex-col gap-3 rounded-[9px] border border-[rgba(34,197,94,0.32)] bg-[rgba(34,197,94,0.05)] p-3.5">
+                  <div className="flex items-start gap-[9px] text-[#22c55e] [&>div]:flex [&>div]:flex-col [&>div]:gap-[3px] [&_strong]:text-xs [&_strong]:text-[var(--text-primary)] [&_span]:text-[11px] [&_span]:leading-[1.45] [&_span]:text-[var(--text-secondary)]">
                     <IconCheck />
                     <div>
                       <strong>{t('changes_applied')}</strong>
                       <span>{completedBundle.summary}</span>
                     </div>
                   </div>
-                  <div className="ai-completed-stats">
+                  <div className="grid grid-cols-2 gap-1.5 [&_span]:rounded-md [&_span]:bg-[var(--bg-base)] [&_span]:p-2 [&_span]:text-center [&_span]:text-[10px] [&_span]:text-[var(--text-muted)] [&_strong]:block [&_strong]:font-[var(--font-mono)] [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--text-primary)]">
                     <span><strong>{completedBundle.operationsPerformed}</strong> {t('label_operations')}</span>
                     <span><strong>{completedBundle.traceEntries.length}</strong> {t('label_trace_entries')}</span>
                     <span><strong>{completedBundle.consoleEntries.length}</strong> console</span>
                   </div>
                   {completedBundle.undoAvailable && (
-                    <button className="ai-undo-bundle-btn" onClick={undoLastAiEdit}>
+                    <button className="inline-flex min-h-[30px] w-max cursor-pointer items-center gap-1.5 rounded-md border border-[rgba(96,165,250,0.45)] bg-[rgba(96,165,250,0.08)] px-2.5 py-0 font-[var(--font-sans)] text-[10px] font-semibold text-[#bfdbfe] hover:border-[#60a5fa] hover:bg-[rgba(96,165,250,0.14)] hover:text-[#dbeafe]" onClick={undoLastAiEdit}>
                       <IconUndo /> Undo {completedBundle.undoLabel ?? 'AI edit'}
                     </button>
                   )}
@@ -1323,38 +1364,38 @@ export default function AiPanel({
                   {completedBundle.consoleEntries.length > 0 && <InlineCard card={{ type: 'console', data: completedBundle.consoleEntries }} />}
                 </div>
               ) : (
-                <div className="ai-workspace-empty">
+                <div className="flex flex-col gap-1.5 rounded-[9px] border border-dashed border-[rgba(167,139,250,0.45)] bg-[rgba(167,139,250,0.05)] p-[18px] [&_strong]:text-xs [&_strong]:text-[#c4b5fd] [&_span]:text-[11px] [&_span]:leading-normal [&_span]:text-[var(--text-muted)]">
                   <strong>{t('changes_empty')}</strong>
                   <span>{t('changes_empty_desc')}</span>
                 </div>
               )
             ) : <>
-              <div className="ai-change-summary">
+              <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--text-muted)]">
                 <span>{t('changes_decision_hint')}</span>
               </div>
               {plan.operations.map(operation => (
-              <div key={operation.index} className="ai-change-row">
-                <span className={`ai-change-kind ${operation.permission_kind}`}>
+              <div key={operation.index} className="grid grid-cols-[58px_1fr] items-start gap-2 rounded-lg border border-dashed border-[rgba(167,139,250,0.4)] bg-[rgba(167,139,250,0.05)] p-2.5 text-[11px] leading-[1.45] text-[var(--text-secondary)] hover:border-[#a78bfa]">
+                <span className={changeKindClass(operation.permission_kind)}>
                   {operation.permission_kind.toUpperCase()}
                 </span>
-                <span className="ai-change-description" title={operation.preview}>{operation.preview}</span>
-                <div className="ai-permission-actions">
+                <span className="leading-[1.45]" title={operation.preview}>{operation.preview}</span>
+                <div className="col-start-2 flex flex-wrap gap-[5px]">
                   {operation.permission_kind === 'read' ? (
-                    <span className="ai-permission-state allowed">{t('op_allowed_auto')}</span>
+                    <span className={permissionStateClass(true)}>{t('op_allowed_auto')}</span>
                   ) : approved.has(operation.index) ? (
-                    <span className="ai-permission-state allowed">
+                    <span className={permissionStateClass(true)}>
                       {operation.permission_kind === 'command' && operation.permanently_allowed ? t('op_always_allowed') : t('op_allowed')}
                     </span>
                   ) : denied.has(operation.index) ? (
-                    <span className="ai-permission-state denied">{t('op_denied_once')}</span>
+                    <span className={permissionStateClass(false)}>{t('op_denied_once')}</span>
                   ) : operation.permission_kind === 'write' ? <>
-                    <button onClick={() => decideOperation(operation, 'once')}>{t('btn_allow_once')}</button>
-                    <button onClick={() => decideOperation(operation, 'session')}>{t('btn_allow_session')}</button>
-                    <button onClick={() => decideOperation(operation, 'deny')}>{t('btn_deny_once')}</button>
+                    <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'once')}>{t('btn_allow_once')}</button>
+                    <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'session')}>{t('btn_allow_session')}</button>
+                    <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'deny')}>{t('btn_deny_once')}</button>
                   </> : <>
-                    <button onClick={() => decideOperation(operation, 'once')}>{t('btn_allow_once')}</button>
-                    <button onClick={() => decideOperation(operation, 'always')}>{t('btn_allow_always')}</button>
-                    <button onClick={() => decideOperation(operation, 'deny')}>{t('btn_deny_once')}</button>
+                    <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'once')}>{t('btn_allow_once')}</button>
+                    <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'always')}>{t('btn_allow_always')}</button>
+                    <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'deny')}>{t('btn_deny_once')}</button>
                   </>}
                 </div>
               </div>
@@ -1364,34 +1405,34 @@ export default function AiPanel({
         )}
         {(chatOnly || workspaceView === 'chat') && <>
         {messages.length === 0 && (
-          <div className="ai-empty">
-            <div className="ai-empty-mark"><IconSparkles size={24} /></div>
-            <span className="ai-empty-eyebrow">{t('ai_workspace_eyebrow')}</span>
-            <p className="ai-empty-title">{t('ai_empty_title')}</p>
-            <p className="ai-empty-description">
+          <div className="m-auto flex h-full max-w-[440px] flex-col items-center justify-start gap-2.5 px-5 pt-7 pb-5 text-center text-[var(--text-secondary)]">
+            <div className="mb-0.5 flex h-[46px] w-[46px] items-center justify-center rounded-[14px] border border-[rgba(96,165,250,0.25)] bg-[linear-gradient(145deg,rgba(96,165,250,0.18),rgba(96,165,250,0.04))] text-[var(--accent)] shadow-[0_8px_24px_rgba(0,0,0,0.2)] [&_svg]:opacity-90"><IconSparkles size={24} /></div>
+            <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--accent)]">{t('ai_workspace_eyebrow')}</span>
+            <p className="text-xl font-semibold text-[var(--text-primary)]">{t('ai_empty_title')}</p>
+            <p className="max-w-[340px] text-[13px] leading-[1.55] text-[var(--text-secondary)]">
               {t('ai_empty_desc')}
             </p>
-            <div className="ai-workflow" aria-label="AI editing workflow">
-              <span className="active">{t('workflow_step_describe')}</span>
-              <span>{t('workflow_step_review')}</span>
-              <span>{t('workflow_step_apply')}</span>
-              <span>{t('workflow_step_verify')}</span>
+            <div className="my-2 mb-1 grid w-full grid-cols-4 rounded-lg border border-[var(--border)] bg-[rgba(0,0,0,0.12)] p-1" aria-label="AI editing workflow">
+              <span className={workflowStepClass(true)}>{t('workflow_step_describe')}</span>
+              <span className={workflowStepClass()}>{t('workflow_step_review')}</span>
+              <span className={workflowStepClass()}>{t('workflow_step_apply')}</span>
+              <span className={workflowStepClass()}>{t('workflow_step_verify')}</span>
             </div>
-            <div className="ai-empty-prompts">
-              <button className="ai-prompt-chip" onClick={() => submitPrompt('Create a playable third-person character with a following camera and basic movement controls')}>
+            <div className="mt-1 grid w-full gap-[7px]">
+              <button className="flex cursor-pointer flex-col gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-left font-[inherit] text-[var(--text-secondary)] transition-[background,border-color,transform] duration-[var(--transition-fast)] hover:-translate-y-px hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] [&_strong]:text-xs [&_strong]:font-semibold [&_strong]:text-[var(--text-primary)] [&_span]:text-[11px] [&_span]:text-[var(--text-muted)]" onClick={() => submitPrompt('Create a playable third-person character with a following camera and basic movement controls')}>
                 <strong>{t('prompt_playable_char')}</strong>
                 <span>{t('prompt_playable_char_desc')}</span>
               </button>
-              <button className="ai-prompt-chip" onClick={() => submitPrompt('Improve the lighting and atmosphere of this scene while preserving the current composition')}>
+              <button className="flex cursor-pointer flex-col gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-left font-[inherit] text-[var(--text-secondary)] transition-[background,border-color,transform] duration-[var(--transition-fast)] hover:-translate-y-px hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] [&_strong]:text-xs [&_strong]:font-semibold [&_strong]:text-[var(--text-primary)] [&_span]:text-[11px] [&_span]:text-[var(--text-muted)]" onClick={() => submitPrompt('Improve the lighting and atmosphere of this scene while preserving the current composition')}>
                 <strong>{t('prompt_improve_scene')}</strong>
                 <span>{t('prompt_improve_scene_desc')}</span>
               </button>
-              <button className="ai-prompt-chip" onClick={() => submitPrompt('Inspect the current project and recommend the highest-impact next improvement')}>
+              <button className="flex cursor-pointer flex-col gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2.5 text-left font-[inherit] text-[var(--text-secondary)] transition-[background,border-color,transform] duration-[var(--transition-fast)] hover:-translate-y-px hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] [&_strong]:text-xs [&_strong]:font-semibold [&_strong]:text-[var(--text-primary)] [&_span]:text-[11px] [&_span]:text-[var(--text-muted)]" onClick={() => submitPrompt('Inspect the current project and recommend the highest-impact next improvement')}>
                 <strong>{t('prompt_inspect')}</strong>
                 <span>{t('prompt_inspect_desc')}</span>
               </button>
             </div>
-            <button className="ai-empty-configure" onClick={onOpenSettings}>
+            <button className="mt-1 flex cursor-pointer items-center gap-[5px] rounded-md border-0 bg-transparent px-3 py-1.5 font-[inherit] text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)]" onClick={onOpenSettings}>
               <IconSettings size={12} />
               <span>{t('ai_model_settings')}</span>
               <IconChevronRight size={12} />
@@ -1404,19 +1445,19 @@ export default function AiPanel({
 
         {/* Executing indicator */}
         {status === 'executing' && (
-          <div className="ai-executing">
-            <IconLoader className="spin-icon" />
+          <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--text-secondary)]">
+            <IconLoader className={commonSpinnerClass} />
             <span>{t('status_executing')}</span>
           </div>
         )}
         {status === 'thinking' && (
-          <div className="ai-executing">
-            <IconLoader className="spin-icon" />
+          <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--text-secondary)]">
+            <IconLoader className={commonSpinnerClass} />
             <span>{t('status_thinking')}</span>
           </div>
         )}
         {status === 'error' && lastPromptRef.current && (
-          <div className="ai-retry-bar">
+          <div className="flex items-center gap-2 px-3 py-2">
             <button
               className={buttonClass('secondary', 'sm')}
               onClick={() => {
@@ -1459,7 +1500,7 @@ export default function AiPanel({
           });
         };
         return (
-          <div className="ai-plan-bar">
+          <div className="flex items-center gap-2 border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
             <button
               className={buttonClass('primary', 'sm')}
               onClick={() => executeApproved()}
@@ -1483,19 +1524,19 @@ export default function AiPanel({
             >
               {t('btn_discard')}
             </button>
-            {approvedWriteCount > 0 && <span className="ai-write-warning">{approvedWriteCount} {approvedWriteCount === 1 ? t('label_write') : t('label_writes')}</span>}
+            {approvedWriteCount > 0 && <span className="shrink-0 rounded bg-[rgba(245,158,11,0.12)] px-1.5 py-[3px] text-[9px] font-semibold text-[#f59e0b]">{approvedWriteCount} {approvedWriteCount === 1 ? t('label_write') : t('label_writes')}</span>}
           </div>
         );
       })()}
 
       {/* Quick Actions + Input */}
-      <div className="ai-input-area">
+      <div className="relative border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 pt-2.5 pb-3 shadow-[0_-8px_24px_rgba(0,0,0,0.12)]">
         <QuickActions onAction={onQuickAction} />
 
         {knowledgeEntries.length > 0 && (
-          <div className={`ai-knowledge-picker ${knowledgeOpen ? 'open' : ''}`}>
+          <div className="mb-2 overflow-hidden rounded-[7px] border border-[var(--border)] bg-[var(--bg-base)]">
             <button
-              className="ai-knowledge-picker-toggle"
+              className="flex h-[30px] w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent px-2 text-left font-[var(--font-sans)] text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] [&_b]:ml-auto [&_b]:inline-flex [&_b]:h-[18px] [&_b]:min-w-[18px] [&_b]:items-center [&_b]:justify-center [&_b]:rounded-[9px] [&_b]:bg-[rgba(34,197,94,0.12)] [&_b]:text-[10px] [&_b]:text-[#86efac]"
               onClick={() => setKnowledgeOpen(open => !open)}
               type="button"
             >
@@ -1505,9 +1546,9 @@ export default function AiPanel({
               <b>{attachedKnowledge.length}</b>
             </button>
             {knowledgeOpen && (
-              <div className="ai-knowledge-list">
+              <div className="grid max-h-[148px] gap-px overflow-y-auto border-t border-[var(--border)]">
                 {knowledgeEntries.map(entry => (
-                  <label key={entry.id} className="ai-knowledge-item">
+                  <label key={entry.id} className="grid cursor-pointer grid-cols-[16px_minmax(0,1fr)] items-start gap-[7px] px-2 py-[7px] hover:bg-[var(--bg-hover)] [&_input]:mt-0.5 [&_input]:h-[13px] [&_input]:w-[13px] [&_span]:grid [&_span]:min-w-0 [&_span]:gap-0.5 [&_strong]:text-[10px] [&_strong]:font-bold [&_strong]:uppercase [&_strong]:text-[var(--text-primary)] [&_small]:line-clamp-2 [&_small]:overflow-hidden [&_small]:text-[11px] [&_small]:leading-[1.35] [&_small]:text-[var(--text-muted)]">
                     <input
                       type="checkbox"
                       checked={selectedKnowledgeIds.has(entry.id)}
@@ -1525,9 +1566,9 @@ export default function AiPanel({
         )}
 
         {(requestActive || status === 'executing' || queuedPrompts.length > 0) && (
-          <div className="ai-queue-status" role="status">
+          <div className="mb-2 flex items-center justify-between gap-2.5 rounded-[7px] border border-[rgba(96,165,250,0.28)] bg-[rgba(59,130,246,0.07)] px-2 py-[7px] text-[11px] text-[#bfdbfe] [&>div]:flex [&>div]:min-w-0 [&>div]:items-center [&>div]:gap-1.5 [&_svg]:h-[11px] [&_svg]:w-[11px] [&_svg]:shrink-0 [&_button]:shrink-0 [&_button]:cursor-pointer [&_button]:rounded-[5px] [&_button]:border [&_button]:border-[rgba(248,113,113,0.35)] [&_button]:bg-[rgba(239,68,68,0.09)] [&_button]:px-[7px] [&_button]:py-1 [&_button]:font-[var(--font-sans)] [&_button]:text-[11px] [&_button]:font-semibold [&_button]:text-[#fca5a5] [&_button:hover:not(:disabled)]:border-[#f87171] [&_button:disabled]:cursor-default [&_button:disabled]:opacity-55" role="status">
             <div>
-              <IconLoader className={requestActive || status === 'executing' ? 'spin-icon' : undefined} />
+              <IconLoader className={requestActive || status === 'executing' ? commonSpinnerClass : undefined} />
               <span>
                 {interruptRequested
                   ? t('queue_stopping')
@@ -1548,30 +1589,30 @@ export default function AiPanel({
 
         {/* @ Mention autocomplete dropdown */}
         {mentionQuery !== null && mentionMatches.length > 0 && (
-          <div className="ai-mention-dropdown" role="listbox" aria-label={t('mention_suggestions')}>
+          <div className="absolute right-2 bottom-full left-2 z-[100] mb-1 max-h-[180px] overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-surface)] shadow-[var(--shadow-md)]" role="listbox" aria-label={t('mention_suggestions')}>
             {mentionMatches.map((obj, i) => (
               <button
                 key={obj.id}
                 role="option"
                 aria-selected={i === mentionIndex}
-                className={`ai-mention-item ${i === mentionIndex ? 'active' : ''}`}
+                className={mentionItemClass(i === mentionIndex)}
                 onMouseDown={(e) => { e.preventDefault(); insertMention(obj); }}
               >
-                <span className="ai-mention-icon">⬡</span>
-                <span className="ai-mention-name">{obj.name}</span>
+                <span className="text-[11px] text-[var(--accent)]">⬡</span>
+                <span className="font-medium">{obj.name}</span>
               </button>
             ))}
           </div>
         )}
 
-        <div className="ai-input-heading">
+        <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px] font-semibold text-[var(--text-primary)] [&_span:last-child]:text-[9px] [&_span:last-child]:font-normal [&_span:last-child]:text-[var(--text-muted)] max-[1050px]:[&_span:last-child]:hidden">
           <span>{requestActive || status === 'executing' ? t('input_queue_next') : t('input_describe')}</span>
           <span>{requestActive || status === 'executing' ? t('input_queue_hint') : t('input_send_hint')}</span>
         </div>
-        <div className="ai-input-row">
+        <div className="flex items-end gap-1.5">
           <textarea
             ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-            className="ai-input"
+            className="max-h-[200px] min-h-[42px] flex-1 resize-none rounded-[9px] border border-[var(--border)] bg-[var(--bg-base)] px-3 py-[9px] font-[inherit] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] focus:shadow-[0_0_0_2px_var(--accent-dim)]"
             placeholder={t('ai_input_placeholder')}
             value={input}
             onChange={handleInputChange}
@@ -1579,7 +1620,7 @@ export default function AiPanel({
             rows={2}
           />
           <button
-            className="ai-send-btn"
+            className="flex h-10 w-9 cursor-pointer items-center justify-center rounded-lg border-0 bg-[var(--accent)] text-white transition-[background,opacity] duration-[var(--transition-fast)] hover:not-disabled:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => queueOrSubmitPrompt(input)}
             disabled={!input.trim()}
             aria-label={t('btn_send')}
@@ -1587,12 +1628,12 @@ export default function AiPanel({
             <IconSend />
           </button>
         </div>
-        <div className="ai-input-controls">
+        <div className="mt-2 flex items-center gap-2">
           <ModelSelector />
-          <div className="ai-thinking-selector">
+          <div className="flex items-center gap-1 text-[var(--text-secondary)] [&_svg]:shrink-0">
             <IconBrain size={12} />
             <select
-              className="ai-thinking-select"
+              className="cursor-pointer whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-2 py-[3px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none hover:border-[var(--accent)] focus:border-[var(--accent)]"
               value={thinkingEffort}
               onChange={(e) => setThinkingEffort(e.target.value as ThinkingEffort)}
               title={t('thinking_effort_title')}

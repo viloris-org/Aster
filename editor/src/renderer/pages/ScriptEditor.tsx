@@ -12,6 +12,21 @@ interface ScriptEditorProps {
   onClose: () => void;
 }
 
+const editorClass = 'flex h-full flex-col bg-[var(--bg-base)]';
+const headerClass = 'flex flex-shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1';
+const titleClass = 'text-xs font-medium text-[var(--text-primary)]';
+const languageClass = 'rounded-[var(--radius-sm)] bg-[var(--accent-dim)] px-1.5 py-px text-[10px] text-[var(--accent)]';
+const dirtyClass = 'text-[10px] text-[var(--accent)]';
+const actionsClass = 'ml-auto flex gap-1';
+const findBarClass = 'flex items-center gap-1 border-b border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1';
+const findInputClass = 'flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] px-1.5 py-0.5 font-[var(--font-mono)] text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent)]';
+const bodyClass = 'flex min-h-0 flex-1 overflow-hidden';
+const gutterClass = 'w-10 flex-shrink-0 select-none overflow-hidden border-r border-[var(--border)] bg-[var(--bg-surface)] pt-0.5';
+const gutterLineClass = 'h-[1.6em] pr-2 text-right font-[var(--font-mono)] text-[11px] leading-[1.6] text-[var(--text-muted)]';
+const codeAreaClass = 'relative flex-1 overflow-hidden';
+const highlightClass = 'pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre p-0.5 px-2 font-[var(--font-mono)] text-xs leading-[1.6] text-[var(--text-primary)] [tab-size:2] [&_code]:font-inherit [&_code]:text-inherit';
+const textareaClass = 'absolute inset-0 h-full w-full resize-none overflow-auto whitespace-pre border-0 bg-transparent p-0.5 px-2 font-[var(--font-mono)] text-xs leading-[1.6] text-transparent caret-[var(--text-primary)] outline-none [tab-size:2] selection:bg-[var(--accent-dim)]';
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function ScriptEditor({ filePath, initialContent, onSave, onClose }: ScriptEditorProps) {
@@ -75,13 +90,13 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
   }, [handleSave, findOpen]);
 
   return (
-    <div className="script-editor">
+    <div className={editorClass}>
       {/* Header */}
-      <div className="script-editor-header">
-        <span className="script-editor-title">{filePath}</span>
-        <span className={`script-editor-lang tag-${language}`}>{language}</span>
-        {dirty && <span className="script-editor-dirty">●</span>}
-        <div className="script-editor-actions">
+      <div className={headerClass}>
+        <span className={titleClass}>{filePath}</span>
+        <span className={languageClass}>{language}</span>
+        {dirty && <span className={dirtyClass}>●</span>}
+        <div className={actionsClass}>
           <button
             className={toolButtonClass()}
             onClick={handleSave}
@@ -102,9 +117,9 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
 
       {/* Find bar */}
       {findOpen && (
-        <div className="script-editor-find-bar">
+        <div className={findBarClass}>
           <input
-            className="script-editor-find-input"
+            className={findInputClass}
             type="text"
             placeholder={t('script_find_placeholder')}
             value={findText}
@@ -116,26 +131,26 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
       )}
 
       {/* Editor area */}
-      <div className="script-editor-body">
+      <div className={bodyClass}>
         {/* Line numbers gutter */}
-        <div className="script-editor-gutter">
+        <div className={gutterClass}>
           {lineNumbers.map(n => (
-            <div key={n} className="script-editor-gutter-line">{n}</div>
+            <div key={n} className={gutterLineClass}>{n}</div>
           ))}
         </div>
 
         {/* Code area with highlighting overlay */}
-        <div className="script-editor-code-area">
+        <div className={codeAreaClass}>
           <pre
             ref={highlightRef}
-            className="script-editor-highlight"
+            className={highlightClass}
             aria-hidden="true"
           >
             <code dangerouslySetInnerHTML={{ __html: highlightedHtml + '\n' }} />
           </pre>
           <textarea
             ref={textareaRef}
-            className="script-editor-textarea"
+            className={textareaClass}
             value={content}
             onChange={(e) => {
               setContent(e.target.value);

@@ -1,4 +1,9 @@
 import React, { useCallback, useMemo } from 'react';
+import {
+  orientationGizmoAxisClass,
+  orientationGizmoClass,
+  viewportGridClass,
+} from '../uiClasses';
 import { cameraBasisVectors, vec3Dot, type Vec3 } from './gizmoMath';
 
 // ─── Viewport Grid Overlay ─────────────────────────────────────────────────
@@ -11,7 +16,7 @@ interface ViewportGridProps {
 
 export function ViewportGrid({ show = true }: ViewportGridProps) {
   if (!show) return null;
-  return <div className="viewport-grid" />;
+  return <div className={viewportGridClass} />;
 }
 
 // ─── Orientation Gizmo ─────────────────────────────────────────────────────
@@ -79,7 +84,7 @@ export function OrientationGizmo({ camera = { yaw: -0.5, pitch: 0.3 }, onSnapToA
   }, [camera.pitch, camera.yaw]);
 
   return (
-    <div className="orientation-gizmo">
+    <div className={orientationGizmoClass}>
       <svg viewBox="-1.2 -1.2 2.4 2.4" width="80" height="80">
         {axes.map((axis) => {
           const x = axis.end.x * 0.82;
@@ -88,7 +93,7 @@ export function OrientationGizmo({ camera = { yaw: -0.5, pitch: 0.3 }, onSnapToA
           return (
             <g
               key={axis.name}
-              className="orientation-gizmo-axis"
+              className={orientationGizmoAxisClass}
               opacity={isFacing ? 1 : 0.56}
               onClick={() => handleClick(axis.name)}
             >

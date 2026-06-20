@@ -51,15 +51,64 @@ interface ApplyResult {
 
 type CopilotStatus = 'idle' | 'planning' | 'ready' | 'executing' | 'complete' | 'error';
 
+const cx = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' ');
+
+const panelClass = 'flex h-full flex-col overflow-hidden text-xs';
+const messagesClass = 'flex flex-1 flex-col gap-1.5 overflow-y-auto p-2 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-sm [&::-webkit-scrollbar-thumb]:bg-[var(--border)]';
+const emptyClass = 'flex flex-col items-center gap-2 px-4 py-6 text-center text-[var(--text-muted)] [&_p]:max-w-[200px] [&_p]:text-[11px] [&_p]:leading-normal [&_svg]:h-8 [&_svg]:w-8 [&_svg]:opacity-40';
+const messageClass = 'flex gap-2 rounded-[var(--radius-md)] px-2 py-1.5 animate-[fadeIn_150ms_ease]';
+const messageAvatarClass = 'flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--accent-dim)] text-[11px] font-bold text-[var(--accent)]';
+const messageContentClass = 'min-w-0 flex-1 break-words text-xs leading-normal text-[var(--text-primary)]';
+const planClass = 'my-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-surface)]';
+const planHeaderClass = 'flex items-center gap-1.5 border-b border-[var(--border)] bg-[var(--bg-hover)] px-2.5 py-2 text-[11px] font-semibold text-[var(--text-secondary)]';
+const planItemClass = 'flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-xs transition-[background] duration-[var(--transition-fast)] hover:bg-[var(--bg-hover)]';
+const planCheckboxClass = 'h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]';
+const planPreviewClass = 'min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)]';
+const planActionsClass = 'flex gap-1.5 border-t border-[var(--border)] px-2.5 py-2';
+const executingClass = 'flex items-center gap-2 px-2.5 py-2 text-[11px] font-medium text-[var(--accent)]';
+const errorClass = 'flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[rgba(239,68,68,0.2)] bg-[var(--danger-dim)] px-2.5 py-1.5 text-[11px] text-[var(--danger)]';
+const traceClass = 'flex-shrink-0 border-t border-[var(--border)]';
+const traceToggleClass = 'flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent px-2.5 py-1.5 font-[var(--font-sans)] text-[11px] text-[var(--text-secondary)] transition-[background] duration-[var(--transition-fast)] hover:bg-[var(--bg-hover)]';
+const traceEntriesClass = 'max-h-[120px] overflow-y-auto px-2.5 pt-1 pb-2';
+const traceEntryClass = 'flex gap-2 py-0.5 font-[var(--font-mono)] text-[10px]';
+const traceToolClass = 'min-w-20 text-[var(--text-muted)]';
+const optionsClass = 'flex-shrink-0 border-t border-[var(--border)] px-2.5 py-1';
+const autoAcceptClass = 'flex cursor-pointer items-center gap-1.5 text-[10px] text-[var(--text-muted)]';
+const autoAcceptCheckboxClass = 'h-3 w-3 accent-[var(--accent)]';
+const inputRowClass = 'flex flex-shrink-0 gap-1 border-t border-[var(--border)] px-2 py-1.5';
+const inputClass = 'flex-1 rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] px-2.5 py-1.5 font-[var(--font-sans)] text-xs text-[var(--text-primary)] outline-none transition-[border-color] duration-[var(--transition-fast)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50';
+const sendButtonClass = 'flex h-7 w-7 flex-shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] border-0 bg-[var(--accent)] text-white transition-[background] duration-[var(--transition-fast)] hover:not-disabled:bg-[var(--accent-hover)] disabled:cursor-default disabled:opacity-40';
+
+const messageContainerClass = (role: string) => cx(
+  messageClass,
+  role === 'user' ? 'bg-[var(--bg-hover)]' : 'bg-transparent',
+);
+
+const messageAvatarVariantClass = (role: string) => cx(
+  messageAvatarClass,
+  role === 'user' && 'bg-[var(--bg-hover)] text-[var(--text-secondary)]',
+);
+
+const planItemVariantClass = (requiresWrite: boolean) => cx(
+  planItemClass,
+  !requiresWrite && 'opacity-70',
+);
+
+const traceResultClass = (result: string) => cx(
+  'text-[var(--text-secondary)]',
+  result === 'applied' && 'text-[var(--accent)]',
+  result.startsWith('failed') && 'text-[var(--danger)]',
+);
+
 // ─── Copilot Message ─────────────────────────────────────────────────────────
 
 function MessageBubble({ role, content }: { role: string; content: string }) {
   return (
-    <div className={`copilot-message copilot-message-${role}`}>
-      <div className="copilot-message-avatar">
+    <div className={messageContainerClass(role)}>
+      <div className={messageAvatarVariantClass(role)}>
         {role === 'assistant' ? <IconBot /> : <span>U</span>}
       </div>
-      <div className="copilot-message-content">
+      <div className={messageContentClass}>
         {role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown> : content}
       </div>
     </div>
@@ -241,11 +290,11 @@ export default function CopilotPanel() {
   const hasPlan = plan && plan.operations.length > 0;
 
   return (
-    <div className="copilot-panel">
+    <div className={panelClass}>
       {/* Messages */}
-      <div ref={scrollRef} className="copilot-messages">
+      <div ref={scrollRef} className={messagesClass}>
         {messages.length === 0 && (
-          <div className="copilot-empty">
+          <div className={emptyClass}>
             <IconBot />
             <p>{t('copilot_empty_hint')}</p>
           </div>
@@ -256,8 +305,8 @@ export default function CopilotPanel() {
 
         {/* Plan Preview */}
         {hasPlan && status === 'ready' && (
-          <div className="copilot-plan">
-            <div className="copilot-plan-header">
+          <div className={planClass}>
+            <div className={planHeaderClass}>
               <IconInfo />
               <span>{t('copilot_plan_title')}</span>
               <StatusBadge status={status} />
@@ -265,24 +314,25 @@ export default function CopilotPanel() {
             {plan.operations.map((op) => (
               <label
                 key={op.index}
-                className={`copilot-plan-item ${!op.requires_write ? 'auto-approved' : ''}`}
+                className={planItemVariantClass(op.requires_write)}
               >
                 {op.requires_write ? (
                   <input
                     type="checkbox"
+                    className={planCheckboxClass}
                     checked={approved.has(op.index)}
                     onChange={() => toggleApproval(op.index)}
                   />
                 ) : (
                   <span className={copilotPlanBadgeReadClass}><IconCheck /></span>
                 )}
-                <span className="copilot-plan-preview">{op.preview}</span>
+                <span className={planPreviewClass}>{op.preview}</span>
                 {op.requires_write && (
                   <span className={copilotPlanBadgeClass}>{t('copilot_badge_write')}</span>
                 )}
               </label>
             ))}
-            <div className="copilot-plan-actions">
+            <div className={planActionsClass}>
               <button
                 className={buttonClass('primary', 'sm')}
                 disabled={approvedCount === 0}
@@ -302,15 +352,15 @@ export default function CopilotPanel() {
 
         {/* Executing indicator */}
         {status === 'executing' && (
-          <div className="copilot-executing">
-            <IconLoader className="spin-icon" />
+          <div className={executingClass}>
+            <IconLoader className="animate-spin" />
             <span>{t('copilot_executing')}</span>
           </div>
         )}
 
         {/* Error */}
         {errorMsg && (
-          <div className="copilot-error">
+          <div className={errorClass}>
             <IconAlertCircle />
             <span>{errorMsg}</span>
           </div>
@@ -319,20 +369,20 @@ export default function CopilotPanel() {
 
       {/* Trace (collapsible) */}
       {trace.length > 0 && (
-        <div className="copilot-trace">
+        <div className={traceClass}>
           <button
-            className="copilot-trace-toggle"
+            className={traceToggleClass}
             onClick={() => setTraceExpanded(!traceExpanded)}
           >
             {traceExpanded ? <IconChevronDown /> : <IconChevronRight />}
             <span>{t('copilot_trace')} ({trace.length})</span>
           </button>
           {traceExpanded && (
-            <div className="copilot-trace-entries">
+            <div className={traceEntriesClass}>
               {trace.map((entry, i) => (
-                <div key={i} className={`copilot-trace-entry copilot-trace-${entry.result === 'applied' ? 'success' : entry.result.startsWith('failed') ? 'fail' : ''}`}>
-                  <span className="copilot-trace-tool">{entry.tool}</span>
-                  <span className="copilot-trace-result">{entry.result}</span>
+                <div key={i} className={traceEntryClass}>
+                  <span className={traceToolClass}>{entry.tool}</span>
+                  <span className={traceResultClass(entry.result)}>{entry.result}</span>
                 </div>
               ))}
             </div>
@@ -341,10 +391,11 @@ export default function CopilotPanel() {
       )}
 
       {/* Auto-accept toggle */}
-      <div className="copilot-options">
-        <label className="copilot-auto-accept">
+      <div className={optionsClass}>
+        <label className={autoAcceptClass}>
           <input
             type="checkbox"
+            className={autoAcceptCheckboxClass}
             checked={autoAccept}
             onChange={(e) => setAutoAccept(e.target.checked)}
           />
@@ -353,10 +404,10 @@ export default function CopilotPanel() {
       </div>
 
       {/* Input */}
-      <div className="copilot-input-row">
+      <div className={inputRowClass}>
         <textarea
           ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-          className="copilot-input"
+          className={inputClass}
           placeholder={t('copilot_input_placeholder')}
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -365,7 +416,7 @@ export default function CopilotPanel() {
           rows={2}
         />
         <button
-          className="copilot-send-btn"
+          className={sendButtonClass}
           onClick={() => submitPrompt(input)}
           disabled={!input.trim() || status === 'planning' || status === 'executing'}
           title={t('copilot_send')}

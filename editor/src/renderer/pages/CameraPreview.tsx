@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from '../i18n';
 import { viewportReadback } from '../api';
+import {
+  cameraPreviewCanvasClass,
+  cameraPreviewContainerClass,
+  cameraPreviewLabelClass,
+} from '../uiClasses';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -86,12 +91,12 @@ export default function CameraPreview({
   }, [entityId, width, height]);
 
   return (
-    <div className="camera-preview-container">
-      <div className="camera-preview-label">{t('camera_preview')}</div>
+    <div className={cameraPreviewContainerClass}>
+      <div className={cameraPreviewLabelClass}>{t('camera_preview')}</div>
       {error && <div className="camera-preview-error">{error}</div>}
       <canvas
         ref={canvasRef}
-        className="camera-preview-canvas"
+        className={cameraPreviewCanvasClass}
         width={width}
         height={height}
       />

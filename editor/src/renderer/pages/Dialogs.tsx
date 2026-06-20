@@ -9,6 +9,9 @@ import {
   modalHeaderClass,
   modalOverlayClass,
   modalTitleClass,
+  warningPanelClass,
+  warningPanelIconClass,
+  warningPanelTextClass,
 } from '../uiClasses';
 
 // ─── Close Project Dialog (Save/Discard/Cancel) ────────────────────────────
@@ -34,9 +37,9 @@ export function CloseProjectDialog({ projectName, onSave, onDiscard, onCancel }:
           <h3 className={modalTitleClass}>{t('dialog_unsaved_title')}</h3>
         </div>
         <div className={modalBodyClass}>
-          <div className="delete-warning">
-            <IconAlertTriangle />
-            <div className="delete-warning-text">
+          <div className={warningPanelClass}>
+            <IconAlertTriangle className={warningPanelIconClass} />
+            <div className={warningPanelTextClass}>
               {t('dialog_unsaved_message').replace('{project}', projectName)}
             </div>
           </div>

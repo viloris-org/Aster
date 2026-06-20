@@ -203,6 +203,308 @@ const BUILD_PRESETS: BuildPreset[] = [
   { id: 'android-apk', label: 'Android APK', target: 'android-arm64', format: 'apk', channel: 'release' },
 ];
 
+function cx(...classes: Array<string | false | null | undefined>): string {
+  return classes.filter(Boolean).join(' ');
+}
+
+const shellClass = {
+  loading: 'flex h-screen items-center justify-center text-[var(--text-secondary)]',
+  root: 'flex h-full w-full min-h-0 flex-col bg-[var(--bg-base)]',
+  toolbar: 'flex min-h-[42px] items-center gap-2 border-b border-[var(--border)] bg-[var(--bg-surface)] py-[5px] pr-2 pl-3 shadow-[0_1px_0_rgba(255,255,255,0.02)]',
+  toolbarProject: 'flex min-w-[120px] flex-col justify-center leading-[1.15]',
+  toolbarProjectKicker: 'text-[9px] font-semibold tracking-[0.08em] text-[var(--text-muted)] uppercase',
+  toolbarProjectName: 'text-[13px] font-semibold text-[var(--text-primary)]',
+  toolbarSpacer: 'flex-1',
+  body: 'flex min-h-0 flex-1 overflow-hidden',
+  statusbar: 'flex h-[22px] min-h-[22px] select-none items-center justify-between border-t border-[var(--border)] bg-[var(--bg-surface)] px-2 text-[11px]',
+  statusGroup: 'flex min-w-0 items-center gap-[7px]',
+  statusDivider: 'h-2.5 w-px flex-none bg-[var(--border)]',
+  statusItem: 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-secondary)]',
+  statusSelection: 'text-[var(--accent)]',
+  statusSaved: 'text-[#22c55e]',
+  statusDirty: 'flex items-center gap-[5px]',
+  statusDot: 'size-1.5 rounded-full bg-[#f59e0b]',
+  version: 'text-[var(--accent)]',
+};
+
+const workspaceClass = {
+  root: 'flex min-w-0 flex-1 flex-col overflow-hidden bg-[#111216]',
+  tabs: 'flex min-h-11 items-end gap-0.5 border-b border-[var(--border)] bg-[var(--bg-surface)] px-3.5',
+  tab: 'flex h-9 cursor-pointer items-center gap-[7px] border-0 border-b-2 border-transparent bg-transparent px-[13px] text-[11px] font-medium text-[var(--text-muted)] transition-[color,background,border-color] duration-150 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] [&_svg]:size-[13px]',
+  tabActive: 'border-b-[#60a5fa] text-[#93c5fd]',
+  tabBadge: 'min-w-[17px] rounded-lg bg-[rgba(96,165,250,0.13)] px-[5px] py-px text-center text-[9px] text-[#93c5fd]',
+  view: 'min-h-0 flex-1 overflow-auto',
+  viewGame: 'flex overflow-hidden',
+  aiPanel: 'flex min-w-[380px] flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--bg-base)] max-[900px]:min-w-[330px] [&_.ai-context-selected]:hidden',
+  resizeHandle: 'relative z-10 w-1 shrink-0 cursor-col-resize hover:bg-[var(--accent)] hover:opacity-30 active:bg-[var(--accent)] active:opacity-30 focus-visible:bg-[var(--accent-dim)] focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-[var(--accent)]',
+};
+
+const prdClass = {
+  document: 'mx-auto mt-[34px] mb-16 w-[min(820px,calc(100%_-_64px))] text-[var(--text-secondary)]',
+  header: 'border-b border-[var(--border)] pb-7',
+  kicker: 'text-[10px] font-bold tracking-[0.1em] text-[#60a5fa] uppercase',
+  title: 'my-2 block text-[28px] tracking-[-0.03em] text-[var(--text-primary)]',
+  description: 'm-0 text-xs text-[var(--text-muted)]',
+  section: 'border-b border-[var(--border)] py-[25px]',
+  sectionTitle: 'mb-[13px] text-sm text-[var(--text-primary)]',
+  bodyText: 'text-xs leading-[1.75]',
+  list: 'm-0 pl-[18px]',
+  grid: 'grid grid-cols-2 gap-2.5 max-[900px]:grid-cols-1',
+  gridCard: 'rounded-[7px] border border-[var(--border)] bg-[var(--bg-surface)] p-3.5',
+  gridLabel: 'mb-[5px] block text-[10px] text-[var(--text-muted)]',
+  gridValue: 'block text-xs text-[var(--text-primary)]',
+};
+
+const taskClass = {
+  board: 'mx-auto mt-7 mb-[60px] w-[min(880px,calc(100%_-_56px))]',
+  header: 'flex items-end justify-between border-b border-[var(--border)] pb-5',
+  kicker: prdClass.kicker,
+  title: 'mt-1.5 mb-0 text-[21px] text-[var(--text-primary)] capitalize',
+  meta: 'text-[var(--text-muted)]',
+  artifactCard: 'mb-[18px] grid grid-cols-[minmax(0,1fr)_auto] gap-3.5 rounded-lg border border-[#29446f] bg-[rgba(37,99,235,0.08)] p-3.5',
+  artifactKicker: 'block text-[9px] font-bold text-[#93c5fd] uppercase',
+  artifactTitle: 'mt-[5px] block text-sm text-[var(--text-primary)]',
+  artifactDescription: 'mt-[7px] mb-0 text-[11px] leading-normal text-[var(--text-secondary)]',
+  artifactPath: 'mt-2 block overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] text-[var(--text-muted)]',
+  artifactActions: 'flex items-start gap-2',
+  artifactButton: 'inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-[var(--border)] bg-[#111216] px-[9px] py-[7px] text-[10px] text-[var(--text-secondary)] hover:border-[#60a5fa] hover:text-[var(--text-primary)]',
+  operations: 'overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]',
+  operationsTitle: 'flex min-h-[42px] items-center justify-between border-b border-[var(--border)] px-[13px] text-[11px] font-semibold text-[var(--text-secondary)]',
+  operationRow: 'grid grid-cols-[58px_1fr_auto] items-start gap-[9px] border-b border-[var(--border)] px-[13px] py-3 last:border-b-0',
+  operationPermission: 'pt-0.5 font-mono text-[8px] font-bold',
+  operationPreview: 'm-0 text-[11px] leading-normal text-[var(--text-secondary)]',
+  operationState: 'whitespace-nowrap text-[9px] text-[var(--text-muted)]',
+  footer: 'mt-3.5 flex justify-end gap-2',
+};
+
+const surfaceClass = {
+  root: 'flex h-full min-h-0 flex-col bg-[#090a0d]',
+  header: 'flex min-h-[46px] items-center justify-between gap-3 border-b border-[var(--border)] bg-[#0d0e12] px-3.5',
+  buildHeader: 'flex min-h-[52px] items-center justify-between gap-3 border-b border-[var(--border)] bg-[#0d0e12] px-4',
+  headerKicker: 'block text-[9px] text-[var(--text-muted)] uppercase',
+  buildKicker: 'block text-[9px] font-bold tracking-[0.08em] text-[var(--text-muted)] uppercase',
+  headerTitle: 'mt-0.5 block text-xs text-[var(--text-primary)]',
+  buildHeaderTitle: 'mt-[3px] block text-[13px] text-[var(--text-primary)]',
+  toolbar: 'flex min-w-0 flex-wrap justify-end gap-1.5',
+  button: 'min-h-7 cursor-pointer rounded-[5px] border border-[var(--border)] bg-[#111216] px-2.5 text-[10px] text-[var(--text-secondary)] hover:border-[#60a5fa] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50',
+  primaryButton: 'inline-flex min-h-8 cursor-pointer items-center gap-[7px] rounded-md border border-[#2563eb] bg-[rgba(37,99,235,0.16)] px-3 text-[11px] text-[#bfdbfe] disabled:cursor-not-allowed disabled:opacity-60',
+  list: 'min-h-0 flex-1 overflow-auto p-2',
+  empty: 'grid min-h-[220px] place-items-center text-xs text-[var(--text-muted)]',
+};
+
+const assetsClass = {
+  row: 'grid grid-cols-[18px_minmax(0,1fr)_92px_92px_auto] items-center gap-2.5 border-b border-[var(--border)] px-2.5 py-[9px] text-[var(--text-secondary)] [&_svg]:text-[#60a5fa]',
+  rowMain: 'min-w-0',
+  rowTitle: 'block overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[var(--text-primary)]',
+  rowMeta: 'block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-[var(--text-muted)]',
+  actions: 'flex gap-1.5',
+};
+
+const buildClass = {
+  layout: 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] max-[1100px]:grid-cols-1',
+  main: 'min-w-0 overflow-auto p-4',
+  presets: 'mb-3.5 grid grid-cols-4 gap-2 max-[1100px]:grid-cols-2',
+  presetButton: 'grid min-w-0 cursor-pointer grid-cols-[18px_minmax(0,1fr)] gap-[7px] rounded-[7px] border border-[var(--border)] bg-[#111216] p-[11px] text-left text-[var(--text-secondary)] [&_svg]:row-span-2 [&_svg]:mt-px [&_svg]:text-[#93c5fd]',
+  selectedButton: 'border-[#60a5fa] bg-[rgba(37,99,235,0.12)]',
+  card: 'mb-3.5 rounded-lg border border-[var(--border)] bg-[#111216]',
+  sectionTitle: 'flex min-h-[42px] items-center justify-between gap-3 border-b border-[var(--border)] px-3',
+  sectionValue: 'text-[11px] text-[var(--text-secondary)]',
+  targetGrid: 'grid grid-cols-3 gap-2 p-2.5 max-[1100px]:grid-cols-2',
+  targetButton: 'grid min-w-0 cursor-pointer gap-[5px] rounded-[7px] border border-[var(--border)] bg-[#111216] p-[11px] text-left text-[var(--text-secondary)]',
+  itemTitle: 'overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-bold text-[var(--text-primary)]',
+  itemMeta: 'overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-[var(--text-muted)]',
+  status: 'justify-self-start rounded-full px-1.5 py-0.5 font-mono text-[8px] font-bold uppercase',
+  formGrid: 'grid grid-cols-2 gap-2.5 p-3',
+  formLabel: 'grid min-w-0 gap-1.5',
+  formLabelText: 'text-[10px] text-[var(--text-muted)]',
+  select: 'min-h-8 rounded-md border border-[var(--border)] bg-[#090a0d] text-[11px] text-[var(--text-primary)]',
+  checkbox: 'grid grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5',
+  checkboxInput: 'size-3.5',
+  output: 'mb-3.5 rounded-lg border border-[var(--border)] bg-[#111216] p-3',
+  outputPath: 'mt-[5px] block [overflow-wrap:anywhere] font-mono text-[11px] text-[var(--text-primary)]',
+  outputNote: 'mt-2.5 mb-0 text-[11px] leading-[1.55] text-[var(--text-secondary)]',
+  outputPre: 'mt-3 overflow-auto whitespace-pre-wrap rounded-md border border-[var(--border)] bg-[#090a0d] p-2.5 font-mono text-[10px] leading-normal text-[var(--text-secondary)]',
+  sidebar: 'min-h-0 overflow-auto border-l border-[var(--border)] bg-[#0d0e12] px-3.5 py-4 max-[1100px]:border-t max-[1100px]:border-l-0',
+  sidebarSection: 'mb-3.5 rounded-lg border border-[var(--border)] bg-[#111216] p-3',
+  sidebarList: 'mt-3 grid list-none gap-2.5 p-0',
+  sidebarItem: 'flex items-center gap-2 text-[11px] text-[var(--text-muted)]',
+  sidebarDl: 'mt-3 grid gap-2',
+  sidebarDlRow: 'flex justify-between gap-3',
+  sidebarDt: 'text-[10px] text-[var(--text-muted)]',
+  sidebarDd: 'm-0 overflow-hidden text-ellipsis whitespace-nowrap text-right text-[10px] text-[var(--text-secondary)]',
+};
+
+const gameClass = {
+  surface: 'grid h-full min-h-0 w-full flex-1 bg-[#090a0d]',
+  surfaceOpen: 'grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(230px,280px)]',
+  surfaceInspectorClosed: 'grid-cols-[minmax(190px,240px)_minmax(0,1fr)]',
+  surfaceHierarchyClosed: 'grid-cols-[minmax(0,1fr)_minmax(230px,280px)]',
+  surfaceOnlyMain: 'grid-cols-[minmax(0,1fr)]',
+  sidePanel: 'flex min-h-0 min-w-0 flex-col border-r border-[var(--border)] bg-[#111218]',
+  inspectorPanel: 'flex min-h-0 min-w-0 flex-col border-l border-[var(--border)] bg-[#111218]',
+  panelHeader: 'flex min-h-[42px] items-center justify-between gap-2 border-b border-[var(--border)] px-2.5',
+  panelHeaderText: 'text-[9px] text-[var(--text-muted)] uppercase',
+  panelHeaderTitle: 'mt-0.5 block text-[11px] text-[var(--text-primary)] normal-case',
+  panelHeaderActions: 'flex items-center gap-1.5',
+  iconButton: 'grid size-[26px] cursor-pointer place-items-center rounded-[5px] border border-[var(--border)] bg-[#171923] text-[var(--text-secondary)] hover:border-[#60a5fa] hover:text-[var(--text-primary)]',
+  hierarchyList: 'flex min-h-0 flex-1 flex-col gap-[3px] overflow-auto p-2',
+  hierarchyItem: 'grid min-h-[34px] cursor-pointer grid-cols-[14px_minmax(0,1fr)] items-center gap-1.5 rounded-[5px] border border-transparent bg-transparent text-left text-[var(--text-primary)] hover:border-[#2f5f9f] hover:bg-[rgba(37,99,235,0.14)]',
+  hierarchyItemSelected: 'border-[#2f5f9f] bg-[rgba(37,99,235,0.14)]',
+  hierarchyMarker: 'text-[9px] text-[var(--text-muted)]',
+  hierarchyName: 'overflow-hidden text-ellipsis whitespace-nowrap',
+  hierarchyTag: 'col-start-2 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-[var(--text-muted)]',
+  mainPanel: 'flex min-h-0 min-w-0 flex-col',
+  previewBar: 'flex min-h-[42px] items-center justify-between border-b border-[var(--border)] bg-[#0d0e12] px-3 text-[10px] text-[var(--text-secondary)]',
+  previewBarGroup: 'flex items-center gap-[7px]',
+  liveDot: 'size-1.5 rounded-full bg-[#22c55e] shadow-[0_0_7px_rgba(34,197,94,0.7)]',
+  modeSwitch: 'inline-flex gap-0.5 rounded-[5px] border border-[var(--border)] bg-[var(--bg-base)] p-0.5',
+  modeButton: 'flex h-[27px] cursor-pointer items-center gap-[5px] rounded bg-transparent px-[9px] text-[9px] font-medium text-[var(--text-muted)] hover:bg-[var(--bg-active)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50',
+  modeButtonActive: 'bg-[var(--bg-active)] text-[var(--text-primary)]',
+  createPresets: 'flex min-h-[38px] items-center gap-1.5 overflow-x-auto border-b border-[var(--border)] bg-[#101116] px-2.5 py-[5px]',
+  createButton: 'inline-flex min-h-[26px] flex-none cursor-pointer items-center gap-[5px] rounded-[5px] border border-[var(--border)] bg-[#111216] px-2 text-[10px] font-semibold text-[var(--text-secondary)] hover:border-[#60a5fa] hover:text-[var(--text-primary)]',
+  previewCanvas: 'relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#090a0d]',
+  empty: 'p-3.5 text-[11px] text-[var(--text-muted)]',
+};
+
+const diagnosticsClass = {
+  headerActions: 'flex gap-1.5',
+  entry: 'grid grid-cols-[132px_minmax(0,1fr)] gap-2.5 border-b border-[var(--border)] px-2.5 py-[9px] text-[11px] text-[var(--text-secondary)]',
+  meta: 'min-w-0',
+  level: 'mb-[3px] inline-flex font-mono text-[9px] font-bold uppercase',
+  subsystem: 'block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-medium text-[var(--text-muted)]',
+  message: 'm-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]',
+  source: 'col-start-2 font-mono text-[10px] text-[var(--text-muted)]',
+};
+
+const artifactPopoverClass = {
+  root: 'fixed z-[90] translate-x-2.5 translate-y-2.5 drop-shadow-[0_10px_24px_rgba(0,0,0,0.42)]',
+  button: 'flex h-[30px] cursor-pointer items-center gap-1.5 rounded-md border border-[rgba(96,165,250,0.45)] bg-[#172033] px-2.5 text-[10px] font-semibold text-[#bfdbfe] hover:border-[#60a5fa] hover:bg-[#1d2a43]',
+  panel: 'w-[310px] overflow-hidden rounded-lg border border-[rgba(96,165,250,0.38)] bg-[#17181d]',
+  header: 'flex h-8 items-center justify-between gap-2 border-b border-[var(--border)] px-[9px] font-mono text-[9px] text-[#93c5fd]',
+  label: 'overflow-hidden text-ellipsis whitespace-nowrap',
+  closeButton: 'grid size-[22px] flex-none cursor-pointer place-items-center border-0 bg-transparent text-[var(--text-muted)]',
+  form: 'flex gap-1.5 p-2',
+  input: 'min-w-0 flex-1 rounded-[5px] border border-[var(--border-light)] bg-[#0f1014] px-2 py-[7px] text-[10px] text-[var(--text-primary)] outline-none focus:border-[#60a5fa]',
+  submit: 'cursor-pointer rounded-[5px] border-0 bg-[#2563eb] px-2.5 text-[10px] font-semibold text-white disabled:cursor-default disabled:opacity-40',
+};
+
+const questBannerClass = {
+  root: 'flex min-h-[46px] items-center gap-2 border-b border-[var(--border)] bg-[rgba(37,99,235,0.12)] px-3.5 text-[var(--text-secondary)]',
+  error: 'bg-[rgba(239,68,68,0.12)]',
+  icon: 'text-[#93c5fd]',
+  errorIcon: 'text-[#f87171]',
+  content: 'min-w-0 flex-1',
+  kicker: 'block text-[9px] font-bold tracking-[0.08em] text-[var(--text-muted)] uppercase',
+  title: 'block overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[var(--text-primary)]',
+  meta: 'block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-[var(--text-muted)]',
+  button: 'inline-flex min-h-7 cursor-pointer items-center gap-1.5 rounded-[5px] border border-[var(--border)] bg-[#111216] px-2.5 text-[10px] text-[var(--text-secondary)] hover:border-[#60a5fa] hover:text-[var(--text-primary)]',
+  iconButton: 'grid size-7 cursor-pointer place-items-center rounded-[5px] border border-[var(--border)] bg-[#111216] text-[var(--text-secondary)] hover:border-[#60a5fa] hover:text-[var(--text-primary)]',
+};
+
+const workspaceSelectionClass = {
+  card: 'm-[0_8px_10px] flex flex-col gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-2.5',
+  title: 'flex items-start justify-between gap-2',
+  titleText: 'flex min-w-0 flex-col gap-0.5',
+  name: 'overflow-hidden text-ellipsis whitespace-nowrap text-xs',
+  tag: 'text-[10px] text-[var(--text-muted)]',
+  liveBadge: 'rounded-lg bg-[rgba(34,197,94,0.12)] px-[5px] py-0.5 font-mono text-[8px] font-bold text-[#22c55e] uppercase',
+  label: 'text-[9px] font-bold tracking-[0.06em] text-[var(--text-muted)] uppercase',
+  positionGrid: 'grid grid-cols-3 gap-1',
+  positionInputWrap: 'grid grid-cols-[14px_1fr] items-center overflow-hidden rounded border border-[var(--border)] bg-[var(--bg-base)] focus-within:border-[var(--accent)]',
+  positionAxis: 'text-center font-mono text-[9px] text-[var(--text-muted)]',
+  positionInput: 'w-full min-w-0 border-0 bg-transparent px-[3px] py-[5px] font-mono text-[9px] text-[var(--text-secondary)] outline-none',
+  button: 'cursor-pointer rounded-[5px] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-1.5 text-[10px] font-medium text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]',
+};
+
+const viewportClass = {
+  container: 'relative flex h-full w-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[#1a1a1e]',
+  canvas: 'block h-full w-full object-fill',
+  selectionOverlay: 'pointer-events-none absolute inset-0 z-20 h-full w-full',
+};
+
+const inspectorClass = {
+  root: 'flex flex-col gap-2.5 p-2.5',
+  section: 'rounded-md border border-[var(--border)] bg-[#111216]',
+  sectionTitle: 'border-b border-[var(--border)] px-2.5 py-2 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]',
+  field: 'grid gap-1.5 px-2.5 py-2 text-[11px] text-[var(--text-secondary)] [&>span]:text-[10px] [&>span]:font-semibold [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--text-muted)]',
+  fieldRow: 'grid-cols-[minmax(0,1fr)_auto] items-center',
+  input: 'w-full min-w-0 rounded border border-[var(--border)] bg-[#171923] px-2 py-1.5 font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]',
+  select: 'w-full min-w-0 appearance-none rounded border border-[var(--border)] bg-[#171923] px-2 py-1.5 pr-[26px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]',
+  json: 'min-h-20 resize-y font-[var(--font-mono)]',
+  colorField: 'grid gap-2 px-2.5 py-2 text-[11px] text-[var(--text-secondary)] [&>span]:text-[10px] [&>span]:font-semibold [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--text-muted)]',
+  colorCustom: 'flex items-center gap-2',
+  colorPicker: 'relative grid size-7 cursor-pointer place-items-center overflow-hidden rounded border border-[var(--border)] [&_input]:absolute [&_input]:inset-0 [&_input]:cursor-pointer [&_input]:opacity-0 [&_span]:size-full',
+  colorHex: 'min-w-0 flex-1 rounded border border-[var(--border)] bg-[#171923] px-2 py-1.5 font-[var(--font-mono)] text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]',
+  colorPresets: 'grid grid-cols-10 gap-1',
+  colorPreset: 'size-5 cursor-pointer rounded border border-[var(--border)] hover:border-[var(--accent)]',
+  colorPresetActive: 'ring-1 ring-[var(--accent)]',
+  colorChannels: 'grid grid-cols-3 gap-1.5',
+  channelInput: 'grid grid-cols-[16px_1fr] items-center overflow-hidden rounded border border-[var(--border)] bg-[#171923] focus-within:border-[var(--accent)] [&_span]:text-center [&_span]:font-mono [&_span]:text-[9px] [&_input]:min-w-0 [&_input]:border-0 [&_input]:bg-transparent [&_input]:px-1 [&_input]:py-1.5 [&_input]:font-mono [&_input]:text-[10px] [&_input]:text-[var(--text-primary)] [&_input]:outline-none',
+  vec3: 'grid grid-cols-3 gap-1.5',
+  vec4: 'grid grid-cols-4 gap-1.5',
+  vecInputWrap: 'grid grid-cols-[16px_1fr] items-center overflow-hidden rounded border border-[var(--border)] bg-[#171923] focus-within:border-[var(--accent)]',
+  vecLabel: 'text-center font-mono text-[9px] text-[var(--text-muted)]',
+  vecInput: 'min-w-0 border-0 bg-transparent px-1 py-1.5 font-mono text-[10px] text-[var(--text-primary)] outline-none',
+  actionRow: 'mt-2 flex gap-1.5',
+  actionButton: 'inline-flex min-h-7 cursor-pointer items-center gap-1.5 rounded border border-[var(--border)] bg-[#171923] px-2 text-[10px] text-[var(--text-secondary)] hover:border-[#60a5fa] hover:text-[var(--text-primary)]',
+  component: 'border-t border-[var(--border)] first:border-t-0',
+  componentHeader: 'flex items-center justify-between gap-2 px-2.5 py-2',
+  componentType: 'text-[11px] font-semibold text-[var(--text-primary)]',
+  removeButton: 'grid size-6 cursor-pointer place-items-center rounded border border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:border-[var(--danger)] hover:text-[var(--danger)]',
+  componentFields: 'border-t border-[var(--border)]',
+  emptyField: 'px-2.5 py-2 text-[10px] text-[var(--text-muted)]',
+  addRow: 'mt-2 flex gap-1.5',
+};
+
+const scriptSurfaceClass = {
+  root: 'grid h-full grid-cols-[230px_minmax(0,1fr)] max-[900px]:grid-cols-[170px_minmax(0,1fr)]',
+  sidebar: 'overflow-auto border-r border-[var(--border)] bg-[var(--bg-surface)]',
+  sidebarHeader: 'flex h-[42px] items-center justify-between border-b border-[var(--border)] px-3 text-[10px] font-semibold text-[var(--text-secondary)]',
+  sidebarEmpty: 'p-3 text-[10px] text-[var(--text-muted)]',
+  scriptButton: 'grid w-full cursor-pointer grid-cols-[16px_1fr] gap-x-[7px] gap-y-0.5 border-0 border-b border-[var(--border)] bg-transparent px-[11px] py-[9px] text-left text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[#93c5fd] [&_svg]:row-span-2 [&_svg]:mt-0.5',
+  scriptButtonActive: 'bg-[var(--bg-hover)] text-[#93c5fd]',
+  scriptName: 'text-[10px] text-[var(--text-secondary)]',
+  scriptPath: 'overflow-hidden text-ellipsis whitespace-nowrap text-[8px]',
+  editor: 'flex min-w-0 flex-col bg-[#0d0e12]',
+  editorHeader: 'flex h-[42px] items-center justify-between border-b border-[var(--border)] px-[13px] font-mono text-[10px] text-[var(--text-secondary)]',
+  editorActions: 'flex items-center gap-2',
+  editorHint: 'font-[var(--font-sans)] text-[8px] font-bold tracking-[0.08em] text-[var(--text-muted)]',
+  editorButton: 'min-h-[26px] cursor-pointer rounded-[5px] border border-[var(--border)] bg-[#111216] px-[9px] text-[10px] font-semibold text-[var(--text-secondary)] hover:not-disabled:border-[#60a5fa] hover:not-disabled:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50',
+  editorPane: 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_220px]',
+  textarea: 'h-full min-h-0 w-full min-w-0 resize-none overflow-auto whitespace-pre border-0 border-r border-[var(--border)] bg-[#0b0c10] px-5 py-[18px] font-mono text-[11px] leading-[1.65] text-[#dbeafe] outline-none [tab-size:2] focus:shadow-[inset_0_0_0_1px_rgba(96,165,250,0.38)]',
+  gutter: 'm-0 flex-1 overflow-auto border-l border-white/[0.03] bg-[#0d0e12] px-5 py-[18px] font-mono text-[11px] leading-[1.65] text-[#cbd5e1] [tab-size:2] [&_code]:block [&_code]:min-w-max',
+  gutterButton: 'grid w-full cursor-text grid-cols-[42px_minmax(max-content,1fr)] border-0 bg-transparent p-0 text-left font-inherit text-inherit whitespace-pre hover:bg-[rgba(96,165,250,0.07)]',
+  gutterButtonSelected: 'bg-[rgba(59,130,246,0.18)]',
+  gutterLineNumber: 'select-none text-[#4b5563]',
+  gutterLineText: 'pr-6 not-italic text-[#cbd5e1]',
+};
+
+function gameSurfaceClass(hierarchyOpen: boolean, inspectorOpen: boolean): string {
+  return cx(
+    gameClass.surface,
+    hierarchyOpen && inspectorOpen && gameClass.surfaceOpen,
+    hierarchyOpen && !inspectorOpen && gameClass.surfaceInspectorClosed,
+    !hierarchyOpen && inspectorOpen && gameClass.surfaceHierarchyClosed,
+    !hierarchyOpen && !inspectorOpen && gameClass.surfaceOnlyMain,
+  );
+}
+
+function buildStatusClass(status: BuildTargetOption['status']): string {
+  return cx(
+    buildClass.status,
+    status === 'ready' && 'bg-[rgba(34,197,94,0.14)] text-[#4ade80]',
+    status === 'planned' && 'bg-[rgba(96,165,250,0.14)] text-[#93c5fd]',
+    status === 'blocked' && 'bg-[rgba(245,158,11,0.14)] text-[#fbbf24]',
+  );
+}
+
+function diagnosticLevelClass(level: string): string {
+  if (level === 'error') return 'text-[#ef4444]';
+  if (level === 'warn' || level === 'warning') return 'text-[#f59e0b]';
+  if (level === 'info') return 'text-[#60a5fa]';
+  return '';
+}
+
 interface QuestArtifactContext {
   surface: WorkspaceView;
   title: string;
@@ -354,10 +656,10 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
 
   if (options) {
     return (
-      <label className="inspector-field">
+      <label className={inspectorClass.field}>
         <span>{componentFieldLabel(componentType, fieldName)}</span>
         <select
-          className="inspector-field-select"
+          className={inspectorClass.select}
           value={value}
           onChange={event => onCommit(fieldName, event.currentTarget.value)}
         >
@@ -371,7 +673,7 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
 
   if (typeof value === 'boolean') {
     return (
-      <label className="inspector-field inspector-field-row">
+      <label className={cx(inspectorClass.field, inspectorClass.fieldRow)}>
         <span>{componentFieldLabel(componentType, fieldName)}</span>
         <input
           type="checkbox"
@@ -417,15 +719,15 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
       };
 
       return (
-        <div className="inspector-field inspector-color-field">
+        <div className={inspectorClass.colorField}>
           <span>{componentFieldLabel(componentType, fieldName)}</span>
-          <div className="inspector-color-custom">
-            <label className="inspector-color-picker" title="Open color palette">
+          <div className={inspectorClass.colorCustom}>
+            <label className={inspectorClass.colorPicker} title="Open color palette">
               <input type="color" value={hex} onChange={event => commitColor(event.currentTarget.value)} />
               <span style={{ backgroundColor: hex }} />
             </label>
             <input
-              className="inspector-color-hex"
+              className={inspectorClass.colorHex}
               value={hexDraft}
               spellCheck={false}
               onChange={event => setHexDraft(event.currentTarget.value)}
@@ -439,21 +741,21 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
               }}
             />
           </div>
-          <div className="inspector-color-presets" aria-label={`${componentFieldLabel(componentType, fieldName)} presets`}>
+          <div className={inspectorClass.colorPresets} aria-label={`${componentFieldLabel(componentType, fieldName)} presets`}>
             {COLOR_PRESETS.map(preset => (
               <button
                 key={preset}
                 type="button"
-                className={preset === hex ? 'active' : ''}
+                className={cx(inspectorClass.colorPreset, preset === hex && inspectorClass.colorPresetActive)}
                 style={{ backgroundColor: preset }}
                 title={preset}
                 onClick={() => commitColor(preset)}
               />
             ))}
           </div>
-          <div className="inspector-color-channels">
+          <div className={inspectorClass.colorChannels}>
             {(['x', 'y', 'z'] as const).map((axis, index) => (
-              <label className="inspector-channel-input" key={`${fieldName}-${axis}`}>
+              <label className={inspectorClass.channelInput} key={`${fieldName}-${axis}`}>
                 <span>{['R', 'G', 'B'][index]}</span>
                 <input
                   defaultValue={value[axis].toFixed(2)}
@@ -473,13 +775,14 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
     }
 
     return (
-      <div className="inspector-field">
+      <div className={inspectorClass.field}>
         <span>{componentFieldLabel(componentType, fieldName)}</span>
-        <div className="inspector-object-vec3-row">
+        <div className={inspectorClass.vec3}>
           {(['x', 'y', 'z'] as const).map(axis => (
-            <label className="inspector-vec3-input-wrap" key={`${fieldName}-${axis}`}>
-              <span className="inspector-vec3-label">{axis.toUpperCase()}</span>
+            <label className={inspectorClass.vecInputWrap} key={`${fieldName}-${axis}`}>
+              <span className={inspectorClass.vecLabel}>{axis.toUpperCase()}</span>
               <input
+                className={inspectorClass.vecInput}
                 defaultValue={value[axis].toFixed(2)}
                 inputMode="decimal"
                 onBlur={event => commitAxis(axis, event.currentTarget.value)}
@@ -509,11 +812,11 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
   };
 
   return (
-    <label className="inspector-field">
+    <label className={inspectorClass.field}>
       <span>{componentFieldLabel(componentType, fieldName)}</span>
       {isObject ? (
         <textarea
-          className="inspector-field-input inspector-field-json"
+          className={cx(inspectorClass.input, inspectorClass.json)}
           value={draft}
           rows={4}
           onChange={event => setDraft(event.currentTarget.value)}
@@ -528,7 +831,7 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
         />
       ) : (
         <input
-          className="inspector-field-input"
+          className={inspectorClass.input}
           value={draft}
           inputMode={typeof value === 'number' || (Array.isArray(value) && value.every(item => typeof item === 'number')) ? 'decimal' : undefined}
           onChange={event => setDraft(event.currentTarget.value)}
@@ -641,20 +944,30 @@ function WorkspaceInspector({ object, onFocus, onPositionChange }: {
   }, [object.position, onPositionChange, position]);
 
   return (
-    <div className="workspace-selection-card">
-      <div className="workspace-selection-title">
-        <div>
-          <strong>{object.name}</strong>
-          <span>{object.tag || t('entity_untagged')}</span>
+    <div className={workspaceSelectionClass.card}>
+      <div className={workspaceSelectionClass.title}>
+        <div className={workspaceSelectionClass.titleText}>
+          <strong className={workspaceSelectionClass.name}>{object.name}</strong>
+          <span className={workspaceSelectionClass.tag}>{object.tag || t('entity_untagged')}</span>
         </div>
-        <span className="workspace-live-badge">{t('badge_live')}</span>
+        <span className={workspaceSelectionClass.liveBadge}>{t('badge_live')}</span>
       </div>
-      <label className="workspace-property-label">{t('prop_position')}</label>
-      <div className="workspace-position workspace-position-editable">
+      <label className={workspaceSelectionClass.label}>{t('prop_position')}</label>
+      <div className={workspaceSelectionClass.positionGrid}>
         {position.map((value, index) => (
-          <label key={index}>
-            <span>{['X', 'Y', 'Z'][index]}</span>
+          <label className={workspaceSelectionClass.positionInputWrap} key={index}>
+            <span
+              className={cx(
+                workspaceSelectionClass.positionAxis,
+                index === 0 && 'text-[#ef4444]',
+                index === 1 && 'text-[#22c55e]',
+                index === 2 && 'text-[#3b82f6]',
+              )}
+            >
+              {['X', 'Y', 'Z'][index]}
+            </span>
             <input
+              className={workspaceSelectionClass.positionInput}
               value={value}
               inputMode="decimal"
               aria-label={`${['X', 'Y', 'Z'][index]} position`}
@@ -675,7 +988,7 @@ function WorkspaceInspector({ object, onFocus, onPositionChange }: {
           </label>
         ))}
       </div>
-      <button onClick={onFocus}>{t('editor_focus_viewport')}</button>
+      <button className={workspaceSelectionClass.button} onClick={onFocus}>{t('editor_focus_viewport')}</button>
     </div>
   );
 }
@@ -896,11 +1209,11 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, onResize,
   return (
     <div
       ref={containerRef}
-      className="viewport-container"
+      className={viewportClass.container}
       onMouseDown={onMouseDown}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <canvas ref={canvasRef} className="viewport-canvas" />
+      <canvas ref={canvasRef} className={viewportClass.canvas} />
       <ViewportGrid show={true} />
       {viewMode === '3d' && <OrientationGizmo camera={camRef.current} onSnapToAxis={(axis) => {
         switch (axis) {
@@ -1003,10 +1316,9 @@ function SelectionOverlay({ sceneTree, selectedId, camera, width, height, viewMo
 
   return (
     <svg
-      className="selection-overlay"
+      className={viewportClass.selectionOverlay}
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
-      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20 }}
     >
       {/* Selection ring */}
       <circle
@@ -1841,18 +2153,18 @@ export default function EditorPage({
   // ── Render ──
 
   if (!shellState) {
-    return <div className="loading">{t('loading_editor')}</div>;
+    return <div className={shellClass.loading}>{t('loading_editor')}</div>;
   }
 
   return (
-    <div className="editor">
+    <div className={shellClass.root}>
       {/* Editor toolbar */}
-      <div className="editor-toolbar editor-toolbar-minimal">
-        <div className="toolbar-project">
-          <span className="toolbar-project-kicker">{t('editor_workspace_kicker')}</span>
-          <span className="toolbar-project-name">{shellState.project_name || t('editor_untitled')}</span>
+      <div className={shellClass.toolbar}>
+        <div className={shellClass.toolbarProject}>
+          <span className={shellClass.toolbarProjectKicker}>{t('editor_workspace_kicker')}</span>
+          <span className={shellClass.toolbarProjectName}>{shellState.project_name || t('editor_untitled')}</span>
         </div>
-        <div className="toolbar-spacer" />
+        <div className={shellClass.toolbarSpacer} />
         <button
           className={toolButtonClass({ size: 'toolbar' })}
           onClick={() => rpc('shell/save_scene').then(() => refreshSceneTree())}
@@ -1885,74 +2197,81 @@ export default function EditorPage({
           disabled={!onPromoteToQuest || promotingQuest}
           title="Promote current Editor context to Quest"
         >
-          {promotingQuest ? <IconLoader className="spin-icon" /> : <IconSparkles />} <span>Promote</span>
+          {promotingQuest ? <IconLoader className="animate-spin" /> : <IconSparkles />} <span>Promote</span>
         </button>
         <button className={toolButtonClass({ size: 'toolbar', extra: 'quest-mode-btn' })} onClick={onOpenQuest} title="Open Quest Mode"><IconProjects /> <span>Quests</span></button>
         <button className={toolButtonClass({ size: 'toolbar' })} onClick={handleClose} title={t('editor_close')}><IconX /></button>
       </div>
 
       {/* Main body: viewport + AI panel */}
-      <div className="editor-body editor-body-ai">
-        <main className="ai-product-workspace">
+      <div className={shellClass.body}>
+        <main className={workspaceClass.root}>
           {questArtifact && (
-            <div className="quest-artifact-banner">
-              <IconProjects />
-              <div>
-                <span>Opened from Quest</span>
-                <strong>{questArtifact.questTitle}</strong>
-                <small>{questArtifact.kind.replaceAll('_', ' ')} · {questArtifact.label}</small>
+            <div className={questBannerClass.root}>
+              <IconProjects className={questBannerClass.icon} />
+              <div className={questBannerClass.content}>
+                <span className={questBannerClass.kicker}>Opened from Quest</span>
+                <strong className={questBannerClass.title}>{questArtifact.questTitle}</strong>
+                <small className={questBannerClass.meta}>{questArtifact.kind.replaceAll('_', ' ')} · {questArtifact.label}</small>
               </div>
-              <button onClick={onOpenQuest}><IconProjects /> Return</button>
-              <button onClick={onDismissQuestArtifact} title="Dismiss"><IconX /></button>
+              <button className={questBannerClass.button} onClick={onOpenQuest}><IconProjects /> Return</button>
+              <button className={questBannerClass.iconButton} onClick={onDismissQuestArtifact} title="Dismiss"><IconX /></button>
             </div>
           )}
           {promoteError && (
-            <div className="quest-artifact-banner promote-error-banner">
-              <IconAlertCircle />
-              <div>
-                <span>Promote to Quest failed</span>
-                <small>{promoteError}</small>
+            <div className={cx(questBannerClass.root, questBannerClass.error)}>
+              <IconAlertCircle className={questBannerClass.errorIcon} />
+              <div className={questBannerClass.content}>
+                <span className={questBannerClass.kicker}>Promote to Quest failed</span>
+                <small className={questBannerClass.meta}>{promoteError}</small>
               </div>
-              <button onClick={() => setPromoteError(null)}><IconX /></button>
+              <button className={questBannerClass.iconButton} onClick={() => setPromoteError(null)}><IconX /></button>
             </div>
           )}
-          <nav className="product-tabs" role="tablist" aria-label="Editor surfaces">
+          <nav className={workspaceClass.tabs} role="tablist" aria-label="Editor surfaces">
             {visibleWorkspaceTabs.map(([view, label, icon]) => (
-              <button key={view} className={workspaceView === view ? 'active' : ''} onClick={() => setWorkspaceView(view)} role="tab" aria-selected={workspaceView === view}>
+              <button
+                key={view}
+                className={cx(workspaceClass.tab, workspaceView === view && workspaceClass.tabActive)}
+                onClick={() => setWorkspaceView(view)}
+                role="tab"
+                aria-selected={workspaceView === view}
+              >
                 {icon}<span>{label}</span>
-                {view === 'tasks' && aiWorkspace?.plan && <b>{aiWorkspace.plan.operations.length}</b>}
-                {view === 'assets' && assets.length > 0 && <b>{assets.length}</b>}
-                {view === 'scripts' && scripts.length > 0 && <b>{scripts.length}</b>}
-                {view === 'diagnostics' && consoleEntries.length > 0 && <b>{consoleEntries.length}</b>}
+                {view === 'tasks' && aiWorkspace?.plan && <b className={workspaceClass.tabBadge}>{aiWorkspace.plan.operations.length}</b>}
+                {view === 'assets' && assets.length > 0 && <b className={workspaceClass.tabBadge}>{assets.length}</b>}
+                {view === 'scripts' && scripts.length > 0 && <b className={workspaceClass.tabBadge}>{scripts.length}</b>}
+                {view === 'diagnostics' && consoleEntries.length > 0 && <b className={workspaceClass.tabBadge}>{consoleEntries.length}</b>}
               </button>
             ))}
           </nav>
 
-          <section className={`product-view product-view-${workspaceView}`}>
-            {workspaceView === 'prd' && openedQuestArtifact && <article className="prd-document" onMouseUp={selectDocumentText}>
-              <header><span>{t('prd_header')}</span><strong>{shellState.project_name || t('prd_untitled_game')}</strong><p>{t('prd_brief_desc')}</p></header>
-              <section><h2>{t('prd_vision')}</h2><p>{t('prd_vision_text').replace('{scene_count}', String(sceneTree.length)).replace('{script_count}', String(scripts.length))}</p></section>
-              <section><h2>{t('prd_current_scope')}</h2><div className="prd-grid"><div><span>{t('prd_scope_player_exp')}</span><strong>{t('prd_scope_playable')}</strong></div><div><span>{t('prd_scope_world')}</span><strong>{sceneTree.length} {t('prd_scope_authored')}</strong></div><div><span>{t('prd_scope_automation')}</span><strong>{t('prd_scope_review')}</strong></div><div><span>{t('prd_scope_delivery')}</span><strong>{t('prd_scope_verification')}</strong></div></div></section>
-              <section><h2>{t('prd_acceptance')}</h2><ul><li>{t('prd_criteria_1')}</li><li>{t('prd_criteria_2')}</li><li>{t('prd_criteria_3')}</li><li>{t('prd_criteria_4')}</li></ul></section>
+          <section className={cx(workspaceClass.view, workspaceView === 'game' && workspaceClass.viewGame)}>
+            {workspaceView === 'prd' && openedQuestArtifact && <article className={prdClass.document} onMouseUp={selectDocumentText}>
+              <header className={prdClass.header}><span className={prdClass.kicker}>{t('prd_header')}</span><strong className={prdClass.title}>{shellState.project_name || t('prd_untitled_game')}</strong><p className={prdClass.description}>{t('prd_brief_desc')}</p></header>
+              <section className={prdClass.section}><h2 className={prdClass.sectionTitle}>{t('prd_vision')}</h2><p className={prdClass.bodyText}>{t('prd_vision_text').replace('{scene_count}', String(sceneTree.length)).replace('{script_count}', String(scripts.length))}</p></section>
+              <section className={prdClass.section}><h2 className={prdClass.sectionTitle}>{t('prd_current_scope')}</h2><div className={prdClass.grid}><div className={prdClass.gridCard}><span className={prdClass.gridLabel}>{t('prd_scope_player_exp')}</span><strong className={prdClass.gridValue}>{t('prd_scope_playable')}</strong></div><div className={prdClass.gridCard}><span className={prdClass.gridLabel}>{t('prd_scope_world')}</span><strong className={prdClass.gridValue}>{sceneTree.length} {t('prd_scope_authored')}</strong></div><div className={prdClass.gridCard}><span className={prdClass.gridLabel}>{t('prd_scope_automation')}</span><strong className={prdClass.gridValue}>{t('prd_scope_review')}</strong></div><div className={prdClass.gridCard}><span className={prdClass.gridLabel}>{t('prd_scope_delivery')}</span><strong className={prdClass.gridValue}>{t('prd_scope_verification')}</strong></div></div></section>
+              <section className={prdClass.section}><h2 className={prdClass.sectionTitle}>{t('prd_acceptance')}</h2><ul className={prdClass.list}><li className={prdClass.bodyText}>{t('prd_criteria_1')}</li><li className={prdClass.bodyText}>{t('prd_criteria_2')}</li><li className={prdClass.bodyText}>{t('prd_criteria_3')}</li><li className={prdClass.bodyText}>{t('prd_criteria_4')}</li></ul></section>
             </article>}
 
-            {workspaceView === 'tasks' && <div className="task-board">
-              <header><div><span>AI artifact</span><h1>{aiWorkspace?.plan ? 'Changes need review' : openedQuestArtifact ? openedQuestArtifact.title : 'AI work'}</h1></div><small>{shellState.project_name} · {sceneTree.length} {t('label_objects')}</small></header>
+            {workspaceView === 'tasks' && <div className={taskClass.board}>
+              <header className={taskClass.header}><div><span className={taskClass.kicker}>AI artifact</span><h1 className={taskClass.title}>{aiWorkspace?.plan ? 'Changes need review' : openedQuestArtifact ? openedQuestArtifact.title : 'AI work'}</h1></div><small className={taskClass.meta}>{shellState.project_name} · {sceneTree.length} {t('label_objects')}</small></header>
               {openedQuestArtifact && (
-                <section className="quest-artifact-context-card">
+                <section className={taskClass.artifactCard}>
                   <div>
-                    <span>{questArtifact?.kind.replaceAll('_', ' ')}</span>
-                    <strong>{openedQuestArtifact.title}</strong>
-                    <p>{openedQuestArtifact.description}</p>
-                    {openedQuestArtifact.focusPath && <small>{openedQuestArtifact.focusPath}</small>}
+                    <span className={taskClass.artifactKicker}>{questArtifact?.kind.replaceAll('_', ' ')}</span>
+                    <strong className={taskClass.artifactTitle}>{openedQuestArtifact.title}</strong>
+                    <p className={taskClass.artifactDescription}>{openedQuestArtifact.description}</p>
+                    {openedQuestArtifact.focusPath && <small className={taskClass.artifactPath}>{openedQuestArtifact.focusPath}</small>}
                   </div>
-                  <div>
+                  <div className={taskClass.artifactActions}>
                     {openedQuestArtifact.surface !== 'tasks' && (
-                      <button onClick={() => setWorkspaceView(openedQuestArtifact.surface)}>
+                      <button className={taskClass.artifactButton} onClick={() => setWorkspaceView(openedQuestArtifact.surface)}>
                         <IconFile /> Open surface
                       </button>
                     )}
                     <button
+                      className={taskClass.artifactButton}
                       onClick={() => setContextualRequest({
                         id: Date.now(),
                         prompt: `Inspect this Quest artifact and suggest the next local editor check.\n\n${openedQuestArtifact.title}\n${openedQuestArtifact.description}\n${openedQuestArtifact.focusPath ?? ''}`,
@@ -1960,53 +2279,53 @@ export default function EditorPage({
                     >
                       <IconSparkles /> Ask AI
                     </button>
-                    <button onClick={onOpenQuest}><IconProjects /> Return</button>
+                    <button className={taskClass.artifactButton} onClick={onOpenQuest}><IconProjects /> Return</button>
                   </div>
                 </section>
               )}
-              <section className="task-operations"><div className="task-section-title"><span>{t('task_proposed_ops')}</span></div>
-                {!aiWorkspace?.plan ? <div className={productEmptyClass}><IconProjects className={productEmptyIconClass} /><strong className={productEmptyTitleClass}>{t('task_no_plan')}</strong><span className={productEmptyTextClass}>{t('task_no_plan_desc')}</span></div> : aiWorkspace.plan.operations.map(operation => <div key={operation.index}><span className={taskOperationPermissionLabelClass(operation.permission_kind)}>{operation.permission_kind.toUpperCase()}</span><p>{operation.preview}</p><small>{operation.permission_kind === 'read' ? t('op_auto_allowed') : aiWorkspace.approved.has(operation.index) ? t('op_allowed') : aiWorkspace.denied.has(operation.index) ? t('op_denied_once') : t('op_awaiting')}</small></div>)}
+              <section className={taskClass.operations}><div className={taskClass.operationsTitle}><span>{t('task_proposed_ops')}</span></div>
+                {!aiWorkspace?.plan ? <div className={productEmptyClass}><IconProjects className={productEmptyIconClass} /><strong className={productEmptyTitleClass}>{t('task_no_plan')}</strong><span className={productEmptyTextClass}>{t('task_no_plan_desc')}</span></div> : aiWorkspace.plan.operations.map(operation => <div className={taskClass.operationRow} key={operation.index}><span className={cx(taskClass.operationPermission, taskOperationPermissionLabelClass(operation.permission_kind))}>{operation.permission_kind.toUpperCase()}</span><p className={taskClass.operationPreview}>{operation.preview}</p><small className={taskClass.operationState}>{operation.permission_kind === 'read' ? t('op_auto_allowed') : aiWorkspace.approved.has(operation.index) ? t('op_allowed') : aiWorkspace.denied.has(operation.index) ? t('op_denied_once') : t('op_awaiting')}</small></div>)}
               </section>
-              {aiWorkspace?.plan && <footer><button className={buttonClass('ghost')} onClick={aiWorkspace.discardProposal}>{t('btn_discard')}</button><button className={buttonClass('primary')} disabled={aiWorkspace.approved.size === 0} onClick={aiWorkspace.applyApproved}>{t('btn_continue_allowed').replace('{count}', String(aiWorkspace.approved.size))}</button></footer>}
+              {aiWorkspace?.plan && <footer className={taskClass.footer}><button className={buttonClass('ghost')} onClick={aiWorkspace.discardProposal}>{t('btn_discard')}</button><button className={buttonClass('primary')} disabled={aiWorkspace.approved.size === 0} onClick={aiWorkspace.applyApproved}>{t('btn_continue_allowed').replace('{count}', String(aiWorkspace.approved.size))}</button></footer>}
             </div>}
 
-            {workspaceView === 'game' && <div className={`game-editor-surface ${hierarchyOpen ? '' : 'hierarchy-closed'} ${inspectorOpen ? '' : 'inspector-closed'}`}>
-              {hierarchyOpen && <aside className="game-hierarchy-panel">
-                <header>
-                  <div><span>Hierarchy</span><strong>{sceneTree.length} objects</strong></div>
-                  <div className="panel-header-actions">
-                    <button onClick={() => createSceneObject()} title="Create object"><IconPlus /></button>
-                    <button onClick={() => setHierarchyOpen(false)} title="Close Hierarchy"><IconX /></button>
+            {workspaceView === 'game' && <div className={gameSurfaceClass(hierarchyOpen, inspectorOpen)}>
+              {hierarchyOpen && <aside className={gameClass.sidePanel}>
+                <header className={gameClass.panelHeader}>
+                  <div className={gameClass.panelHeaderText}><span>Hierarchy</span><strong className={gameClass.panelHeaderTitle}>{sceneTree.length} objects</strong></div>
+                  <div className={gameClass.panelHeaderActions}>
+                    <button className={gameClass.iconButton} onClick={() => createSceneObject()} title="Create object"><IconPlus /></button>
+                    <button className={gameClass.iconButton} onClick={() => setHierarchyOpen(false)} title="Close Hierarchy"><IconX /></button>
                   </div>
                 </header>
-                <div className="game-hierarchy-list">
+                <div className={gameClass.hierarchyList}>
                   {sceneTree.length === 0 ? <p>No scene objects.</p> : sceneTree.map(object => (
                     <button
                       key={object.id}
-                      className={selectedId === object.id ? 'selected' : ''}
+                      className={cx(gameClass.hierarchyItem, selectedId === object.id && gameClass.hierarchyItemSelected)}
                       onClick={() => selectSceneObject(object.id)}
                       style={{ paddingLeft: object.parent_id ? 22 : 10 }}
                     >
-                      <span>{object.parent_id ? '↳' : '●'}</span>
-                      <strong>{object.name}</strong>
-                      <small>{object.tag || 'Untagged'}</small>
+                      <span className={gameClass.hierarchyMarker}>{object.parent_id ? '↳' : '●'}</span>
+                      <strong className={gameClass.hierarchyName}>{object.name}</strong>
+                      <small className={gameClass.hierarchyTag}>{object.tag || 'Untagged'}</small>
                     </button>
                   ))}
                 </div>
               </aside>}
 
-              <section className="game-main-panel">
-                <div className="game-preview-bar">
-                  <div><span className="live-dot" />Scene/Game View</div>
-                  <div className="viewport-mode-switch">
+              <section className={gameClass.mainPanel}>
+                <div className={gameClass.previewBar}>
+                  <div className={gameClass.previewBarGroup}><span className={gameClass.liveDot} />Scene/Game View</div>
+                  <div className={gameClass.modeSwitch}>
                     {!hierarchyOpen && (
-                      <button onClick={() => setHierarchyOpen(true)}>Hierarchy</button>
+                      <button className={gameClass.modeButton} onClick={() => setHierarchyOpen(true)}>Hierarchy</button>
                     )}
-                    <button className={viewMode === '2d' ? 'active' : ''} onClick={() => setViewMode('2d')}>2D</button>
-                    <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>
-                    <button onClick={() => rpc('shell/undo').then(() => refreshSceneTree())} disabled={!shellState.can_undo}>Undo</button>
-                    <button onClick={() => rpc('shell/redo').then(() => refreshSceneTree())} disabled={!shellState.can_redo}>Redo</button>
-                    <button onClick={() => openNativeSceneView({
+                    <button className={cx(gameClass.modeButton, viewMode === '2d' && gameClass.modeButtonActive)} onClick={() => setViewMode('2d')}>2D</button>
+                    <button className={cx(gameClass.modeButton, viewMode === '3d' && gameClass.modeButtonActive)} onClick={() => setViewMode('3d')}>3D</button>
+                    <button className={gameClass.modeButton} onClick={() => rpc('shell/undo').then(() => refreshSceneTree())} disabled={!shellState.can_undo}>Undo</button>
+                    <button className={gameClass.modeButton} onClick={() => rpc('shell/redo').then(() => refreshSceneTree())} disabled={!shellState.can_redo}>Redo</button>
+                    <button className={gameClass.modeButton} onClick={() => openNativeSceneView({
                       yaw: cameraRef.current.yaw,
                       pitch: cameraRef.current.pitch,
                       distance: cameraRef.current.distance,
@@ -2014,23 +2333,23 @@ export default function EditorPage({
                       targetY: cameraRef.current.targetY,
                       targetZ: cameraRef.current.targetZ,
                     })}>Native View</button>
-                    <button onClick={openGameView}><IconPlay /> Run</button>
+                    <button className={gameClass.modeButton} onClick={openGameView}><IconPlay /> Run</button>
                     {!inspectorOpen && (
-                      <button onClick={() => setInspectorOpen(true)}>Inspector</button>
+                      <button className={gameClass.modeButton} onClick={() => setInspectorOpen(true)}>Inspector</button>
                     )}
                   </div>
                 </div>
-                <div className="game-create-presets" aria-label="Create scene preset">
-                  <button onClick={() => createSceneObject()}><IconPlus /> Empty</button>
-                  <button onClick={() => createPresetObject('Camera', 'Camera')}><IconPlus /> Camera</button>
-                  <button onClick={() => createPresetObject('Light', 'Light')}><IconPlus /> Light</button>
-                  <button onClick={() => createPresetObject('Mesh Object', 'MeshRenderer')}><IconPlus /> Mesh</button>
-                  <button onClick={() => createPresetObject('Audio Source', 'AudioSource')}><IconPlus /> Audio</button>
-                  <button onClick={() => createPresetObject('Rigid Body', 'Rigidbody')}><IconPlus /> Rigidbody</button>
-                  <button onClick={() => createPresetObject('Collider', 'Collider')}><IconPlus /> Collider</button>
-                  <button onClick={createBehaviorObject}><IconCode /> Behavior</button>
+                <div className={gameClass.createPresets} aria-label="Create scene preset">
+                  <button className={gameClass.createButton} onClick={() => createSceneObject()}><IconPlus /> Empty</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Camera', 'Camera')}><IconPlus /> Camera</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Light', 'Light')}><IconPlus /> Light</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Mesh Object', 'MeshRenderer')}><IconPlus /> Mesh</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Audio Source', 'AudioSource')}><IconPlus /> Audio</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Rigid Body', 'Rigidbody')}><IconPlus /> Rigidbody</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Collider', 'Collider')}><IconPlus /> Collider</button>
+                  <button className={gameClass.createButton} onClick={createBehaviorObject}><IconCode /> Behavior</button>
                 </div>
-                <div className="game-preview-canvas" onClick={handleViewportClick}>
+                <div className={gameClass.previewCanvas} onClick={handleViewportClick}>
                   <ViewportCanvas
                     sceneVersion={sceneVersion}
                     cameraRef={cameraRef}
@@ -2043,26 +2362,26 @@ export default function EditorPage({
                 </div>
               </section>
 
-              {inspectorOpen && <aside className="game-inspector-panel">
-                <header>
-                  <div>
+              {inspectorOpen && <aside className={gameClass.inspectorPanel}>
+                <header className={gameClass.panelHeader}>
+                  <div className={gameClass.panelHeaderText}>
                     <span>Inspector</span>
-                    {selectedEntityDetails && <strong>{selectedEntityDetails.name}</strong>}
+                    {selectedEntityDetails && <strong className={gameClass.panelHeaderTitle}>{selectedEntityDetails.name}</strong>}
                   </div>
-                  <button className="inspector-close-btn" onClick={() => setInspectorOpen(false)} title="Close Inspector">
+                  <button className={gameClass.iconButton} onClick={() => setInspectorOpen(false)} title="Close Inspector">
                     <IconX />
                   </button>
                 </header>
                 {!selectedEntityDetails ? (
-                  <div className="inspector-empty">Select an object in the viewport or hierarchy.</div>
+                  <div className={gameClass.empty}>Select an object in the viewport or hierarchy.</div>
                 ) : (
-                  <div className="inspector">
-                    <section className="inspector-section">
-                      <div className="inspector-section-title">Object</div>
-                      <label className="inspector-field">
+                  <div className={inspectorClass.root}>
+                    <section className={inspectorClass.section}>
+                      <div className={inspectorClass.sectionTitle}>Object</div>
+                      <label className={inspectorClass.field}>
                         <span>Name</span>
                         <input
-                          className="inspector-text-input"
+                          className={inspectorClass.input}
                           value={selectedEntityNameDraft}
                           onChange={event => setSelectedEntityNameDraft(event.target.value)}
                           onBlur={renameSelectedObject}
@@ -2072,10 +2391,10 @@ export default function EditorPage({
                           }}
                         />
                       </label>
-                      <label className="inspector-field">
+                      <label className={inspectorClass.field}>
                         <span>Parent</span>
                         <select
-                          className="inspector-text-input"
+                          className={inspectorClass.select}
                           value={selectedObject?.parent_id ?? ''}
                           onChange={event => reparentSelectedObject(event.currentTarget.value)}
                         >
@@ -2085,19 +2404,20 @@ export default function EditorPage({
                           ))}
                         </select>
                       </label>
-                      <div className="inspector-action-row">
-                        <button onClick={duplicateSelectedObject}><IconCopy /> Duplicate</button>
-                        <button onClick={deleteSelectedObject}><IconTrash /> Delete</button>
+                      <div className={inspectorClass.actionRow}>
+                        <button className={inspectorClass.actionButton} onClick={duplicateSelectedObject}><IconCopy /> Duplicate</button>
+                        <button className={inspectorClass.actionButton} onClick={deleteSelectedObject}><IconTrash /> Delete</button>
                       </div>
                     </section>
                     {(['position', 'rotation', 'scale'] as const).map(field => (
-                      <section className="inspector-section" key={field}>
-                        <div className="inspector-section-title">{field}</div>
-                        <div className="inspector-vec3">
+                      <section className={inspectorClass.section} key={field}>
+                        <div className={inspectorClass.sectionTitle}>{field}</div>
+                        <div className={field === 'rotation' ? inspectorClass.vec4 : inspectorClass.vec3}>
                           {selectedEntityDetails.transform[field].map((value, index) => (
-                            <label className="inspector-vec3-input-wrap" key={`${field}-${index}`}>
-                              <span className="inspector-vec3-label">{['X', 'Y', 'Z', 'W'][index]}</span>
+                            <label className={inspectorClass.vecInputWrap} key={`${field}-${index}`}>
+                              <span className={inspectorClass.vecLabel}>{['X', 'Y', 'Z', 'W'][index]}</span>
                               <input
+                                className={inspectorClass.vecInput}
                                 defaultValue={value.toFixed(2)}
                                 inputMode="decimal"
                                 onBlur={event => updateSelectedTransform(field, index, event.currentTarget.value)}
@@ -2112,17 +2432,17 @@ export default function EditorPage({
                         </div>
                       </section>
                     ))}
-                    <section className="inspector-section">
-                      <div className="inspector-section-title">Components</div>
+                    <section className={inspectorClass.section}>
+                      <div className={inspectorClass.sectionTitle}>Components</div>
                       {selectedEntityDetails.components.map(component => (
-                        <div className="inspector-component" key={component.type}>
-                          <div className="inspector-component-header">
-                            <span className="inspector-component-type">{component.type}</span>
-                            <button className="inspector-remove-btn" onClick={() => removeSelectedComponent(component.type)} title="Remove component">×</button>
+                        <div className={inspectorClass.component} key={component.type}>
+                          <div className={inspectorClass.componentHeader}>
+                            <span className={inspectorClass.componentType}>{component.type}</span>
+                            <button className={inspectorClass.removeButton} onClick={() => removeSelectedComponent(component.type)} title="Remove component">×</button>
                           </div>
-                          <div className="inspector-component-fields">
+                          <div className={inspectorClass.componentFields}>
                             {Object.entries(component.data ?? {}).length === 0 ? (
-                              <div className="inspector-field-empty">No editable fields</div>
+                              <div className={inspectorClass.emptyField}>No editable fields</div>
                             ) : Object.entries(component.data ?? {}).map(([fieldName, value]) => (
                               <ComponentFieldEditor
                                 key={`${component.type}-${fieldName}`}
@@ -2135,13 +2455,13 @@ export default function EditorPage({
                           </div>
                         </div>
                       ))}
-                      <div className="inspector-add-row">
-                        <select value={addComponentType} onChange={event => setAddComponentType(event.target.value)}>
+                      <div className={inspectorClass.addRow}>
+                        <select className={inspectorClass.select} value={addComponentType} onChange={event => setAddComponentType(event.target.value)}>
                           {['Camera', 'Light', 'MeshRenderer', 'Rigidbody', 'Collider', 'AudioSource', 'AudioListener', 'Script'].map(type => (
                             <option key={type} value={type}>{type}</option>
                           ))}
                         </select>
-                        <button onClick={addSelectedComponent}><IconPlus /> Add</button>
+                        <button className={inspectorClass.actionButton} onClick={addSelectedComponent}><IconPlus /> Add</button>
                       </div>
                     </section>
                   </div>
@@ -2149,44 +2469,44 @@ export default function EditorPage({
               </aside>}
             </div>}
 
-            {workspaceView === 'assets' && <div className="assets-surface">
-              <header>
+            {workspaceView === 'assets' && <div className={surfaceClass.root}>
+              <header className={surfaceClass.header}>
                 <div>
-                  <span>Project/Assets</span>
-                  <strong>{assets.length} assets</strong>
+                  <span className={surfaceClass.headerKicker}>Project/Assets</span>
+                  <strong className={surfaceClass.headerTitle}>{assets.length} assets</strong>
                 </div>
-                <div className="assets-toolbar">
-                  <button onClick={() => createProjectAsset('script')} disabled={assetsBusy}>Script</button>
-                  <button onClick={() => createProjectAsset('material')} disabled={assetsBusy}>Material</button>
-                  <button onClick={() => createProjectAsset('prefab')} disabled={assetsBusy}>Prefab</button>
-                  <button onClick={() => createProjectAsset('scene')} disabled={assetsBusy}>Scene</button>
-                  <button onClick={refreshProjectAssets} disabled={assetsBusy}>
+                <div className={surfaceClass.toolbar}>
+                  <button className={surfaceClass.button} onClick={() => createProjectAsset('script')} disabled={assetsBusy}>Script</button>
+                  <button className={surfaceClass.button} onClick={() => createProjectAsset('material')} disabled={assetsBusy}>Material</button>
+                  <button className={surfaceClass.button} onClick={() => createProjectAsset('prefab')} disabled={assetsBusy}>Prefab</button>
+                  <button className={surfaceClass.button} onClick={() => createProjectAsset('scene')} disabled={assetsBusy}>Scene</button>
+                  <button className={surfaceClass.button} onClick={refreshProjectAssets} disabled={assetsBusy}>
                     {assetsBusy ? 'Refreshing' : 'Refresh'}
                   </button>
                 </div>
               </header>
-              <div className="assets-list">
+              <div className={surfaceClass.list}>
                 {assets.length === 0 ? (
-                  <div className="assets-empty">No imported assets found.</div>
+                  <div className={surfaceClass.empty}>No imported assets found.</div>
                 ) : assets.map(asset => {
                   const canOpenScript = isScriptPath(asset.source_path);
                   return (
-                    <article className="asset-row" key={asset.guid || asset.source_path}>
+                    <article className={assetsClass.row} key={asset.guid || asset.source_path}>
                       <IconFile />
-                      <div>
-                        <strong>{asset.source_path.split('/').pop() || asset.source_path}</strong>
-                        <span>{asset.source_path}</span>
+                      <div className={assetsClass.rowMain}>
+                        <strong className={assetsClass.rowTitle}>{asset.source_path.split('/').pop() || asset.source_path}</strong>
+                        <span className={assetsClass.rowMeta}>{asset.source_path}</span>
                       </div>
-                      <small>{asset.kind}</small>
-                      <small>{asset.importer || 'default'}</small>
-                      <div className="asset-row-actions">
+                      <small className={assetsClass.rowMeta}>{asset.kind}</small>
+                      <small className={assetsClass.rowMeta}>{asset.importer || 'default'}</small>
+                      <div className={assetsClass.actions}>
                         {canOpenScript ? (
-                          <button onClick={() => {
+                          <button className={surfaceClass.button} onClick={() => {
                             setSelectedScript(asset.source_path);
                             setWorkspaceView('scripts');
                           }}>Open</button>
                         ) : (
-                          <button onClick={event => {
+                          <button className={surfaceClass.button} onClick={event => {
                             setArtifactSelection({
                               kind: 'document',
                               label: asset.source_path,
@@ -2197,8 +2517,8 @@ export default function EditorPage({
                             setArtifactQuestionOpen(false);
                           }}>Inspect</button>
                         )}
-                        <button onClick={event => revealAssetReferences(asset, event)} disabled={assetsBusy}>Refs</button>
-                        <button onClick={() => reloadAsset(asset.source_path)} disabled={assetsBusy}>Reload</button>
+                        <button className={surfaceClass.button} onClick={event => revealAssetReferences(asset, event)} disabled={assetsBusy}>Refs</button>
+                        <button className={surfaceClass.button} onClick={() => reloadAsset(asset.source_path)} disabled={assetsBusy}>Reload</button>
                       </div>
                     </article>
                   );
@@ -2206,27 +2526,28 @@ export default function EditorPage({
               </div>
             </div>}
 
-            {workspaceView === 'scripts' && <div className="script-preview">
-              <aside>
-                <header>{t('scripts_header')} <span>{scripts.length}</span></header>
-                {scripts.length === 0 ? <p>{t('scripts_empty')}</p> : scripts.map(path => (
-                  <button key={path} className={selectedScript === path ? 'active' : ''} onClick={() => setSelectedScript(path)}>
-                    <IconCode /><span>{path.split('/').pop()}</span><small>{path}</small>
+            {workspaceView === 'scripts' && <div className={scriptSurfaceClass.root}>
+              <aside className={scriptSurfaceClass.sidebar}>
+                <header className={scriptSurfaceClass.sidebarHeader}>{t('scripts_header')} <span>{scripts.length}</span></header>
+                {scripts.length === 0 ? <p className={scriptSurfaceClass.sidebarEmpty}>{t('scripts_empty')}</p> : scripts.map(path => (
+                  <button key={path} className={cx(scriptSurfaceClass.scriptButton, selectedScript === path && scriptSurfaceClass.scriptButtonActive)} onClick={() => setSelectedScript(path)}>
+                    <IconCode /><span className={scriptSurfaceClass.scriptName}>{path.split('/').pop()}</span><small className={scriptSurfaceClass.scriptPath}>{path}</small>
                   </button>
                 ))}
               </aside>
-              <article>
-                <header>
+              <article className={scriptSurfaceClass.editor}>
+                <header className={scriptSurfaceClass.editorHeader}>
                   <span>{selectedScript || t('scripts_select')}{scriptDirty ? ' *' : ''}</span>
-                  <div>
-                    <b>{t('scripts_line_select_hint')}</b>
-                    <button onClick={saveSelectedScript} disabled={!selectedScript || !scriptDirty || scriptSaving}>
+                  <div className={scriptSurfaceClass.editorActions}>
+                    <b className={scriptSurfaceClass.editorHint}>{t('scripts_line_select_hint')}</b>
+                    <button className={scriptSurfaceClass.editorButton} onClick={saveSelectedScript} disabled={!selectedScript || !scriptDirty || scriptSaving}>
                       {scriptSaving ? 'Saving' : 'Save'}
                     </button>
                   </div>
                 </header>
-                <div className="script-editor-pane">
+                <div className={scriptSurfaceClass.editorPane}>
                   <textarea
+                    className={scriptSurfaceClass.textarea}
                     value={scriptContent}
                     spellCheck={false}
                     disabled={!selectedScript}
@@ -2247,160 +2568,165 @@ export default function EditorPage({
                       }
                     }}
                   />
-                  <pre className="selectable-code script-line-gutter"><code>{(scriptContent || '// Aster-generated scripts will appear here.').split('\n').map((line, index) => { const lineNumber = index + 1; const selected = scriptLineRange && lineNumber >= scriptLineRange[0] && lineNumber <= scriptLineRange[1]; return <button key={lineNumber} className={selected ? 'selected' : ''} onClick={event => selectScriptLine(lineNumber, event.shiftKey, event)}><span>{lineNumber}</span><i>{line || ' '}</i></button>; })}</code></pre>
+                  <pre className={scriptSurfaceClass.gutter}><code>{(scriptContent || '// Aster-generated scripts will appear here.').split('\n').map((line, index) => { const lineNumber = index + 1; const selected = scriptLineRange && lineNumber >= scriptLineRange[0] && lineNumber <= scriptLineRange[1]; return <button key={lineNumber} className={cx(scriptSurfaceClass.gutterButton, selected && scriptSurfaceClass.gutterButtonSelected)} onClick={event => selectScriptLine(lineNumber, event.shiftKey, event)}><span className={scriptSurfaceClass.gutterLineNumber}>{lineNumber}</span><i className={scriptSurfaceClass.gutterLineText}>{line || ' '}</i></button>; })}</code></pre>
                 </div>
               </article>
             </div>}
 
-            {workspaceView === 'build' && <div className="build-surface">
-              <header>
+            {workspaceView === 'build' && <div className={surfaceClass.root}>
+              <header className={surfaceClass.buildHeader}>
                 <div>
-                  <span>Build & Package</span>
-                  <strong>{shellState.project_name || 'Untitled project'}</strong>
+                  <span className={surfaceClass.buildKicker}>Build & Package</span>
+                  <strong className={surfaceClass.buildHeaderTitle}>{shellState.project_name || 'Untitled project'}</strong>
                 </div>
-                <button onClick={requestBuildPackage} disabled={buildBusy}>
-                  {buildBusy ? <IconLoader className="spin-icon" /> : <IconPackage />}
+                <button className={surfaceClass.primaryButton} onClick={requestBuildPackage} disabled={buildBusy}>
+                  {buildBusy ? <IconLoader className="animate-spin" /> : <IconPackage />}
                   {buildBusy ? 'Preparing' : 'Package'}
                 </button>
               </header>
 
-              <div className="build-layout">
-                <section className="build-main">
-                  <div className="build-presets" aria-label="Build presets">
+              <div className={buildClass.layout}>
+                <section className={buildClass.main}>
+                  <div className={buildClass.presets} aria-label="Build presets">
                     {BUILD_PRESETS.map(preset => (
                       <button
                         key={preset.id}
-                        className={buildTarget === preset.target && buildFormat === preset.format && buildChannel === preset.channel ? 'active' : ''}
+                        className={cx(
+                          buildClass.presetButton,
+                          buildTarget === preset.target && buildFormat === preset.format && buildChannel === preset.channel && buildClass.selectedButton,
+                        )}
                         onClick={() => applyBuildPreset(preset)}
                       >
                         <IconPackage />
-                        <span>{preset.label}</span>
-                        <small>{preset.channel} · {preset.format}</small>
+                        <span className={buildClass.itemTitle}>{preset.label}</span>
+                        <small className={buildClass.itemMeta}>{preset.channel} · {preset.format}</small>
                       </button>
                     ))}
                   </div>
 
-                  <div className="build-section">
-                    <div className="build-section-title">
-                      <span>Target</span>
-                      <strong className={`build-status build-status-${selectedBuildTarget.status}`}>{selectedBuildTarget.status}</strong>
+                  <div className={buildClass.card}>
+                    <div className={buildClass.sectionTitle}>
+                      <span className={surfaceClass.buildKicker}>Target</span>
+                      <strong className={buildStatusClass(selectedBuildTarget.status)}>{selectedBuildTarget.status}</strong>
                     </div>
-                    <div className="build-target-grid">
+                    <div className={buildClass.targetGrid}>
                       {BUILD_TARGETS.map(target => (
                         <button
                           key={target.id}
-                          className={buildTarget === target.id ? 'selected' : ''}
+                          className={cx(buildClass.targetButton, buildTarget === target.id && buildClass.selectedButton)}
                           onClick={() => {
                             setBuildTarget(target.id);
                             setBuildFormat(target.formats[0]);
                           }}
                         >
-                          <span>{target.label}</span>
-                          <small>{target.formats.join(', ')}</small>
-                          <b className={`build-status build-status-${target.status}`}>{target.status}</b>
+                          <span className={buildClass.itemTitle}>{target.label}</span>
+                          <small className={buildClass.itemMeta}>{target.formats.join(', ')}</small>
+                          <b className={buildStatusClass(target.status)}>{target.status}</b>
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  <div className="build-section">
-                    <div className="build-section-title">
-                      <span>Package</span>
-                      <strong>{selectedBuildTarget.label}</strong>
+                  <div className={buildClass.card}>
+                    <div className={buildClass.sectionTitle}>
+                      <span className={surfaceClass.buildKicker}>Package</span>
+                      <strong className={buildClass.sectionValue}>{selectedBuildTarget.label}</strong>
                     </div>
-                    <div className="build-form-grid">
-                      <label>
-                        <span>Format</span>
-                        <select value={buildFormat} onChange={event => setBuildFormat(event.currentTarget.value as BuildFormat)}>
+                    <div className={buildClass.formGrid}>
+                      <label className={buildClass.formLabel}>
+                        <span className={buildClass.formLabelText}>Format</span>
+                        <select className={buildClass.select} value={buildFormat} onChange={event => setBuildFormat(event.currentTarget.value as BuildFormat)}>
                           {selectedBuildTarget.formats.map(format => (
                             <option key={format} value={format}>{format}</option>
                           ))}
                         </select>
                       </label>
-                      <label>
-                        <span>Channel</span>
-                        <select value={buildChannel} onChange={event => setBuildChannel(event.currentTarget.value as 'debug' | 'release')}>
+                      <label className={buildClass.formLabel}>
+                        <span className={buildClass.formLabelText}>Channel</span>
+                        <select className={buildClass.select} value={buildChannel} onChange={event => setBuildChannel(event.currentTarget.value as 'debug' | 'release')}>
                           <option value="release">release</option>
                           <option value="debug">debug</option>
                         </select>
                       </label>
-                      <label className="build-checkbox">
+                      <label className={cx(buildClass.formLabel, buildClass.checkbox)}>
                         <input
+                          className={buildClass.checkboxInput}
                           type="checkbox"
                           checked={buildOptimizeAssets}
                           onChange={event => setBuildOptimizeAssets(event.currentTarget.checked)}
                         />
-                        <span>Optimize assets</span>
+                        <span className={buildClass.formLabelText}>Optimize assets</span>
                       </label>
-                      <label className="build-checkbox">
+                      <label className={cx(buildClass.formLabel, buildClass.checkbox)}>
                         <input
+                          className={buildClass.checkboxInput}
                           type="checkbox"
                           checked={buildIncludeDebugSymbols}
                           onChange={event => setBuildIncludeDebugSymbols(event.currentTarget.checked)}
                         />
-                        <span>Debug symbols</span>
+                        <span className={buildClass.formLabelText}>Debug symbols</span>
                       </label>
                     </div>
                   </div>
 
-                  <div className="build-output">
+                  <div className={buildClass.output}>
                     <div>
-                      <span>Output</span>
-                      <strong>exports/{shellState.project_name || 'project'}/{buildTarget}/{buildChannel}</strong>
+                      <span className={surfaceClass.buildKicker}>Output</span>
+                      <strong className={buildClass.outputPath}>exports/{shellState.project_name || 'project'}/{buildTarget}/{buildChannel}</strong>
                     </div>
-                    <p>{selectedBuildTarget.note}</p>
-                    {buildMessage && <pre>{buildMessage}</pre>}
+                    <p className={buildClass.outputNote}>{selectedBuildTarget.note}</p>
+                    {buildMessage && <pre className={buildClass.outputPre}>{buildMessage}</pre>}
                   </div>
                 </section>
 
-                <aside className="build-sidebar">
-                  <section>
-                    <span>Pipeline</span>
-                    <ol>
-                      <li className="complete"><IconCheck /> Validate project</li>
-                      <li className="active"><IconPackage /> Export runtime</li>
-                      <li><IconPackage /> Bundle assets</li>
-                      <li><IconPackage /> Create installer</li>
-                      <li><IconCheck /> Sign & verify</li>
+                <aside className={buildClass.sidebar}>
+                  <section className={buildClass.sidebarSection}>
+                    <span className={surfaceClass.buildKicker}>Pipeline</span>
+                    <ol className={buildClass.sidebarList}>
+                      <li className={cx(buildClass.sidebarItem, 'text-[#4ade80]')}><IconCheck /> Validate project</li>
+                      <li className={cx(buildClass.sidebarItem, 'text-[#93c5fd]')}><IconPackage /> Export runtime</li>
+                      <li className={buildClass.sidebarItem}><IconPackage /> Bundle assets</li>
+                      <li className={buildClass.sidebarItem}><IconPackage /> Create installer</li>
+                      <li className={buildClass.sidebarItem}><IconCheck /> Sign & verify</li>
                     </ol>
                   </section>
-                  <section>
-                    <span>Current request</span>
-                    <dl>
-                      <div><dt>Project</dt><dd>{shellState.project_name || 'project'}</dd></div>
-                      <div><dt>Target</dt><dd>{selectedBuildTarget.label}</dd></div>
-                      <div><dt>Format</dt><dd>{buildFormat}</dd></div>
-                      <div><dt>Assets</dt><dd>{buildOptimizeAssets ? 'optimized' : 'raw'}</dd></div>
-                      <div><dt>Symbols</dt><dd>{buildIncludeDebugSymbols ? 'included' : 'stripped'}</dd></div>
+                  <section className={buildClass.sidebarSection}>
+                    <span className={surfaceClass.buildKicker}>Current request</span>
+                    <dl className={buildClass.sidebarDl}>
+                      <div className={buildClass.sidebarDlRow}><dt className={buildClass.sidebarDt}>Project</dt><dd className={buildClass.sidebarDd}>{shellState.project_name || 'project'}</dd></div>
+                      <div className={buildClass.sidebarDlRow}><dt className={buildClass.sidebarDt}>Target</dt><dd className={buildClass.sidebarDd}>{selectedBuildTarget.label}</dd></div>
+                      <div className={buildClass.sidebarDlRow}><dt className={buildClass.sidebarDt}>Format</dt><dd className={buildClass.sidebarDd}>{buildFormat}</dd></div>
+                      <div className={buildClass.sidebarDlRow}><dt className={buildClass.sidebarDt}>Assets</dt><dd className={buildClass.sidebarDd}>{buildOptimizeAssets ? 'optimized' : 'raw'}</dd></div>
+                      <div className={buildClass.sidebarDlRow}><dt className={buildClass.sidebarDt}>Symbols</dt><dd className={buildClass.sidebarDd}>{buildIncludeDebugSymbols ? 'included' : 'stripped'}</dd></div>
                     </dl>
                   </section>
                 </aside>
               </div>
             </div>}
 
-            {workspaceView === 'diagnostics' && <div className="diagnostics-surface">
-              <header>
+            {workspaceView === 'diagnostics' && <div className={surfaceClass.root}>
+              <header className={surfaceClass.header}>
                 <div>
-                  <span>Console</span>
-                  <strong>{consoleEntries.length} diagnostics</strong>
+                  <span className={surfaceClass.headerKicker}>Console</span>
+                  <strong className={surfaceClass.headerTitle}>{consoleEntries.length} diagnostics</strong>
                 </div>
-                <div>
-                  <button onClick={() => refreshConsoleEntries()} disabled={consoleBusy}>{consoleBusy ? 'Refreshing' : 'Refresh'}</button>
-                  <button onClick={clearConsoleEntries} disabled={consoleBusy || consoleEntries.length === 0}>Clear</button>
+                <div className={diagnosticsClass.headerActions}>
+                  <button className={surfaceClass.button} onClick={() => refreshConsoleEntries()} disabled={consoleBusy}>{consoleBusy ? 'Refreshing' : 'Refresh'}</button>
+                  <button className={surfaceClass.button} onClick={clearConsoleEntries} disabled={consoleBusy || consoleEntries.length === 0}>Clear</button>
                 </div>
               </header>
-              <div className="diagnostics-list">
+              <div className={surfaceClass.list}>
                 {consoleEntries.length === 0 ? (
-                  <div className="diagnostics-empty">No diagnostics or tool output yet.</div>
+                  <div className={surfaceClass.empty}>No diagnostics or tool output yet.</div>
                 ) : consoleEntries.map((entry, index) => (
-                  <article className={`diagnostics-entry level-${entry.level}`} key={`${entry.timestamp}-${index}`}>
-                    <div>
-                      <span>{entry.level}</span>
-                      <strong>{entry.subsystem || 'editor'}</strong>
+                  <article className={diagnosticsClass.entry} key={`${entry.timestamp}-${index}`}>
+                    <div className={diagnosticsClass.meta}>
+                      <span className={cx(diagnosticsClass.level, diagnosticLevelClass(entry.level))}>{entry.level}</span>
+                      <strong className={diagnosticsClass.subsystem}>{entry.subsystem || 'editor'}</strong>
                     </div>
-                    <p>{entry.message}</p>
+                    <p className={diagnosticsClass.message}>{entry.message}</p>
                     {(entry.file || entry.line) && (
-                      <small>{entry.file ?? 'source'}{entry.line ? `:${entry.line}` : ''}</small>
+                      <small className={diagnosticsClass.source}>{entry.file ?? 'source'}{entry.line ? `:${entry.line}` : ''}</small>
                     )}
                   </article>
                 ))}
@@ -2408,14 +2734,14 @@ export default function EditorPage({
             </div>}
           </section>
 
-          {artifactSelection && <div className={`artifact-ask-popover ${artifactQuestionOpen ? 'expanded' : ''}`} style={{ left: artifactSelection.x, top: artifactSelection.y }}>
-            {!artifactQuestionOpen ? <button onClick={() => setArtifactQuestionOpen(true)}><IconSparkles /> {t('artifact_ask_about').replace('{kind}', artifactSelection.kind)}</button> : <div><header><span>{artifactSelection.label}</span><button onClick={() => setArtifactSelection(null)}><IconX /></button></header><div><input autoFocus value={artifactQuestion} onChange={event => setArtifactQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitArtifactQuestion(); if (event.key === 'Escape') setArtifactQuestionOpen(false); }} placeholder={t('artifact_ask_placeholder')} /><button onClick={submitArtifactQuestion} disabled={!artifactQuestion.trim()}>{t('btn_ask')}</button></div></div>}
+          {artifactSelection && <div className={artifactPopoverClass.root} style={{ left: artifactSelection.x, top: artifactSelection.y }}>
+            {!artifactQuestionOpen ? <button className={artifactPopoverClass.button} onClick={() => setArtifactQuestionOpen(true)}><IconSparkles /> {t('artifact_ask_about').replace('{kind}', artifactSelection.kind)}</button> : <div className={artifactPopoverClass.panel}><header className={artifactPopoverClass.header}><span className={artifactPopoverClass.label}>{artifactSelection.label}</span><button className={artifactPopoverClass.closeButton} onClick={() => setArtifactSelection(null)}><IconX /></button></header><div className={artifactPopoverClass.form}><input className={artifactPopoverClass.input} autoFocus value={artifactQuestion} onChange={event => setArtifactQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') submitArtifactQuestion(); if (event.key === 'Escape') setArtifactQuestionOpen(false); }} placeholder={t('artifact_ask_placeholder')} /><button className={artifactPopoverClass.submit} onClick={submitArtifactQuestion} disabled={!artifactQuestion.trim()}>{t('btn_ask')}</button></div></div>}
           </div>}
         </main>
 
         {/* Resize handle */}
         <div
-          className="resize-handle resize-handle-right"
+          className={workspaceClass.resizeHandle}
           onMouseDown={handleResizeDown}
           role="separator"
           aria-label="Resize AI workspace"
@@ -2431,7 +2757,7 @@ export default function EditorPage({
         />
 
         {/* AI Panel (right side) */}
-        <aside className="ai-panel-container" style={{ width: aiPanelWidth }}>
+        <aside className={workspaceClass.aiPanel} style={{ width: aiPanelWidth }}>
           <AiPanel
             projectName={shellState.project_name}
             selectedEntity={selectedId}
@@ -2451,21 +2777,21 @@ export default function EditorPage({
       </div>
 
       {/* Status Bar */}
-      <footer className="editor-statusbar">
-        <div className="status-group">
-          <span className="status-item">{shellState.project_name || t('status_no_project')}</span>
-          <span className="status-divider" />
-          <span className="status-item">{sceneTree.length} {t('label_objects')}</span>
-          {selectedEntityName && <><span className="status-divider" /><span className="status-item status-selection">{t('status_selected')} {selectedEntityName}</span></>}
+      <footer className={shellClass.statusbar}>
+        <div className={shellClass.statusGroup}>
+          <span className={shellClass.statusItem}>{shellState.project_name || t('status_no_project')}</span>
+          <span className={shellClass.statusDivider} />
+          <span className={shellClass.statusItem}>{sceneTree.length} {t('label_objects')}</span>
+          {selectedEntityName && <><span className={shellClass.statusDivider} /><span className={cx(shellClass.statusItem, shellClass.statusSelection)}>{t('status_selected')} {selectedEntityName}</span></>}
         </div>
-        <div className="status-group">
+        <div className={shellClass.statusGroup}>
           {shellState.scene_dirty ? (
-            <span className="status-item status-dirty"><span className="status-dot" />{t('status_unsaved')}</span>
+            <span className={cx(shellClass.statusItem, shellClass.statusDirty)}><span className={shellClass.statusDot} />{t('status_unsaved')}</span>
           ) : (
-            <span className="status-item status-saved">{t('status_saved')}</span>
+            <span className={cx(shellClass.statusItem, shellClass.statusSaved)}>{t('status_saved')}</span>
           )}
-          <span className="status-divider" />
-          <span className="status-item" style={{ color: 'var(--accent)' }}>v0.1.0</span>
+          <span className={shellClass.statusDivider} />
+          <span className={cx(shellClass.statusItem, shellClass.version)}>v0.1.0</span>
         </div>
       </footer>
 
