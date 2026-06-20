@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import HubPage from './pages/HubPage';
 import EditorPage from './pages/EditorPage';
-import GameView from './pages/GameView';
 import QuestPage from './pages/QuestPage';
 import { rpc } from './api';
 import { promoteQuest } from './quest';
@@ -34,7 +33,7 @@ interface HubState {
   desktop_integration?: DesktopIntegration;
 }
 
-type Screen = 'loading' | 'hub' | 'editor' | 'quest' | 'game-view';
+type Screen = 'loading' | 'hub' | 'editor' | 'quest';
 
 export interface QuestEditorArtifact {
   questId: string;
@@ -103,15 +102,6 @@ export default function App() {
   const initialize = useCallback(() => {
     setStartupError(null);
     setScreen('loading');
-
-    // Check hash-based routing first (Game View opens via Tauri new window)
-    if (window.location.hash === '#/game-view') {
-      rpc<DesktopIntegration>('app/get_desktop_integration')
-        .then(applyDesktopIntegration)
-        .catch(() => {});
-      setScreen('game-view');
-      return;
-    }
 
     // Normal editor startup
     Promise.all([
@@ -208,10 +198,6 @@ export default function App() {
   // ── Render ──
 
   const locale = hubState?.locale ?? 'en';
-
-  if (screen === 'game-view') {
-    return <GameView />;
-  }
 
   if (screen === 'loading') {
     return (

@@ -29,8 +29,11 @@ import {
   IconPlay,
   IconPlus,
   IconProjects,
+  IconRedo,
+  IconSave,
   IconSparkles,
   IconTrash,
+  IconUndo,
   IconX,
 } from '../icons';
 import type { QuestEditorArtifact } from '../App';
@@ -707,13 +710,14 @@ function useDragHandle(
 
 // ─── Viewport ────────────────────────────────────────────────────────────────
 
-function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode, playMode, editorCamera }: {
+function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, onResize, viewMode, playMode, editorCamera }: {
   sceneVersion?: number;
   cameraRef?: React.MutableRefObject<{
     yaw: number; pitch: number; distance: number;
     targetX: number; targetY: number; targetZ: number;
   }>;
   onCameraChange?: () => void;
+  onResize?: (size: { width: number; height: number }) => void;
   viewMode: '2d' | '3d';
   playMode?: boolean;
   editorCamera?: boolean;
@@ -726,6 +730,7 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode,
   const versionRef = useRef(sceneVersion);
   const lastRenderedVersionRef = useRef<number | null>(null);
   const fastPreviewUntilRef = useRef(0);
+  const onResizeRef = useRef(onResize);
   const internalCameraRef = useRef({
     yaw: -0.5, pitch: 0.3, distance: 6,
     targetX: 0, targetY: 1, targetZ: 0,
@@ -737,6 +742,7 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode,
   });
 
   versionRef.current = sceneVersion;
+  onResizeRef.current = onResize;
 
   // Poll for frames via binary IPC
   useEffect(() => {
@@ -803,11 +809,14 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, viewMode,
       width: Math.round(initRect.width) || 640,
       height: Math.round(initRect.height) || 480,
     };
+    onResizeRef.current?.(sizeRef.current);
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          sizeRef.current = { width: Math.round(width), height: Math.round(height) };
+          const nextSize = { width: Math.round(width), height: Math.round(height) };
+          sizeRef.current = nextSize;
+          onResizeRef.current?.(nextSize);
           lastRenderedVersionRef.current = null;
           const canvas = canvasRef.current;
           if (canvas) {
@@ -1024,7 +1033,7 @@ function SelectionOverlay({ sceneTree, selectedId, camera, width, height, viewMo
   );
 }
 
-// ─── Editor Page (AI-First Layout) ──────────────────────────────────────────
+// ─── Editor Page ────────────────────────────────────────────────────────────
 
 export default function EditorPage({
   onCloseProject,
@@ -1046,6 +1055,12 @@ export default function EditorPage({
     const saved = Number(window.localStorage.getItem('aster.aiPanelWidth'));
     return Number.isFinite(saved) && saved >= 320 && saved <= 560 ? saved : 380;
   });
+  const [inspectorOpen, setInspectorOpen] = useState(() => (
+    window.localStorage.getItem('aster.inspectorOpen') !== 'false'
+  ));
+  const [hierarchyOpen, setHierarchyOpen] = useState(() => (
+    window.localStorage.getItem('aster.hierarchyOpen') !== 'false'
+  ));
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('game');
   const [aiWorkspace, setAiWorkspace] = useState<AiWorkspaceState | null>(null);
   const [scripts, setScripts] = useState<string[]>([]);
@@ -1109,28 +1124,11 @@ export default function EditorPage({
   const [activeTool] = useState<'view' | 'move' | 'rotate' | 'scale'>('move');
   const [transformSpace] = useState<'global' | 'local'>('global');
   const [selectedPosition, setSelectedPosition] = useState<Vec3 | null>(null);
-  const viewportMainRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    const viewport = viewportMainRef.current;
-    if (!viewport) return;
-
-    const updateSize = () => {
-      const rect = viewport.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        const width = Math.round(rect.width);
-        const height = Math.round(rect.height);
-        setViewportSize(current => {
-          if (current.width === width && current.height === height) return current;
-          return { width, height };
-        });
-      }
-    };
-
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(viewport);
-    return () => observer.disconnect();
+  const handleViewportResize = useCallback((size: { width: number; height: number }) => {
+    setViewportSize(current => {
+      if (current.width === size.width && current.height === size.height) return current;
+      return size;
+    });
   }, []);
 
   const handleCameraChange = useCallback(() => {
@@ -1150,6 +1148,14 @@ export default function EditorPage({
   useEffect(() => {
     window.localStorage.setItem('aster.aiPanelWidth', String(aiPanelWidth));
   }, [aiPanelWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem('aster.inspectorOpen', String(inspectorOpen));
+  }, [inspectorOpen]);
+
+  useEffect(() => {
+    window.localStorage.setItem('aster.hierarchyOpen', String(hierarchyOpen));
+  }, [hierarchyOpen]);
 
   // Periodic state poll
   useEffect(() => {
@@ -1830,14 +1836,40 @@ export default function EditorPage({
   }
 
   return (
-    <div className="editor editor-ai-first">
-      {/* Minimal toolbar */}
+    <div className="editor">
+      {/* Editor toolbar */}
       <div className="editor-toolbar editor-toolbar-minimal">
         <div className="toolbar-project">
           <span className="toolbar-project-kicker">{t('editor_workspace_kicker')}</span>
           <span className="toolbar-project-name">{shellState.project_name || t('editor_untitled')}</span>
         </div>
-        <span className="ai-only-badge">AI-native</span>
+        <div className="toolbar-spacer" />
+        <button
+          className="tool-btn"
+          onClick={() => rpc('shell/save_scene').then(() => refreshSceneTree())}
+          disabled={!shellState.scene_dirty}
+          title="Save scene"
+        >
+          <IconSave />
+        </button>
+        <button
+          className="tool-btn"
+          onClick={() => rpc('shell/undo').then(() => refreshSceneTree())}
+          disabled={!shellState.can_undo}
+          title="Undo"
+        >
+          <IconUndo />
+        </button>
+        <button
+          className="tool-btn"
+          onClick={() => rpc('shell/redo').then(() => refreshSceneTree())}
+          disabled={!shellState.can_redo}
+          title="Redo"
+        >
+          <IconRedo />
+        </button>
+        <button className="tool-btn play-btn" onClick={openGameView} title={t('editor_open_game_view')}><IconPlay /></button>
+        <button className="tool-btn" onClick={() => setWorkspaceView('build')} title="Build and package"><IconPackage /></button>
         <button
           className="tool-btn quest-mode-btn"
           onClick={promoteCurrentContext}
@@ -1847,14 +1879,12 @@ export default function EditorPage({
           {promotingQuest ? <IconLoader className="spin-icon" /> : <IconSparkles />} <span>Promote</span>
         </button>
         <button className="tool-btn quest-mode-btn" onClick={onOpenQuest} title="Open Quest Mode"><IconProjects /> <span>Quests</span></button>
-        <button className="tool-btn" onClick={() => setWorkspaceView('build')} title="Build and package"><IconPackage /></button>
-        <button className="tool-btn play-btn" onClick={() => setWorkspaceView('game')} title={t('editor_open_game_view')}><IconPlay /></button>
         <button className="tool-btn" onClick={handleClose} title={t('editor_close')}><IconX /></button>
       </div>
 
       {/* Main body: viewport + AI panel */}
       <div className="editor-body editor-body-ai">
-        <main className="ai-product-workspace" ref={viewportMainRef}>
+        <main className="ai-product-workspace">
           {questArtifact && (
             <div className="quest-artifact-banner">
               <IconProjects />
@@ -1931,11 +1961,14 @@ export default function EditorPage({
               {aiWorkspace?.plan && <footer><button className="btn btn-ghost" onClick={aiWorkspace.discardProposal}>{t('btn_discard')}</button><button className="btn btn-primary" disabled={aiWorkspace.approved.size === 0} onClick={aiWorkspace.applyApproved}>{t('btn_continue_allowed').replace('{count}', String(aiWorkspace.approved.size))}</button></footer>}
             </div>}
 
-            {workspaceView === 'game' && <div className="game-editor-surface">
-              <aside className="game-hierarchy-panel">
+            {workspaceView === 'game' && <div className={`game-editor-surface ${hierarchyOpen ? '' : 'hierarchy-closed'} ${inspectorOpen ? '' : 'inspector-closed'}`}>
+              {hierarchyOpen && <aside className="game-hierarchy-panel">
                 <header>
                   <div><span>Hierarchy</span><strong>{sceneTree.length} objects</strong></div>
-                  <button onClick={() => createSceneObject()} title="Create object"><IconPlus /></button>
+                  <div className="panel-header-actions">
+                    <button onClick={() => createSceneObject()} title="Create object"><IconPlus /></button>
+                    <button onClick={() => setHierarchyOpen(false)} title="Close Hierarchy"><IconX /></button>
+                  </div>
                 </header>
                 <div className="game-hierarchy-list">
                   {sceneTree.length === 0 ? <p>No scene objects.</p> : sceneTree.map(object => (
@@ -1951,12 +1984,15 @@ export default function EditorPage({
                     </button>
                   ))}
                 </div>
-              </aside>
+              </aside>}
 
               <section className="game-main-panel">
                 <div className="game-preview-bar">
                   <div><span className="live-dot" />Scene/Game View</div>
                   <div className="viewport-mode-switch">
+                    {!hierarchyOpen && (
+                      <button onClick={() => setHierarchyOpen(true)}>Hierarchy</button>
+                    )}
                     <button className={viewMode === '2d' ? 'active' : ''} onClick={() => setViewMode('2d')}>2D</button>
                     <button className={viewMode === '3d' ? 'active' : ''} onClick={() => setViewMode('3d')}>3D</button>
                     <button onClick={() => rpc('shell/undo').then(() => refreshSceneTree())} disabled={!shellState.can_undo}>Undo</button>
@@ -1970,6 +2006,9 @@ export default function EditorPage({
                       targetZ: cameraRef.current.targetZ,
                     })}>Native View</button>
                     <button onClick={openGameView}><IconPlay /> Run</button>
+                    {!inspectorOpen && (
+                      <button onClick={() => setInspectorOpen(true)}>Inspector</button>
+                    )}
                   </div>
                 </div>
                 <div className="game-create-presets" aria-label="Create scene preset">
@@ -1983,13 +2022,28 @@ export default function EditorPage({
                   <button onClick={createBehaviorObject}><IconCode /> Behavior</button>
                 </div>
                 <div className="game-preview-canvas" onClick={handleViewportClick}>
-                  <ViewportCanvas sceneVersion={sceneVersion} cameraRef={cameraRef} onCameraChange={handleCameraChange} viewMode={viewMode} editorCamera />
+                  <ViewportCanvas
+                    sceneVersion={sceneVersion}
+                    cameraRef={cameraRef}
+                    onCameraChange={handleCameraChange}
+                    onResize={handleViewportResize}
+                    viewMode={viewMode}
+                    editorCamera
+                  />
                   <SelectionOverlay sceneTree={sceneTree} selectedId={selectedId} camera={cameraRef.current} width={viewportSize.width} height={viewportSize.height} viewMode={viewMode} />
                 </div>
               </section>
 
-              <aside className="game-inspector-panel">
-                <header><span>Inspector</span>{selectedEntityDetails && <strong>{selectedEntityDetails.name}</strong>}</header>
+              {inspectorOpen && <aside className="game-inspector-panel">
+                <header>
+                  <div>
+                    <span>Inspector</span>
+                    {selectedEntityDetails && <strong>{selectedEntityDetails.name}</strong>}
+                  </div>
+                  <button className="inspector-close-btn" onClick={() => setInspectorOpen(false)} title="Close Inspector">
+                    <IconX />
+                  </button>
+                </header>
                 {!selectedEntityDetails ? (
                   <div className="inspector-empty">Select an object in the viewport or hierarchy.</div>
                 ) : (
@@ -2083,7 +2137,7 @@ export default function EditorPage({
                     </section>
                   </div>
                 )}
-              </aside>
+              </aside>}
             </div>}
 
             {workspaceView === 'assets' && <div className="assets-surface">

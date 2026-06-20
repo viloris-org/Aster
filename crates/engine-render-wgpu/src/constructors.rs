@@ -1,6 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{device::*, format::*, math::*, meshes::*, render::*, shaders::*, uniforms::*};
+use crate::{
+    device::*, format::*, math::*, meshes::*, render::*, scene_uniforms::default_csm_params,
+    shaders::*, uniforms::*,
+};
 use engine_core::{EngineError, EngineResult, HandleAllocator};
 use engine_render::{
     ImageFormat, RenderPerformanceConfig, RenderPerformanceMetrics, RenderTargetDesc, ViewKind,
@@ -443,6 +446,7 @@ impl WgpuRenderDevice {
             contents: bytemuck::bytes_of(&CsmUniform {
                 cascade_vps: [IDENTITY_MAT4; CSM_CASCADE_COUNT],
                 cascade_splits: [0.0; 4],
+                params: default_csm_params(),
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });

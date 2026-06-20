@@ -5359,7 +5359,7 @@ fn build_runtime_binary(repo_root: &Path, release: bool) -> EngineResult<()> {
         .arg("runtime-min")
         .arg("--no-default-features")
         .arg("--features")
-        .arg("runtime-game,physics,script-rhai");
+        .arg("runtime-game,wgpu,physics,script-rhai");
     if release {
         command.arg("--release");
     }

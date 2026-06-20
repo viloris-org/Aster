@@ -171,7 +171,7 @@ fn run_scene_window(
             return;
         }
     };
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut app = SceneApp {
         title,
@@ -318,6 +318,9 @@ impl ApplicationHandler for SceneApp {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + MIN_FRAME_DT));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
 

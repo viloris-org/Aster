@@ -2045,19 +2045,6 @@ body {
   color: var(--danger);
 }
 
-.gameview-container {
-  position: fixed;
-  inset: 0;
-  background: #000;
-  display: flex;
-}
-
-.gameview-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
 .play-btn {
   color: var(--accent) !important;
   font-weight: 600;
@@ -3553,9 +3540,7 @@ button {
   background: var(--border-light);
 }
 
-/* ─── AI-First Editor Layout ─────────────────────────────────────────────── */
-
-.editor-ai-first {
+.editor {
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -3579,6 +3564,10 @@ button {
   justify-content: center;
   min-width: 120px;
   line-height: 1.15;
+}
+
+.toolbar-spacer {
+  flex: 1;
 }
 
 .toolbar-project-kicker {
@@ -4657,14 +4646,19 @@ button {
 }
 
 .ai-message-assistant .ai-message-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 0.5em 0;
   font-size: 0.9em;
+  white-space: normal;
 }
 .ai-message-assistant .ai-message-content th,
 .ai-message-assistant .ai-message-content td {
   border: 1px solid var(--border);
   padding: 4px 8px;
+  vertical-align: top;
 }
 .ai-message-assistant .ai-message-content th {
   background: var(--bg-tertiary, rgba(255,255,255,0.05));
@@ -5629,22 +5623,10 @@ button {
   }
 }
 
-/* ─── AI-only product workspace ─────────────────────────────────────────── */
+/* ─── Editor workbench workspace ────────────────────────────────────────── */
 
-.editor-ai-first .editor-toolbar-minimal {
+.editor-toolbar-minimal {
   padding-right: 8px;
-}
-
-.ai-only-badge {
-  margin-left: auto;
-  padding: 3px 8px;
-  border: 1px solid rgba(96, 165, 250, 0.32);
-  border-radius: 999px;
-  background: rgba(59, 130, 246, 0.1);
-  color: #60a5fa;
-  font: 600 9px var(--font-sans);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .ai-product-workspace {
@@ -6463,6 +6445,19 @@ button {
   grid-template-columns: minmax(190px, 240px) minmax(0, 1fr) minmax(230px, 280px);
   background: #090a0d;
 }
+
+.game-editor-surface.inspector-closed {
+  grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
+}
+
+.game-editor-surface.hierarchy-closed {
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 280px);
+}
+
+.game-editor-surface.hierarchy-closed.inspector-closed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .game-hierarchy-panel,
 .game-inspector-panel {
   display: flex;
@@ -6487,7 +6482,7 @@ button {
   border-bottom: 1px solid var(--border);
 }
 .game-hierarchy-panel header div,
-.game-inspector-panel header {
+.game-inspector-panel header div {
   color: var(--text-muted);
   font-size: 9px;
   text-transform: uppercase;
@@ -6511,6 +6506,32 @@ button {
   color: var(--text-secondary);
   cursor: pointer;
 }
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inspector-close-btn {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #171923;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.inspector-close-btn:hover,
+.game-hierarchy-panel header button:hover {
+  border-color: #60a5fa;
+  color: var(--text-primary);
+}
+
 .game-hierarchy-list {
   display: flex;
   min-height: 0;

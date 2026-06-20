@@ -188,14 +188,6 @@ export async function importAsset(): Promise<string | null> {
   return result.imported;
 }
 
-export function startPlayMode(): Promise<unknown> {
-  return rpc('play/start');
-}
-
-export function stopPlayMode(): Promise<unknown> {
-  return rpc('play/stop');
-}
-
 /** Fetch scene guide entities (cameras and lights) for viewport overlay. */
 export function fetchSceneGuides(): Promise<{ guides: import('./pages/SceneGuides').GuideEntity[] }> {
   return rpc('scene/get_guides');

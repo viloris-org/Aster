@@ -2248,11 +2248,14 @@ fn convert_winit_mouse_button_static(
 #[cfg(feature = "runtime-game")]
 pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
     use engine_platform::KeyCode;
-    use std::{sync::Arc, time::Instant};
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
     use winit::{
         application::ApplicationHandler,
         event::{ElementState, WindowEvent},
-        event_loop::{ActiveEventLoop, EventLoop},
+        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
         window::{Window, WindowId},
     };
 
@@ -2268,6 +2271,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
         last_frame: Instant,
         single_step: bool,
         project_name: String,
+        target_frame_time: Duration,
     }
 
     impl ApplicationHandler for GameApp {
@@ -2306,6 +2310,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
                 }
             }
             self.window = Some(window);
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
 
         fn window_event(
@@ -2379,15 +2384,22 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
             }
         }
 
-        fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
             if let Some(window) = &self.window {
                 window.request_redraw();
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + self.target_frame_time,
+                ));
+            } else {
+                event_loop.set_control_flow(ControlFlow::Wait);
             }
         }
     }
 
     let project = load_runtime_project(project)?;
     let project_name = project.manifest.name.clone();
+    let target_fps = project.build.render.target_fps.max(1);
+    let target_frame_time = Duration::from_secs_f64(1.0 / f64::from(target_fps));
     let event_loop = EventLoop::new().map_err(|error| EngineError::other(error.to_string()))?;
     let mut app = GameApp {
         services: None,
@@ -2396,6 +2408,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
         last_frame: Instant::now(),
         single_step: false,
         project_name,
+        target_frame_time,
     };
     event_loop
         .run_app(&mut app)

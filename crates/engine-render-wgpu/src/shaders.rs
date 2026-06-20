@@ -22,6 +22,7 @@ struct LightingUniform {
 struct CsmUniform {
     cascade_vps: array<mat4x4<f32>, 5>,
     cascade_splits: vec4<f32>,
+    params: vec4<f32>,
 };
 
 struct FogUniform {
@@ -148,9 +149,9 @@ fn apply_fog(color: vec3<f32>, world_pos: vec3<f32>, camera_pos: vec3<f32>, dist
     return mix(color, fog.color, clamp(fog_factor, 0.0, 1.0));
 }
 
-fn sample_cascade_shadow(cascade_idx: u32, uv: vec2<f32>, depth: f32) -> f32 {
-    let bias = 0.0005;
-    let texel = 1.0 / 4096.0;
+fn sample_cascade_shadow(cascade_idx: u32, uv: vec2<f32>, depth: f32, ndotl: f32) -> f32 {
+    let bias = csm.params.z + csm.params.w * (1.0 - ndotl);
+    let texel = csm.params.y;
     var shadow_factor = 0.0;
     for (var dx = -1; dx <= 1; dx++) {
         for (var dy = -1; dy <= 1; dy++) {
@@ -171,28 +172,29 @@ fn sample_cascade_shadow(cascade_idx: u32, uv: vec2<f32>, depth: f32) -> f32 {
     return shadow_factor / 9.0;
 }
 
-fn sample_csm_shadow(world_pos: vec3<f32>, view_depth: f32) -> f32 {
+fn sample_csm_shadow(world_pos: vec3<f32>, view_depth: f32, n: vec3<f32>, light_dir: vec3<f32>) -> f32 {
     var cascade_idx = 4u;
     var fade = 1.0;
+    let fade_range = max(csm.params.x, EPSILON);
     if (view_depth < csm.cascade_splits.x) {
         cascade_idx = 0u;
-        if (view_depth > csm.cascade_splits.x - 4.0) {
-            fade = (csm.cascade_splits.x - view_depth) / 4.0;
+        if (view_depth > csm.cascade_splits.x - fade_range) {
+            fade = (csm.cascade_splits.x - view_depth) / fade_range;
         }
     } else if (view_depth < csm.cascade_splits.y) {
         cascade_idx = 1u;
-        if (view_depth > csm.cascade_splits.y - 4.0) {
-            fade = (csm.cascade_splits.y - view_depth) / 4.0;
+        if (view_depth > csm.cascade_splits.y - fade_range) {
+            fade = (csm.cascade_splits.y - view_depth) / fade_range;
         }
     } else if (view_depth < csm.cascade_splits.z) {
         cascade_idx = 2u;
-        if (view_depth > csm.cascade_splits.z - 4.0) {
-            fade = (csm.cascade_splits.z - view_depth) / 4.0;
+        if (view_depth > csm.cascade_splits.z - fade_range) {
+            fade = (csm.cascade_splits.z - view_depth) / fade_range;
         }
     } else if (view_depth < csm.cascade_splits.w) {
         cascade_idx = 3u;
-        if (view_depth > csm.cascade_splits.w - 4.0) {
-            fade = (csm.cascade_splits.w - view_depth) / 4.0;
+        if (view_depth > csm.cascade_splits.w - fade_range) {
+            fade = (csm.cascade_splits.w - view_depth) / fade_range;
         }
     }
 
@@ -211,7 +213,8 @@ fn sample_csm_shadow(world_pos: vec3<f32>, view_depth: f32) -> f32 {
         return 1.0;
     }
 
-    let base_shadow = sample_cascade_shadow(cascade_idx, uv, depth);
+    let ndotl = max(dot(n, light_dir), 0.0);
+    let base_shadow = sample_cascade_shadow(cascade_idx, uv, depth, ndotl);
     if (fade < 1.0) {
         if (cascade_idx == 0u) {
             shadow_coord = csm.cascade_vps[1] * vec4<f32>(world_pos, 1.0);
@@ -225,7 +228,7 @@ fn sample_csm_shadow(world_pos: vec3<f32>, view_depth: f32) -> f32 {
         let ndc2 = shadow_coord.xyz / shadow_coord.w;
         let uv2 = ndc2.xy * 0.5 + 0.5;
         let depth2 = ndc2.z;
-        let next_shadow = sample_cascade_shadow(cascade_idx + 1u, uv2, depth2);
+        let next_shadow = sample_cascade_shadow(cascade_idx + 1u, uv2, depth2, ndotl);
         return mix(base_shadow, next_shadow, 1.0 - fade);
     }
     return base_shadow;
@@ -305,7 +308,9 @@ fn fs_main(input: VsOut) -> FsOut {
     );
     var shadow_factor = 1.0;
     if (input.receive_shadows > 0.5) {
-        shadow_factor = sample_csm_shadow(input.world_position, view_depth);
+        let shadow_light = lighting.lights[0];
+        let shadow_light_dir = normalize(-shadow_light.direction_range.xyz);
+        shadow_factor = sample_csm_shadow(input.world_position, view_depth, n, shadow_light_dir);
     }
 
     for (var i: u32 = 0u; i < lighting.params.x; i = i + 1u) {

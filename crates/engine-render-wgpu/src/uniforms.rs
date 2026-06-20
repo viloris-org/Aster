@@ -87,6 +87,8 @@ pub(crate) struct CsmUniform {
     pub(crate) cascade_vps: [[[f32; 4]; 4]; CSM_CASCADE_COUNT],
     /// Split depth for each cascade in view space (vec4 for alignment, only first 4 used).
     pub(crate) cascade_splits: [f32; 4],
+    /// x: cascade fade range, y: shadow map texel size, z: constant depth bias, w: slope bias.
+    pub(crate) params: [f32; 4],
 }
 
 #[repr(C)]

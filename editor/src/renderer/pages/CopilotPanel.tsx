@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { rpc, streamCopilotPlan } from '../api';
 import { useTranslation } from '../i18n';
 import {
@@ -53,7 +54,7 @@ function MessageBubble({ role, content }: { role: string; content: string }) {
         {role === 'assistant' ? <IconBot /> : <span>U</span>}
       </div>
       <div className="copilot-message-content">
-        {role === 'assistant' ? <ReactMarkdown>{content}</ReactMarkdown> : content}
+        {role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown> : content}
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ pub(crate) fn csm_uniform_from_world(world: &RenderWorld, aspect: f32) -> CsmUni
             return CsmUniform {
                 cascade_vps: [IDENTITY_MAT4; CSM_CASCADE_COUNT],
                 cascade_splits: [0.0; 4],
+                params: default_csm_params(),
             };
         }
     };
@@ -102,6 +103,13 @@ pub(crate) fn csm_uniform_from_world(world: &RenderWorld, aspect: f32) -> CsmUni
             max_z = max_z.max(p.z);
         }
 
+        let (snapped_min_x, snapped_max_x, snapped_min_y, snapped_max_y) =
+            snap_csm_bounds_to_texel_grid(min_x, max_x, min_y, max_y);
+        min_x = snapped_min_x;
+        max_x = snapped_max_x;
+        min_y = snapped_min_y;
+        max_y = snapped_max_y;
+
         let z_padding = 10.0;
         let light_proj = orthographic_rh_custom(
             min_x,
@@ -117,7 +125,33 @@ pub(crate) fn csm_uniform_from_world(world: &RenderWorld, aspect: f32) -> CsmUni
     CsmUniform {
         cascade_vps,
         cascade_splits,
+        params: default_csm_params(),
     }
+}
+
+pub(crate) fn default_csm_params() -> [f32; 4] {
+    [
+        CSM_CASCADE_FADE_RANGE,
+        1.0 / CSM_SHADOW_RESOLUTION as f32,
+        0.0005,
+        0.0015,
+    ]
+}
+
+pub(crate) fn snap_csm_bounds_to_texel_grid(
+    min_x: f32,
+    max_x: f32,
+    min_y: f32,
+    max_y: f32,
+) -> (f32, f32, f32, f32) {
+    let texel_size =
+        ((max_x - min_x).max(max_y - min_y) / CSM_SHADOW_RESOLUTION as f32).max(f32::EPSILON);
+    (
+        (min_x / texel_size).floor() * texel_size,
+        (max_x / texel_size).ceil() * texel_size,
+        (min_y / texel_size).floor() * texel_size,
+        (max_y / texel_size).ceil() * texel_size,
+    )
 }
 pub(crate) fn skybox_uniform_from_world(world: &RenderWorld) -> SkyboxUniform {
     let skybox = match &world.skybox {

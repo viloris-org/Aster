@@ -49,7 +49,10 @@ fn forward_shader_binds_and_samples_all_csm_cascades() {
         assert!(FORWARD_SHADER.contains(&format!("var csm_shadow_{cascade}:")));
         assert!(FORWARD_SHADER.contains(&format!("textureSampleCompare(csm_shadow_{cascade}")));
     }
-    assert!(FORWARD_SHADER.contains("let texel = 1.0 / 4096.0"));
+    assert!(FORWARD_SHADER.contains("params: vec4<f32>"));
+    assert!(FORWARD_SHADER.contains("let texel = csm.params.y"));
+    assert!(!FORWARD_SHADER.contains("let texel = 1.0 / 4096.0"));
+    assert!(!FORWARD_SHADER.contains("- 4.0"));
 }
 
 #[test]
@@ -66,7 +69,35 @@ fn forward_shader_selects_cascades_with_linear_camera_depth() {
 #[test]
 fn gpu_uniform_structs_match_wgsl_alignment() {
     assert_eq!(std::mem::size_of::<CameraUniform>(), 96);
+    assert_eq!(std::mem::size_of::<CsmUniform>(), 352);
     assert_eq!(std::mem::size_of::<FogUniform>(), 32);
+}
+
+#[test]
+fn csm_uniform_exposes_shadow_sampling_params() {
+    let params = default_csm_params();
+
+    assert_eq!(params[0], CSM_CASCADE_FADE_RANGE);
+    assert_eq!(params[1], 1.0 / CSM_SHADOW_RESOLUTION as f32);
+    assert!(params[2] > 0.0);
+    assert!(params[3] > params[2]);
+}
+
+#[test]
+fn csm_bounds_snap_to_shadow_texel_grid() {
+    let (min_x, max_x, min_y, max_y) =
+        snap_csm_bounds_to_texel_grid(-3.217, 8.911, -2.603, 4.119);
+    let texel_size = ((8.911_f32 + 3.217).max(4.119 + 2.603) / CSM_SHADOW_RESOLUTION as f32)
+        .max(f32::EPSILON);
+
+    for value in [min_x, max_x, min_y, max_y] {
+        let snapped = value / texel_size;
+        assert!((snapped - snapped.round()).abs() < 0.001);
+    }
+    assert!(min_x <= -3.217);
+    assert!(max_x >= 8.911);
+    assert!(min_y <= -2.603);
+    assert!(max_y >= 4.119);
 }
 
 #[test]
