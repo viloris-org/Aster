@@ -232,15 +232,101 @@ function parseInspectorValue(raw: string, current: unknown): unknown {
   return raw;
 }
 
-function ComponentFieldEditor({ fieldName, value, onCommit }: {
+function isVec3Record(value: unknown): value is { x: number; y: number; z: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.x === 'number' && typeof record.y === 'number' && typeof record.z === 'number';
+}
+
+function componentFieldOptions(componentType: string, fieldName: string): string[] | null {
+  if (componentType === 'Light' && fieldName === 'kind') return ['directional', 'point', 'spot'];
+  if (componentType === 'Rigidbody' && fieldName === 'body_type') return ['dynamic', 'kinematic', 'static'];
+  if (componentType === 'Collider' && fieldName === 'shape') return ['box', 'sphere', 'capsule'];
+  if (componentType === 'AudioSource' && fieldName === 'spatial_mode') return ['direct', 'spatial'];
+  if (componentType === 'AudioSource' && fieldName === 'shape') return ['point', 'cone'];
+  if (componentType === 'AudioSource' && fieldName === 'attenuation') return ['none', 'linear', 'inverse'];
+  if (componentType === 'AudioListener' && fieldName === 'output_mode') return ['stereo', 'surround'];
+  if (componentType === 'AudioListener' && fieldName === 'hrtf_quality') return ['low', 'medium', 'high'];
+  return null;
+}
+
+function formatFieldLabel(fieldName: string): string {
+  return fieldName.replaceAll('_', ' ');
+}
+
+function numericWheelDelta(event: React.WheelEvent<HTMLInputElement>, baseStep = 0.1): number {
+  const multiplier = event.shiftKey ? 10 : event.altKey ? 0.1 : 1;
+  return (event.deltaY < 0 ? baseStep : -baseStep) * multiplier;
+}
+
+function nudgeNumericInput(
+  input: HTMLInputElement,
+  delta: number,
+  options: { min?: number; max?: number; precision?: number } = {},
+): number | null {
+  const current = Number(input.value);
+  if (!Number.isFinite(current)) return null;
+  const precision = options.precision ?? 2;
+  const factor = 10 ** precision;
+  let next = Math.round((current + delta) * factor) / factor;
+  if (options.min !== undefined) next = Math.max(options.min, next);
+  if (options.max !== undefined) next = Math.min(options.max, next);
+  input.value = next.toFixed(precision);
+  return next;
+}
+
+function componentFieldLabel(componentType: string, fieldName: string): string {
+  if (componentType === 'Camera' && fieldName === 'clear_color') return 'background';
+  if (componentType === 'Light' && fieldName === 'color') return 'light color';
+  return formatFieldLabel(fieldName);
+}
+
+function usesColorPicker(componentType: string, fieldName: string): boolean {
+  return componentType === 'Light' && fieldName === 'color';
+}
+
+function vec3ToHex(value: { x: number; y: number; z: number }): string {
+  return `#${[value.x, value.y, value.z]
+    .map(channel => Math.round(Math.max(0, Math.min(1, channel)) * 255).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+function hexToVec3(hex: string): { x: number; y: number; z: number } | null {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return null;
+  const value = match[1];
+  return {
+    x: parseInt(value.slice(0, 2), 16) / 255,
+    y: parseInt(value.slice(2, 4), 16) / 255,
+    z: parseInt(value.slice(4, 6), 16) / 255,
+  };
+}
+
+const COLOR_PRESETS = [
+  '#ffffff',
+  '#f8fafc',
+  '#fef3c7',
+  '#fed7aa',
+  '#fecaca',
+  '#fbcfe8',
+  '#ddd6fe',
+  '#bfdbfe',
+  '#a7f3d0',
+  '#111827',
+];
+
+function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
+  componentType: string;
   fieldName: string;
   value: unknown;
   onCommit: (fieldName: string, value: unknown) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(() => formatInspectorValue(value));
+  const [hexDraft, setHexDraft] = useState(() => isVec3Record(value) ? vec3ToHex(value) : '');
 
   useEffect(() => {
     setDraft(formatInspectorValue(value));
+    setHexDraft(isVec3Record(value) ? vec3ToHex(value) : '');
   }, [value]);
 
   const commit = useCallback(async () => {
@@ -252,10 +338,29 @@ function ComponentFieldEditor({ fieldName, value, onCommit }: {
     await onCommit(fieldName, next);
   }, [draft, fieldName, onCommit, value]);
 
+  const options = typeof value === 'string' ? componentFieldOptions(componentType, fieldName) : null;
+
+  if (options) {
+    return (
+      <label className="inspector-field">
+        <span>{componentFieldLabel(componentType, fieldName)}</span>
+        <select
+          className="inspector-field-select"
+          value={value}
+          onChange={event => onCommit(fieldName, event.currentTarget.value)}
+        >
+          {options.map(option => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
   if (typeof value === 'boolean') {
     return (
       <label className="inspector-field inspector-field-row">
-        <span>{fieldName}</span>
+        <span>{componentFieldLabel(componentType, fieldName)}</span>
         <input
           type="checkbox"
           checked={value}
@@ -265,11 +370,135 @@ function ComponentFieldEditor({ fieldName, value, onCommit }: {
     );
   }
 
+  if (isVec3Record(value)) {
+    const commitAxis = (axis: 'x' | 'y' | 'z', raw: string) => {
+      const nextAxisValue = Number(raw);
+      if (!Number.isFinite(nextAxisValue) || nextAxisValue === value[axis]) return;
+      onCommit(fieldName, { ...value, [axis]: nextAxisValue });
+    };
+    const wheelAxis = (
+      event: React.WheelEvent<HTMLInputElement>,
+      axis: 'x' | 'y' | 'z',
+      options?: { min?: number; max?: number; precision?: number },
+    ) => {
+      event.preventDefault();
+      const nextAxisValue = nudgeNumericInput(
+        event.currentTarget,
+        numericWheelDelta(event, options?.precision === 2 && options?.min === 0 && options?.max === 1 ? 0.01 : 0.1),
+        options,
+      );
+      if (nextAxisValue === null || nextAxisValue === value[axis]) return;
+      onCommit(fieldName, { ...value, [axis]: nextAxisValue });
+    };
+    const isColor = usesColorPicker(componentType, fieldName);
+    const hex = vec3ToHex(value);
+
+    if (isColor) {
+      const commitColor = (hexValue: string) => {
+        const next = hexToVec3(hexValue);
+        if (!next) {
+          setHexDraft(hex);
+          return;
+        }
+        setHexDraft(vec3ToHex(next));
+        onCommit(fieldName, next);
+      };
+
+      return (
+        <div className="inspector-field inspector-color-field">
+          <span>{componentFieldLabel(componentType, fieldName)}</span>
+          <div className="inspector-color-custom">
+            <label className="inspector-color-picker" title="Open color palette">
+              <input type="color" value={hex} onChange={event => commitColor(event.currentTarget.value)} />
+              <span style={{ backgroundColor: hex }} />
+            </label>
+            <input
+              className="inspector-color-hex"
+              value={hexDraft}
+              spellCheck={false}
+              onChange={event => setHexDraft(event.currentTarget.value)}
+              onBlur={() => commitColor(hexDraft)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+                if (event.key === 'Escape') {
+                  setHexDraft(hex);
+                  event.currentTarget.blur();
+                }
+              }}
+            />
+          </div>
+          <div className="inspector-color-presets" aria-label={`${componentFieldLabel(componentType, fieldName)} presets`}>
+            {COLOR_PRESETS.map(preset => (
+              <button
+                key={preset}
+                type="button"
+                className={preset === hex ? 'active' : ''}
+                style={{ backgroundColor: preset }}
+                title={preset}
+                onClick={() => commitColor(preset)}
+              />
+            ))}
+          </div>
+          <div className="inspector-color-channels">
+            {(['x', 'y', 'z'] as const).map((axis, index) => (
+              <label className="inspector-channel-input" key={`${fieldName}-${axis}`}>
+                <span>{['R', 'G', 'B'][index]}</span>
+                <input
+                  defaultValue={value[axis].toFixed(2)}
+                  inputMode="decimal"
+                  onBlur={event => commitAxis(axis, event.currentTarget.value)}
+                  onWheel={event => wheelAxis(event, axis, { min: 0, max: 1, precision: 2 })}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                    if (event.key === 'Escape') event.currentTarget.blur();
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="inspector-field">
+        <span>{componentFieldLabel(componentType, fieldName)}</span>
+        <div className="inspector-object-vec3-row">
+          {(['x', 'y', 'z'] as const).map(axis => (
+            <label className="inspector-vec3-input-wrap" key={`${fieldName}-${axis}`}>
+              <span className="inspector-vec3-label">{axis.toUpperCase()}</span>
+              <input
+                defaultValue={value[axis].toFixed(2)}
+                inputMode="decimal"
+                onBlur={event => commitAxis(axis, event.currentTarget.value)}
+                onWheel={event => wheelAxis(event, axis)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                  if (event.key === 'Escape') event.currentTarget.blur();
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const isObject = Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  const wheelNumberField = async (event: React.WheelEvent<HTMLInputElement>) => {
+    if (typeof value !== 'number') return;
+    event.preventDefault();
+    const current = Number(draft);
+    if (!Number.isFinite(current)) return;
+    const next = Math.round((current + numericWheelDelta(event)) * 100) / 100;
+    const formatted = next.toFixed(2);
+    setDraft(formatted);
+    await onCommit(fieldName, next);
+  };
 
   return (
     <label className="inspector-field">
-      <span>{fieldName}</span>
+      <span>{componentFieldLabel(componentType, fieldName)}</span>
       {isObject ? (
         <textarea
           className="inspector-field-input inspector-field-json"
@@ -292,6 +521,7 @@ function ComponentFieldEditor({ fieldName, value, onCommit }: {
           inputMode={typeof value === 'number' || (Array.isArray(value) && value.every(item => typeof item === 'number')) ? 'decimal' : undefined}
           onChange={event => setDraft(event.currentTarget.value)}
           onBlur={commit}
+          onWheel={wheelNumberField}
           onKeyDown={event => {
             if (event.key === 'Enter') event.currentTarget.blur();
             if (event.key === 'Escape') {
@@ -1296,6 +1526,21 @@ export default function EditorPage({
     await refreshSceneTree();
   }, [refreshSceneTree, selectedEntityDetails, selectedId]);
 
+  const nudgeSelectedTransform = useCallback(async (
+    field: 'position' | 'rotation' | 'scale',
+    index: number,
+    event: React.WheelEvent<HTMLInputElement>,
+  ) => {
+    if (!selectedId || !selectedEntityDetails) return;
+    event.preventDefault();
+    const nextValue = nudgeNumericInput(event.currentTarget, numericWheelDelta(event));
+    if (nextValue === null) return;
+    const next = [...selectedEntityDetails.transform[field]];
+    next[index] = nextValue;
+    await rpc('shell/update_transform', { id: selectedId, [field]: next });
+    await refreshSceneTree();
+  }, [refreshSceneTree, selectedEntityDetails, selectedId]);
+
   const addSelectedComponent = useCallback(async () => {
     if (!selectedId) return;
     await rpc('shell/add_component', { id: selectedId, component_type: addComponentType });
@@ -1793,6 +2038,7 @@ export default function EditorPage({
                                 defaultValue={value.toFixed(2)}
                                 inputMode="decimal"
                                 onBlur={event => updateSelectedTransform(field, index, event.currentTarget.value)}
+                                onWheel={event => nudgeSelectedTransform(field, index, event)}
                                 onKeyDown={event => {
                                   if (event.key === 'Enter') event.currentTarget.blur();
                                   if (event.key === 'Escape') event.currentTarget.blur();
@@ -1817,6 +2063,7 @@ export default function EditorPage({
                             ) : Object.entries(component.data ?? {}).map(([fieldName, value]) => (
                               <ComponentFieldEditor
                                 key={`${component.type}-${fieldName}`}
+                                componentType={component.type}
                                 fieldName={fieldName}
                                 value={value}
                                 onCommit={(name, nextValue) => updateSelectedComponentField(component.type, name, nextValue)}
