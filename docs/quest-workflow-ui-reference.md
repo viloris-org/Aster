@@ -45,6 +45,42 @@ Good feed layers:
 
 Tool calls should be grouped by purpose. For example, a single `Explore rendering pipeline` group can contain memory search, file search, and file reads. Individual tool rows should be low-contrast metadata unless they are active or require attention.
 
+### Permission and Tool Request Cards
+
+When the agent needs approval for a command, write, network access, dependency install, or other risky tool, Quest should render an in-feed decision card rather than a generic modal or bare command row.
+
+The tool wrapper should scale metadata by risk. Routine low-risk commands should not require a long justification; a concise reason is enough. Higher-risk, broader-scope, or external-side-effect operations need more structured detail.
+
+Minimum metadata for routine low-risk requests:
+
+- operation label or command argv;
+- one-line reason;
+- affected scope;
+- expected success signal.
+
+Additional metadata for elevated-risk requests:
+
+- what operation it wants to perform;
+- why the operation is needed for this Quest;
+- what evidence or artifact caused the request;
+- expected output or success signal;
+- affected scope such as workspace, file paths, network host, or command argv;
+- risk and side effects, including whether files, caches, dependencies, credentials, or external state may change;
+- audit artifacts that will be captured after approval.
+
+The approval card should make the reason prominent but compact. Users should not have to infer intent from a shell command, but the feed card must not become a long report. The default card should show a one-line reason, concise scope, risk, and primary actions. Longer command detail, side effects, logs, and audit artifacts belong behind `View details`.
+
+For example, instead of asking to approve only `cargo test -p engine-render`, the card can say `Verify renderer culling behavior before applying changes`. Keep the visible reason short enough to fit one or two lines.
+
+Recommended actions:
+
+- Approve once;
+- Approve for this Quest or session when the scope is narrow and repeatable;
+- Deny;
+- View details or evidence.
+
+After the user decides, the large card should collapse into durable evidence such as `Command approved · cargo test -p engine-render · Verify renderer culling behavior`.
+
 ### Active Execution Animation
 
 The active tool group should have a subtle sense of motion so the user can tell work is still running.
@@ -82,7 +118,7 @@ Clarifications are not temporary chat. They are durable Quest evidence and shoul
 
 ### Temporary Agent To-Dos
 
-Exploration may create short-lived to-dos. These are the agent's scratchpad, not user-managed Quest tasks.
+Exploration may create short-lived to-dos before the agent commits to a spec or execution path. These are the agent's scratchpad for read-only context gathering and routing decisions, not user-managed Quest tasks.
 
 Temporary to-dos should:
 
@@ -90,9 +126,10 @@ Temporary to-dos should:
 - show current and completed internal steps;
 - collapse after completion into a summary such as `Updated to-dos · 4/5 done`;
 - not populate the main Quest progress surface;
+- not be editable by the user;
 - not be treated as user tasks requiring review.
 
-Formal Progress or Quest tasks should appear only after a stable plan, spec, review bundle, or user-facing task artifact exists.
+The main Progress surface should show Quest state and durable milestones, such as context exploration, spec drafted, waiting for approval, running changes, validating, ready for review, and completed. It should not behave like a human task manager. User action should appear as decision cards: answer questions, approve spec, grant permission, apply changes, request revision, or discard.
 
 ### Artifact Workspace
 
@@ -226,6 +263,25 @@ type QuestActivityGroup = {
   artifact_refs: string[];
 };
 
+type QuestToolPermissionRequest = {
+  id: string;
+  group_id?: string;
+  operation_kind: 'command' | 'write' | 'network' | 'dependency' | 'external_tool';
+  operation_label: string;
+  command_argv?: string[];
+  paths?: string[];
+  network_hosts?: string[];
+  reason: string; // one or two visible lines
+  evidence_refs?: string[];
+  expected_output?: string;
+  risk: 'low' | 'medium' | 'high';
+  side_effects?: string[];
+  audit_artifacts?: string[];
+  approval_scope_options: Array<'once' | 'quest' | 'session'>;
+  status: 'pending' | 'approved' | 'denied' | 'completed';
+  timestamp_ms: number;
+};
+
 type QuestEphemeralTodoUpdate = {
   id: string;
   group_id: string;
@@ -237,7 +293,7 @@ type QuestEphemeralTodoUpdate = {
 };
 ```
 
-Ephemeral to-dos should not be stored as formal Quest tasks unless the orchestrator promotes them into a user-facing task artifact.
+Ephemeral to-dos should not be stored as user-managed Quest tasks. If the orchestrator needs durable work structure later, it should create state milestones, spec sections, review evidence, or decision cards rather than editable human checklist items.
 
 ## Visual Design Notes
 
@@ -266,7 +322,7 @@ Recommended motion budget:
 2. Add a state-driven center renderer for Draft, Clarifying, Running, Waiting, Review, Blocked, Failed, Completed.
 3. Move review decisions into the center surface for `ready_for_review`.
 4. Add structured clarification cards and persisted clarification evidence.
-5. Render temporary agent to-dos inside activity groups instead of formal Quest progress.
+5. Render temporary agent to-dos inside activity groups instead of formal Quest progress or editable user tasks.
 6. Add active execution animation to the current tool group only.
 7. Render knowledge, validation, findings, and diffs as structured artifacts instead of raw JSON.
 8. Add responsive behavior: collapsible queue, overlay artifact pane, and no cramped three-column layout on narrow screens.
@@ -277,7 +333,7 @@ Recommended motion budget:
 - A broad Quest can ask structured clarifying questions and persist answers.
 - User answers collapse into durable evidence and influence the generated spec.
 - Running work shows grouped activity with one animated active group.
-- Temporary to-dos do not appear in formal progress unless promoted.
+- Temporary to-dos do not appear in formal progress or editable user task lists.
 - Clicking activity evidence opens an artifact in the right pane.
 - `ready_for_review` exposes Apply, Request revision, and Discard in the center surface.
 - Raw traces and JSON are not the default artifact presentation.

@@ -14,7 +14,6 @@ import {
   approveKnowledge,
   applyQuestTransactionGroups,
   applyQuest,
-  executeQuest,
   exportQuest,
   getQuest,
   listQuestProjectFiles,
@@ -34,7 +33,6 @@ import {
   updateQuestIntent,
   updateQuestKnowledgeContext,
   updateQuestSpec,
-  updateQuestTasks,
   type KnowledgeEntry,
   type QuestDetail,
   type QuestAiStreamHandle,
@@ -45,7 +43,6 @@ import {
   type QuestRecord,
   type QuestReviewAction,
   type QuestStatus,
-  type QuestTask,
 } from '../quest';
 import { rpc } from '../api';
 import { useTranslation } from '../i18n';
@@ -65,6 +62,7 @@ import {
   IconFile,
   IconLoader,
   IconMic,
+  IconMonitor,
   IconPlay,
   IconPlus,
   IconRefresh,
@@ -165,6 +163,14 @@ function cn(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }
 
+const artifactPaneStorageKey = 'aster.quest.artifactPanePercent';
+const artifactPaneMinPercent = 28;
+const artifactPaneMaxPercent = 55;
+
+function clampArtifactPanePercent(value: number): number {
+  return Math.min(artifactPaneMaxPercent, Math.max(artifactPaneMinPercent, value));
+}
+
 const buttonBase = 'inline-flex h-[30px] cursor-pointer items-center gap-[6px] whitespace-nowrap rounded-[5px] border border-[var(--border-light)] bg-[var(--bg-surface)] px-[10px] text-[11px] font-semibold text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40';
 const sectionHeadingButton = buttonBase;
 const primaryButton = 'border-[var(--accent-hover)] bg-[var(--accent-hover)] text-[var(--bg-base)] hover:border-[var(--text-primary)] hover:bg-[var(--text-primary)]';
@@ -181,12 +187,11 @@ const clearIssueClass = 'border-[#14532d] bg-[rgba(20,83,45,0.14)] text-[#86efac
 const issueOpenClass = 'flex min-w-0 flex-1 cursor-pointer items-start gap-2 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit hover:underline hover:underline-offset-2';
 const reviewActionButtonClass = 'h-[30px] cursor-pointer rounded-[5px] border border-[var(--border-light)] bg-[var(--bg-hover)] px-[10px] text-[9px] font-bold text-[var(--text-primary)] disabled:cursor-default disabled:opacity-40';
 const decisionButtonClass = 'inline-flex h-8 cursor-pointer items-center gap-[6px] rounded-[5px] border border-[var(--border-light)] bg-[var(--bg-surface)] px-[11px] text-[9px] font-bold text-[var(--text-secondary)] disabled:cursor-default disabled:opacity-40';
+const feedDecisionCardClass = 'ml-6 mt-3 grid w-[min(720px,calc(100%-36px))] overflow-hidden rounded-[6px] border border-[var(--border-light)] bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-[var(--shadow-sm)] [&_header]:flex [&_header]:min-w-0 [&_header]:items-center [&_header]:justify-between [&_header]:gap-2 [&_header]:border-b [&_header]:border-[var(--border)] [&_header]:px-[10px] [&_header]:py-[7px] [&_header_span]:flex [&_header_span]:min-w-0 [&_header_span]:items-center [&_header_span]:gap-2 [&_header_span]:text-[11px] [&_header_span]:text-[var(--text-secondary)] [&_header_strong]:min-w-0 [&_header_strong]:overflow-hidden [&_header_strong]:text-ellipsis [&_header_strong]:whitespace-nowrap [&_header_strong]:font-semibold [&_header_strong]:text-[var(--text-primary)] [&_section]:grid [&_section]:gap-2 [&_section]:px-[10px] [&_section]:py-[9px] [&_p]:m-0 [&_p]:text-[12px] [&_p]:leading-[1.45] [&_footer]:flex [&_footer]:items-center [&_footer]:justify-between [&_footer]:gap-2 [&_footer]:px-[10px] [&_footer]:pb-[10px] [&_footer_button]:inline-flex [&_footer_button]:h-7 [&_footer_button]:cursor-pointer [&_footer_button]:items-center [&_footer_button]:gap-[6px] [&_footer_button]:rounded-[5px] [&_footer_button]:border [&_footer_button]:px-[9px] [&_footer_button]:text-[10px] [&_footer_button]:font-semibold [&_footer_button:disabled]:cursor-default [&_footer_button:disabled]:opacity-45';
 const askAiSelectionButtonClass = 'absolute z-20 inline-flex min-h-8 cursor-pointer items-center gap-[7px] rounded-[var(--radius-md)] border border-[var(--brand)] bg-[var(--brand)] px-3 text-[11px] font-semibold text-[var(--bg-base)] shadow-[0_0_0_1px_var(--brand-dim),0_8px_18px_rgba(34,197,94,0.24)] hover:border-[var(--brand-hover)] hover:bg-[var(--brand-hover)] disabled:cursor-not-allowed disabled:opacity-60 [&_svg]:stroke-[2.25]';
 const askAiSelectionPromptClass = 'absolute z-20 grid w-[min(360px,calc(100%-24px))] gap-2 rounded-[var(--radius-md)] border border-[var(--brand)] bg-[var(--bg-elevated)] p-2 shadow-[0_0_0_1px_var(--brand-dim),0_14px_34px_rgba(0,0,0,0.38)]';
 const askAiSelectionPromptInputClass = 'min-h-[68px] resize-none rounded-[5px] border border-[var(--border-light)] bg-[var(--bg-base)] px-2.5 py-2 text-[12px] leading-[1.45] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--brand)]';
 const askAiSelectionPromptActionsClass = 'flex items-center justify-end gap-1.5 [&_button]:inline-flex [&_button]:h-7 [&_button]:cursor-pointer [&_button]:items-center [&_button]:gap-1.5 [&_button]:rounded-[5px] [&_button]:border [&_button]:px-2.5 [&_button]:text-[10px] [&_button]:font-semibold [&_button:disabled]:cursor-default [&_button:disabled]:opacity-45';
-const taskChecklistClass = 'grid gap-2 [&_input[type="text"]]:min-w-0 [&_input[type="text"]]:flex-1 [&_input[type="text"]]:rounded-[5px] [&_input[type="text"]]:border [&_input[type="text"]]:border-[var(--border)] [&_input[type="text"]]:bg-[var(--bg-base)] [&_input[type="text"]]:px-2 [&_input[type="text"]]:py-[7px] [&_input[type="text"]]:text-[11px] [&_input[type="text"]]:text-[var(--text-primary)] [&_input[type="text"]]:outline-none [&_input[type="text"]:focus]:border-[var(--accent)]';
-const taskChecklistRowClass = 'flex min-w-0 items-center gap-2 rounded-[6px] border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1.5 [&_button]:grid [&_button]:h-7 [&_button]:w-7 [&_button]:shrink-0 [&_button]:cursor-pointer [&_button]:place-items-center [&_button]:rounded-[5px] [&_button]:border [&_button]:border-[var(--border)] [&_button]:bg-transparent [&_button]:text-[var(--text-muted)] hover:[&_button]:border-[var(--border-light)] hover:[&_button]:text-[var(--text-primary)]';
 const questInputSuggestClass = 'absolute bottom-[44px] left-3 z-30 grid max-h-[240px] w-[min(520px,calc(100%-24px))] overflow-auto rounded-[7px] border border-[var(--border-light)] bg-[var(--bg-elevated)] py-1 shadow-[var(--shadow-lg)]';
 const questInputSuggestItemClass = (active: boolean) => cn(
   'grid cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent px-3 py-2 text-left text-[11px] text-[var(--text-secondary)]',
@@ -214,10 +219,8 @@ const markdownPreviewClass = [
 
 const questClasses = {
   shell: 'grid h-screen w-screen grid-rows-[48px_minmax(0,1fr)_24px] overflow-hidden bg-[var(--bg-base)] font-[Inter,var(--font-sans)] text-[var(--text-primary)]',
-  globalHeader: 'grid grid-cols-[220px_minmax(0,1fr)_auto] items-center border-b border-[var(--border)] bg-[var(--bg-overlay)] text-[var(--text-primary)] max-[900px]:grid-cols-[150px_minmax(0,1fr)_auto] [&_nav]:flex [&_nav]:h-full [&_nav]:items-stretch [&_nav]:gap-0.5',
-  brand: 'flex items-baseline gap-2 px-4 [&_span]:text-[13px] [&_span]:font-extrabold [&_span]:text-[var(--text-primary)] [&_strong]:text-[11px] [&_strong]:text-[var(--text-secondary)]',
-  topNavButton: 'cursor-pointer border-0 border-b-2 border-transparent bg-transparent px-[14px] text-[11px] font-semibold text-[var(--text-secondary)] disabled:cursor-default disabled:opacity-40 max-[900px]:px-[7px]',
-  topNavButtonActive: 'border-b-[var(--text-primary)] text-[var(--text-primary)]',
+  globalHeader: 'grid grid-cols-[minmax(0,1fr)_auto] items-center border-b border-[var(--border)] bg-[var(--bg-overlay)] text-[var(--text-primary)]',
+  brand: 'flex min-w-0 items-center gap-2 px-4 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[13px] [&_span]:font-semibold [&_span]:text-[var(--text-primary)] [&_strong]:shrink-0 [&_strong]:text-[11px] [&_strong]:font-medium [&_strong]:text-[var(--text-muted)] [&_svg]:shrink-0 [&_svg]:text-[var(--text-muted)]',
   globalActions: 'flex gap-[6px] pr-[10px]',
   layout: 'grid min-h-0 grid-cols-[280px_minmax(0,1fr)] bg-[var(--bg-base)] max-[900px]:grid-cols-[220px_minmax(0,1fr)]',
   sidebar: 'grid grid-rows-[auto_minmax(0,auto)_minmax(0,auto)_1fr] overflow-y-auto border-r border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-primary)]',
@@ -234,8 +237,10 @@ const questClasses = {
   liveActivityList: 'mt-4 w-[min(800px,calc(100vw-360px))] min-w-[min(800px,calc(100vw-360px))] border-l border-[var(--border)] py-1 pl-4 max-[900px]:w-[min(680px,calc(100vw-280px))] max-[900px]:min-w-0',
   liveActivityEntry: 'relative flex min-h-[22px] items-center gap-2 text-[11px] leading-none text-[var(--text-muted)] before:absolute before:-left-[19px] before:top-1/2 before:h-[7px] before:w-[7px] before:-translate-y-1/2 before:rounded-full before:border before:border-[var(--text-muted)] before:bg-[var(--bg-base)] [&_b]:font-medium [&_b]:text-[var(--text-secondary)] [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_svg]:h-[13px] [&_svg]:w-[13px] [&_svg]:shrink-0',
   workspace: 'grid min-h-0 min-w-0 overflow-hidden bg-[var(--bg-surface)]',
-  cockpit: 'grid min-h-0 grid-cols-[minmax(480px,1fr)_minmax(320px,36%)] overflow-hidden bg-[var(--bg-surface)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[minmax(0,1fr)_minmax(320px,42vh)]',
-  runStream: 'grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] border-r border-[var(--border)] bg-[var(--bg-base)] max-[900px]:border-b max-[900px]:border-r-0',
+  cockpit: 'grid min-h-0 overflow-hidden bg-[var(--bg-surface)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[minmax(0,1fr)_minmax(320px,42vh)]',
+  runStream: 'grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] bg-[var(--bg-base)] max-[900px]:border-b max-[900px]:border-r-0',
+  paneResizeHandle: 'w-[6px] cursor-col-resize border-x border-[var(--border)] bg-[var(--bg-base)] transition-colors hover:bg-[var(--bg-hover)] active:bg-[var(--bg-hover)] focus:outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--brand)] max-[900px]:hidden',
+  paneResizeHandleActive: 'bg-[var(--bg-hover)]',
   streamPrompt: 'mx-auto mb-4 mt-4 w-[min(720px,calc(100%-44px))] rounded-[7px] border border-[var(--border)] bg-[var(--bg-hover)] px-3 py-[9px] text-[12px] leading-[1.45] text-[var(--text-secondary)]',
   streamList: 'min-h-0 overflow-auto px-[22px] pb-[22px]',
   streamEntry: 'grid grid-cols-[16px_minmax(0,1fr)] gap-[9px] py-[3px] [&>div]:min-w-0 [&_button]:flex [&_button]:min-h-8 [&_button]:w-full [&_button]:cursor-default [&_button]:items-center [&_button]:gap-2 [&_button]:rounded-[5px] [&_button]:border-0 [&_button]:bg-transparent [&_button]:px-2 [&_button]:py-[6px] [&_button]:text-left [&_button]:font-[inherit] [&_button]:outline-none [&_button:enabled]:cursor-pointer [&_button:enabled:hover]:bg-[var(--bg-hover)] [&_pre]:mt-1 [&_pre]:max-h-[260px] [&_pre]:overflow-auto [&_pre]:rounded-[5px] [&_pre]:bg-[var(--bg-surface)] [&_pre]:p-[9px] [&_pre]:font-mono [&_pre]:text-[10px] [&_pre]:leading-[1.55] [&_pre]:text-[var(--text-secondary)] [&_small]:min-w-0 [&_small]:shrink-0 [&_small]:text-[11px] [&_small]:text-[var(--text-muted)] [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[12px] [&_strong]:font-medium [&_strong]:text-[var(--text-primary)]',
@@ -415,6 +420,133 @@ function QuestDropdown({
   );
 }
 
+function QuestModelThinkingDropdown({
+  modelValue,
+  thinkingValue,
+  modelOptions,
+  thinkingOptions,
+  onModelChange,
+  onThinkingChange,
+  disabled,
+  widthClass = 'w-full',
+  menuWidthClass = 'w-[240px]',
+  placement = 'bottom',
+}: {
+  modelValue: string;
+  thinkingValue: string;
+  modelOptions: QuestSelectOption[];
+  thinkingOptions: QuestSelectOption[];
+  onModelChange: (value: string) => void;
+  onThinkingChange: (value: string) => void;
+  disabled?: boolean;
+  widthClass?: string;
+  menuWidthClass?: string;
+  placement?: 'top' | 'bottom';
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedModel = modelOptions.find(option => option.value === modelValue) ?? modelOptions[0];
+  const selectedThinking = thinkingOptions.find(option => option.value === thinkingValue) ?? thinkingOptions[0];
+  const compactThinkingLabel = (value: string, label: string): string => {
+    if (value === 'off') return 'Off';
+    if (value === 'low') return 'Low';
+    if (value === 'medium') return 'Med';
+    if (value === 'high') return 'High';
+    return label;
+  };
+
+  return (
+    <div
+      className={cn('relative min-w-0', widthClass)}
+      onBlur={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        type="button"
+        className="flex h-[18px] min-w-0 cursor-pointer items-center justify-between gap-0.5 rounded-[5px] border-0 bg-transparent px-0.5 text-left text-[9px] font-medium text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-45"
+        onClick={() => setOpen(current => !current)}
+        disabled={disabled || modelOptions.length === 0}
+        title={`${selectedModel?.label ?? 'No model'} / ${selectedThinking?.label ?? ''}`}
+      >
+        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+          {selectedModel?.label ?? 'No model'}
+        </span>
+        <IconChevronDown
+          className={cn(
+            'shrink-0 text-[var(--text-muted)]',
+            open && placement === 'bottom' && 'rotate-180',
+            !open && placement === 'top' && 'rotate-180',
+          )}
+          size={8}
+        />
+      </button>
+      {open && (
+        <div className={cn(
+          'absolute left-0 z-30 grid max-h-[280px] min-w-full overflow-hidden rounded-[7px] border border-[var(--border-light)] bg-[var(--bg-elevated)] shadow-[var(--shadow-md)]',
+          placement === 'top' ? 'bottom-[calc(100%+4px)]' : 'top-[calc(100%+4px)]',
+          menuWidthClass,
+        )}>
+          <div className="grid border-b border-[var(--border)] p-1">
+            <div className="px-2 pb-1 pt-1 text-[9px] font-semibold uppercase text-[var(--text-muted)]">Thinking</div>
+            <div className="grid grid-cols-4 gap-0.5 rounded-[5px] bg-[var(--bg-base)] p-0.5">
+              {thinkingOptions.map(option => {
+                const active = option.value === thinkingValue;
+                return (
+                  <button
+                    type="button"
+                    key={option.value}
+                    className={cn(
+                      'h-[24px] cursor-pointer rounded-[4px] border border-transparent bg-transparent px-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+                      active && '!border-[var(--brand)] !bg-[var(--brand)] !text-white hover:!border-[var(--brand-hover)] hover:!bg-[var(--brand-hover)] hover:!text-white',
+                    )}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => onThinkingChange(option.value)}
+                    aria-pressed={active}
+                    title={option.label}
+                  >
+                    <span className="block overflow-hidden text-ellipsis whitespace-nowrap">
+                      {compactThinkingLabel(option.value, option.label)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="grid max-h-[210px] overflow-auto p-1">
+            <div className="px-2 pb-1 pt-1 text-[9px] font-semibold uppercase text-[var(--text-muted)]">Model</div>
+            {modelOptions.map(option => {
+              const active = option.value === modelValue;
+              return (
+                <button
+                  type="button"
+                  key={option.value}
+                  className={cn(
+                    'grid min-w-0 cursor-pointer grid-cols-[minmax(0,1fr)_14px] items-center gap-2 rounded-[5px] border-0 bg-transparent px-2 py-[7px] text-left text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+                    active && 'bg-[var(--bg-active)] text-[var(--text-primary)]',
+                  )}
+                  onMouseDown={event => event.preventDefault()}
+                  onClick={() => {
+                    onModelChange(option.value);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="min-w-0">
+                    <span className="block overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{option.label}</span>
+                    {option.description && <small className="block overflow-hidden text-ellipsis whitespace-nowrap text-[10px] text-[var(--text-muted)]">{option.description}</small>}
+                  </span>
+                  {active && <IconCheck size={12} className="text-[var(--text-primary)]" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PromptRewriteIcon({ active }: { active: boolean }) {
   if (active) {
     return (
@@ -545,10 +677,7 @@ function progressItems(
   detail: QuestDetail,
   t: (key: string) => string,
 ): Array<{ title: string; status: 'done' | 'current' | 'pending' }> {
-  const taskEvents = detail.events.filter(event => event.kind === 'task_created');
-  const titles = taskEvents.length > 0
-    ? taskEvents.map(event => event.summary)
-    : [t('quest_progress_review_spec'), t('quest_progress_approve_execution'), t('quest_progress_review_evidence')];
+  const titles = [t('quest_progress_review_spec'), t('quest_progress_approve_execution'), t('quest_progress_review_evidence')];
   return titles.map((title, index) => {
     if (detail.status === 'completed') return { title, status: 'done' };
     if (detail.status === 'ready_for_review') return { title, status: index < titles.length - 1 ? 'done' : 'current' };
@@ -558,6 +687,10 @@ function progressItems(
     if (detail.status === 'blocked') return { title, status: index === Math.min(3, titles.length - 1) ? 'current' : index < 3 ? 'done' : 'pending' };
     return { title, status: index === 0 ? 'current' : 'pending' };
   });
+}
+
+function isInternalTaskEvent(kind: string): boolean {
+  return kind === 'task_created' || kind === 'tasks_updated';
 }
 
 function hasEventDetails(details: unknown): boolean {
@@ -573,6 +706,15 @@ function formatEventDetails(details: unknown): string {
   }
 }
 
+function summarizeSpecForDecision(spec: string, fallback: string): string {
+  const line = spec
+    .split('\n')
+    .map(item => item.replace(/^#+\s*/, '').replace(/^[-*]\s*/, '').trim())
+    .find(item => item.length > 0);
+  if (!line) return fallback;
+  return line.length > 220 ? `${line.slice(0, 217)}...` : line;
+}
+
 export default function QuestPage({
   currentProjectPath,
   initialQuestId,
@@ -583,6 +725,7 @@ export default function QuestPage({
   const voiceInputRef = React.useRef<RealtimeTranscriptionHandle | null>(null);
   const questInputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const specAskInputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const cockpitRef = React.useRef<HTMLElement | null>(null);
   const [quests, setQuests] = useState<QuestRecord[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [selected, setSelected] = useState<QuestDetail | null>(null);
@@ -617,6 +760,13 @@ export default function QuestPage({
   const [questInputSuggestionIndex, setQuestInputSuggestionIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [errorOpen, setErrorOpen] = useState(false);
+  const [artifactPanePercent, setArtifactPanePercent] = useState(() => {
+    const stored = window.localStorage.getItem(artifactPaneStorageKey);
+    const parsed = stored ? Number(stored) : 36;
+    return Number.isFinite(parsed) ? clampArtifactPanePercent(parsed) : 36;
+  });
+  const [isResizingArtifactPane, setIsResizingArtifactPane] = useState(false);
+  const [isNarrowQuestLayout, setIsNarrowQuestLayout] = useState(false);
 
   const clearSelectedQuest = useCallback(() => {
     setSelected(null);
@@ -703,6 +853,14 @@ export default function QuestPage({
     refreshList(initialQuestId).catch(reportError);
     refreshKnowledge().catch(reportError);
   }, []); // Load the cross-project registry once on entry.
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const update = () => setIsNarrowQuestLayout(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     if (!currentProjectPath) return;
@@ -794,6 +952,57 @@ export default function QuestPage({
       description: option.provider,
     }));
   }, [modelOptions, t]);
+  const visibleEvents = useMemo(
+    () => selected?.events.filter(event => !isInternalTaskEvent(event.kind)) ?? [],
+    [selected?.events],
+  );
+
+  const startArtifactPaneResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const cockpit = cockpitRef.current;
+    if (!cockpit) return;
+    event.preventDefault();
+    const pointerId = event.pointerId;
+    const originalCursor = document.body.style.cursor;
+    const originalUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    setIsResizingArtifactPane(true);
+    event.currentTarget.setPointerCapture(pointerId);
+    const updateWidth = (clientX: number) => {
+      const rect = cockpit.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const rightWidth = rect.right - clientX;
+      const percent = clampArtifactPanePercent((rightWidth / rect.width) * 100);
+      setArtifactPanePercent(percent);
+      window.localStorage.setItem(artifactPaneStorageKey, percent.toFixed(2));
+    };
+    updateWidth(event.clientX);
+    const handleMove = (moveEvent: PointerEvent) => updateWidth(moveEvent.clientX);
+    const cleanup = () => {
+      document.body.style.cursor = originalCursor;
+      document.body.style.userSelect = originalUserSelect;
+      setIsResizingArtifactPane(false);
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', cleanup);
+      window.removeEventListener('pointercancel', cleanup);
+      try {
+        event.currentTarget.releasePointerCapture(pointerId);
+      } catch {
+        // The pointer may already be released by the browser.
+      }
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', cleanup);
+    window.addEventListener('pointercancel', cleanup);
+  }, []);
+
+  const nudgeArtifactPane = useCallback((delta: number) => {
+    setArtifactPanePercent(current => {
+      const next = clampArtifactPanePercent(current + delta);
+      window.localStorage.setItem(artifactPaneStorageKey, next.toFixed(2));
+      return next;
+    });
+  }, []);
 
   const thinkingOptions = useMemo<QuestSelectOption[]>(() => [
     { value: 'off', label: t('quest_thinking_off') },
@@ -1081,37 +1290,6 @@ export default function QuestPage({
     }
   }, [refreshList, selected, specDraft]);
 
-  const persistTasks = useCallback(async (tasks: QuestTask[]) => {
-    if (!selected) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const detail = await updateQuestTasks(selected.id, tasks);
-      setSelected(detail);
-      await refreshList(detail.id);
-    } catch (reason) {
-      reportError(reason);
-    } finally {
-      setBusy(false);
-    }
-  }, [refreshList, reportError, selected]);
-
-  const addTask = useCallback(() => {
-    if (!selected) return;
-    const id = `task-${Date.now()}`;
-    persistTasks([...selected.tasks, { id, title: 'New task', done: false }]);
-  }, [persistTasks, selected]);
-
-  const updateTask = useCallback((taskId: string, patch: Partial<QuestTask>) => {
-    if (!selected) return;
-    persistTasks(selected.tasks.map(task => task.id === taskId ? { ...task, ...patch } : task));
-  }, [persistTasks, selected]);
-
-  const deleteTask = useCallback((taskId: string) => {
-    if (!selected) return;
-    persistTasks(selected.tasks.filter(task => task.id !== taskId));
-  }, [persistTasks, selected]);
-
   const saveIntent = useCallback(async () => {
     if (!selected) return;
     setBusy(true);
@@ -1132,63 +1310,8 @@ export default function QuestPage({
 
   const execute = useCallback(async () => {
     if (!selected) return;
-    setBusy(true);
-    setExecutingQuestId(selected.id);
-    setError(null);
-    const startedAt = Date.now();
-    setLiveNow(startedAt);
-    setLiveQuestActivities([{
-      id: 'quest-execute-start',
-      kind: 'status',
-      label: 'Starting workspace',
-      detail: selected.mode,
-      startedAt,
-    }]);
-    try {
-      if (intentDraft !== selected.intent) {
-        setLiveQuestActivities(prev => [...prev, {
-          id: `status-intent-${Date.now()}`,
-          kind: 'status',
-          label: 'Saving intent',
-          startedAt: Date.now(),
-        }].slice(-8));
-        await updateQuestIntent(selected.id, intentDraft);
-      }
-      if (specDraft !== selected.spec) {
-        setLiveQuestActivities(prev => [...prev, {
-          id: `status-spec-${Date.now()}`,
-          kind: 'status',
-          label: 'Saving spec',
-          startedAt: Date.now(),
-        }].slice(-8));
-        await updateQuestSpec(selected.id, specDraft);
-      }
-      setSelected(prev => prev && prev.id === selected.id ? { ...prev, status: 'running' } : prev);
-      setPanel('overview');
-      setLiveQuestActivities(prev => [...prev, {
-        id: `status-run-${Date.now()}`,
-        kind: 'status',
-        label: 'Running agent',
-        detail: 'watching timeline',
-        startedAt: Date.now(),
-      }].slice(-8));
-      const detail = await executeQuest(selected.id);
-      setSelected(detail);
-      setIntentDraft(detail.intent);
-      setSpecDraft(detail.spec);
-      setTitleDraft(detail.title);
-      resetReviewSelection(detail);
-      setArtifact(null);
-      setPanel('overview');
-      await refreshList(detail.id);
-    } catch (reason) {
-      reportError(reason);
-    } finally {
-      setExecutingQuestId(null);
-      setLiveQuestActivities([]);
-      setBusy(false);
-    }
-  }, [intentDraft, refreshList, resetReviewSelection, selected, specDraft]);
+    reportError(new Error('Quest execution is temporarily disabled because the current backend execution path runs on the desktop UI thread. This prevents the Build button from freezing the app while the background execution path is implemented.'));
+  }, [reportError, selected]);
 
   const transition = useCallback(async (status: QuestStatus) => {
     if (!selected) return;
@@ -1872,12 +1995,10 @@ export default function QuestPage({
     <div className={questClasses.shell}>
       <header className={questClasses.globalHeader}>
         <div className={questClasses.brand}>
-          <span>Aster</span>
-          <strong>{t('quest_title')}</strong>
+          <span title={selected?.title ?? 'Aster'}>{selected?.title ?? 'Aster'}</span>
+          <strong>{selected?.project.name ?? t('quest_title')}</strong>
+          {selected && <IconMonitor size={13} />}
         </div>
-        <nav>
-          <button className={cn(questClasses.topNavButton, questClasses.topNavButtonActive)}>{t('quest_title')}</button>
-        </nav>
         <div className={questClasses.globalActions}>
           {selected ? (
             <button
@@ -1955,13 +2076,15 @@ export default function QuestPage({
                     onChange={value => setQuestMode(value as QuestMode)}
                     disabled={busy}
                     compact
-                    widthClass="w-[64px]"
+                    widthClass="w-auto shrink-0"
                     menuWidthClass="w-[120px]"
                   />
-                  <QuestDropdown
-                    value={modelConfig.model}
-                    options={modelSelectOptions}
-                    onChange={value => {
+                  <QuestModelThinkingDropdown
+                    modelValue={modelConfig.model}
+                    thinkingValue={modelConfig.thinking_effort}
+                    modelOptions={modelSelectOptions}
+                    thinkingOptions={thinkingOptions}
+                    onModelChange={value => {
                       const model = modelOptions.find(option => option.id === value);
                       setModelConfig(prev => ({
                         ...prev,
@@ -1970,8 +2093,8 @@ export default function QuestPage({
                         max_tokens: model?.default_max_tokens ?? prev.max_tokens,
                       }));
                     }}
+                    onThinkingChange={value => setModelConfig(prev => ({ ...prev, thinking_effort: value }))}
                     disabled={busy}
-                    compact
                     widthClass="w-[150px]"
                     menuWidthClass="w-[220px]"
                   />
@@ -2021,7 +2144,13 @@ export default function QuestPage({
           </main>
         ) : (
           <main className={questClasses.workspace}>
-            <section className={questClasses.cockpit}>
+            <section
+              ref={cockpitRef}
+              className={questClasses.cockpit}
+              style={isNarrowQuestLayout ? undefined : {
+                gridTemplateColumns: `minmax(360px,1fr) 6px minmax(280px,${artifactPanePercent}%)`,
+              }}
+            >
               <div className={questClasses.runStream}>
                 <div className={questClasses.streamList}>
                   <div className={questClasses.streamPrompt}>{selected.goal}</div>
@@ -2034,14 +2163,14 @@ export default function QuestPage({
                       </button>
                     </div>
                   </article>
-                  {selected.events.map((event, index) => {
+                  {visibleEvents.map((event, index) => {
                     const hasDetails = hasEventDetails(event.details);
                     const expanded = expandedEventIds.has(event.id);
                     return (
                       <article key={event.id} className={questClasses.streamEntry}>
                         <span className={cn(
                           questClasses.timelineDot,
-                          index === selected.events.length - 1
+                          index === visibleEvents.length - 1
                             && selected.status !== 'draft'
                             && !['draft', 'specified'].includes(selected.status)
                             && executingQuestId !== selected.id
@@ -2088,15 +2217,36 @@ export default function QuestPage({
                     </div>
                   </article>
                   {['draft', 'specified'].includes(selected.status) && (
-                    <article className={cn(questClasses.streamEntry, questClasses.nextEntry)}>
-                      <span className={cn(questClasses.timelineDot, questClasses.timelineDotNext)} />
-                      <div>
-                        <button type="button" disabled>
-                          <strong>{t('quest_spec_ready')}</strong>
-                          <small>{t('quest_spec_ready_desc')}</small>
+                    <div className={feedDecisionCardClass}>
+                      <header>
+                        <span>
+                          <IconCode />
+                          <b>Spec</b>
+                          <strong>{selected.spec_path?.split('/').pop() ?? 'Spec.md'}</strong>
+                        </span>
+                      </header>
+                      <section>
+                        <p>{summarizeSpecForDecision(specDraft || selected.spec, selected.next_action.reason || t('quest_spec_ready_desc'))}</p>
+                      </section>
+                      <footer>
+                        <button
+                          type="button"
+                          className="border-transparent bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                          onClick={() => { setArtifact(null); setPanel('spec'); }}
+                        >
+                          View detail
                         </button>
-                      </div>
-                    </article>
+                        <button
+                          type="button"
+                          className="border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-base)]"
+                          onClick={execute}
+                          disabled={busy || selected.status === 'archived'}
+                          title="Build"
+                        >
+                          {busy ? <QuestLoader /> : <IconPlay />} Build
+                        </button>
+                      </footer>
+                    </div>
                   )}
                   {executingQuestId === selected.id && (
                     <article className={cn(questClasses.streamEntry, questClasses.liveEntry)}>
@@ -2219,10 +2369,12 @@ export default function QuestPage({
                         menuWidthClass="w-[116px]"
                         placement="top"
                       />
-                      <QuestDropdown
-                        value={modelConfig.model}
-                        options={modelSelectOptions}
-                        onChange={value => {
+                      <QuestModelThinkingDropdown
+                        modelValue={modelConfig.model}
+                        thinkingValue={modelConfig.thinking_effort}
+                        modelOptions={modelSelectOptions}
+                        thinkingOptions={thinkingOptions}
+                        onModelChange={value => {
                           const model = modelOptions.find(option => option.id === value);
                           setModelConfig(prev => ({
                             ...prev,
@@ -2231,8 +2383,8 @@ export default function QuestPage({
                             max_tokens: model?.default_max_tokens ?? prev.max_tokens,
                           }));
                         }}
+                        onThinkingChange={value => setModelConfig(prev => ({ ...prev, thinking_effort: value }))}
                         disabled={busy || executionLockedStatuses.includes(selected.status)}
-                        compact
                         widthClass="w-[68px]"
                         menuWidthClass="w-[240px]"
                         placement="top"
@@ -2244,6 +2396,34 @@ export default function QuestPage({
                   </button>
                 </div>
               </div>
+
+              <div
+                className={cn(questClasses.paneResizeHandle, isResizingArtifactPane && questClasses.paneResizeHandleActive)}
+                onPointerDown={startArtifactPaneResize}
+                onKeyDown={event => {
+                  if (event.key === 'ArrowLeft') {
+                    event.preventDefault();
+                    nudgeArtifactPane(2);
+                  } else if (event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    nudgeArtifactPane(-2);
+                  } else if (event.key === 'Home') {
+                    event.preventDefault();
+                    nudgeArtifactPane(artifactPaneMaxPercent);
+                  } else if (event.key === 'End') {
+                    event.preventDefault();
+                    nudgeArtifactPane(-artifactPaneMaxPercent);
+                  }
+                }}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize artifact pane"
+                aria-valuemin={artifactPaneMinPercent}
+                aria-valuemax={artifactPaneMaxPercent}
+                aria-valuenow={Math.round(artifactPanePercent)}
+                tabIndex={0}
+                title="Resize artifact pane"
+              />
 
               <aside className={questClasses.rightPanel}>
                 <div className={questClasses.artifactHeader}>
@@ -2308,45 +2488,6 @@ export default function QuestPage({
                         ))}
                       </ol>
 	                    </section>
-
-                    <section>
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <h2 className="m-0">Tasks <b>{selected.tasks.filter(task => task.done).length}/{selected.tasks.length}</b></h2>
-                        <button className={sectionHeadingButton} onClick={addTask} disabled={busy}>
-                          <IconPlus /> Add
-                        </button>
-                      </div>
-                      <div className={taskChecklistClass}>
-                        {selected.tasks.length === 0 ? (
-                          <p className={mutedText}>No tasks yet.</p>
-                        ) : selected.tasks.map(task => (
-                          <div className={taskChecklistRowClass} key={task.id}>
-                            <input
-                              type="checkbox"
-                              checked={task.done}
-                              onChange={event => updateTask(task.id, { done: event.target.checked })}
-                              disabled={busy}
-                            />
-                            <input
-                              type="text"
-                              value={task.title}
-                              onChange={event => {
-                                const title = event.target.value;
-                                setSelected(current => current && current.id === selected.id
-                                  ? { ...current, tasks: current.tasks.map(item => item.id === task.id ? { ...item, title } : item) }
-                                  : current);
-                              }}
-                              onBlur={event => updateTask(task.id, { title: event.target.value })}
-                              disabled={busy}
-                              className={task.done ? 'line-through opacity-60' : ''}
-                            />
-                            <button onClick={() => deleteTask(task.id)} disabled={busy} title="Delete" aria-label="Delete">
-                              <IconX />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
 
                     <section>
                       <h2>{t('quest_artifacts')}</h2>

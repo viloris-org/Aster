@@ -429,11 +429,15 @@ Fields:
 - requested capability: outside-sandbox execution, network, write scope expansion, deletion, dependency install, container execution, credential access, or active-project apply;
 - requested scope: once, session, Quest, project, or permanent;
 - cwd and affected paths;
+- agent-provided rationale explaining why this operation is needed for the current Quest;
+- evidence or artifact that triggered the request;
 - reason current policy blocks progress;
 - expected output;
 - rollback or recovery plan;
 - risk level;
 - audit artifacts that will be produced if approved.
+
+Approval metadata and UI detail should scale with risk. Routine low-risk commands need only a short rationale, scope, and expected success signal. Higher-risk or broader-scope requests must include the fuller rationale, triggering evidence, side effects, recovery plan, and audit artifacts. The visible rationale should fit one or two lines; longer side effects, logs, and audit detail should be behind a details affordance. Users should not have to infer why a command is needed from the command string alone.
 
 Elevation outcomes:
 
