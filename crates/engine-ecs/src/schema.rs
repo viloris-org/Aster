@@ -180,6 +180,21 @@ impl ComponentSchemaRegistry {
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
+            type_id: "FluidVolume".to_string(),
+            display_name: "Fluid Volume".to_string(),
+            version: 1,
+            fields: vec![
+                field("size", ComponentFieldKind::Vec3, "4,2,4"),
+                field("density", ComponentFieldKind::F32, "1000"),
+                field("buoyancy_scale", ComponentFieldKind::F32, "1"),
+                field("linear_drag", ComponentFieldKind::F32, "2"),
+                field("angular_drag", ComponentFieldKind::F32, "0.5"),
+                field("flow_velocity", ComponentFieldKind::Vec3, "0,0,0"),
+                field("surface_offset", ComponentFieldKind::F32, "0"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
             type_id: "AudioSource".to_string(),
             display_name: "Audio Source".to_string(),
             version: 3,

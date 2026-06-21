@@ -6,6 +6,7 @@ use engine_core::EntityId;
 use engine_ecs::{ColliderComponentData, ComponentData, Scene};
 use engine_physics::{
     BodyHandle, BodyKind, ColliderDesc, ColliderHandle, ColliderShape, PhysicsWorld, RigidbodyDesc,
+    built_in_physical_material,
 };
 
 /// Synchronizes ECS RigidbodyComponent/ColliderComponent with the physics backend.
@@ -88,17 +89,16 @@ impl PhysicsSync {
 
             for (idx, collider_data) in collider_components.enumerate() {
                 if !self.collider_map.contains_key(&(object.id, idx)) {
-                    let (friction, restitution) =
-                        physics_material_friction_restitution(&collider_data.physics_material);
+                    let material = built_in_physical_material(&collider_data.physics_material);
                     let desc = ColliderDesc {
                         shape: collider_shape_from_data(collider_data),
-                        friction,
-                        restitution,
+                        friction: material.friction,
+                        restitution: material.restitution,
                         is_trigger: collider_data.is_trigger,
                         layer: object.layer,
                         mask: collider_data.mask,
-                        friction_combine: engine_physics::CombineMode::Average,
-                        restitution_combine: engine_physics::CombineMode::Average,
+                        friction_combine: material.friction_combine,
+                        restitution_combine: material.restitution_combine,
                         active_contact_events: false,
                     };
                     let collider_handle = physics.backend_mut().add_collider(body, &desc)?;
@@ -204,16 +204,6 @@ impl PhysicsSync {
     /// Returns the number of physics colliders managed by this sync.
     pub fn collider_count(&self) -> usize {
         self.collider_map.len()
-    }
-}
-
-/// Helper to get friction/restitution from physics material name.
-fn physics_material_friction_restitution(material: &str) -> (f32, f32) {
-    match material {
-        "metal" => (0.3, 0.5),
-        "ice" => (0.05, 0.1),
-        "rubber" => (0.9, 0.8),
-        _ => (0.5, 0.0), // default
     }
 }
 

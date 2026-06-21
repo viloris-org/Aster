@@ -583,7 +583,12 @@ impl PhysicalMaterialRegistry {
 
     /// Looks up a material by name.
     pub fn get(&self, name: &str) -> Option<&PhysicalMaterial> {
-        self.materials.get(name)
+        self.materials.get(name).or_else(|| {
+            self.materials
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
+                .map(|(_, material)| material)
+        })
     }
 
     /// Returns the friction for a named material, or the default.
@@ -600,6 +605,14 @@ impl PhysicalMaterialRegistry {
     pub fn density(&self, name: &str) -> f32 {
         self.get(name).map_or(1000.0, |m| m.density)
     }
+}
+
+/// Resolves a named built-in physical material, falling back to [`PhysicalMaterial::default`].
+pub fn built_in_physical_material(name: &str) -> PhysicalMaterial {
+    PhysicalMaterialRegistry::with_defaults()
+        .get(name)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Kinematic character movement request.
@@ -1194,6 +1207,25 @@ impl PhysicsWorld {
     /// Returns joint reaction forces.
     pub fn joint_forces(&self, joint: JointHandle) -> EngineResult<(f32, f32)> {
         self.backend.joint_forces(joint)
+    }
+
+    /// Creates a wheeled vehicle attached to an existing chassis body.
+    pub fn create_vehicle(&mut self, desc: &VehicleDesc) -> EngineResult<VehicleHandle> {
+        self.backend.create_vehicle(desc)
+    }
+
+    /// Destroys a wheeled vehicle.
+    pub fn destroy_vehicle(&mut self, vehicle: VehicleHandle) -> EngineResult<()> {
+        self.backend.destroy_vehicle(vehicle)
+    }
+
+    /// Updates vehicle input and returns the latest runtime vehicle state.
+    pub fn update_vehicle(
+        &mut self,
+        vehicle: VehicleHandle,
+        input: VehicleInput,
+    ) -> EngineResult<VehicleState> {
+        self.backend.update_vehicle(vehicle, input)
     }
 
     /// Drains contact events from the backend, filtering through the contact filter chain.
@@ -3435,6 +3467,47 @@ mod tests {
     }
 
     #[test]
+    fn built_in_physical_material_matches_names_case_insensitively() {
+        let rubber = built_in_physical_material("rubber");
+        let rubber_title = built_in_physical_material("Rubber");
+        let unknown = built_in_physical_material("missing");
+
+        assert_eq!(rubber, rubber_title);
+        assert_eq!(rubber.friction, 0.9);
+        assert_eq!(rubber.restitution, 0.8);
+        assert_eq!(unknown, PhysicalMaterial::default());
+    }
+
+    #[test]
+    fn physics_world_filters_drained_contact_events() {
+        let mut backend = SimplePhysicsBackend::new();
+        let ignored = backend.create_body(&RigidbodyDesc::default()).unwrap();
+        let other = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.25, 0.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(ignored, &ColliderDesc::default())
+            .unwrap();
+        backend
+            .add_collider(other, &ColliderDesc::default())
+            .unwrap();
+
+        let mut world = PhysicsWorld::new(backend);
+        world
+            .contact_filter_chain
+            .push(ContactFilter::IgnoreBody { body: ignored });
+        world.fixed_update(0.0);
+
+        assert!(world.drain_contacts().is_empty());
+    }
+
+    #[test]
     fn invalid_heightfield_is_rejected_without_panicking() {
         let mut backend = SimplePhysicsBackend::default();
         let body = backend.create_body(&RigidbodyDesc::default()).unwrap();
@@ -3935,6 +4008,136 @@ mod tests {
         // Ensure all handles are distinct
         assert_ne!(box_collider, sphere_collider);
         assert_ne!(sphere_collider, capsule_collider);
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_stats_track_bodies_colliders_and_joints() {
+        let mut backend = RapierPhysicsBackend::new();
+        let static_body = backend
+            .create_body(&RigidbodyDesc {
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        let dynamic_body = backend.create_body(&RigidbodyDesc::default()).unwrap();
+        backend
+            .add_collider(static_body, &ColliderDesc::default())
+            .unwrap();
+        backend
+            .add_collider(dynamic_body, &ColliderDesc::default())
+            .unwrap();
+        backend
+            .create_joint(&JointDesc::pin(
+                static_body,
+                dynamic_body,
+                Vec3::ZERO,
+                Vec3::ZERO,
+            ))
+            .unwrap();
+
+        backend.fixed_update(1.0 / 60.0);
+        let stats = backend.stats();
+
+        assert_eq!(stats.body_count, 2);
+        assert_eq!(stats.collider_count, 2);
+        assert_eq!(stats.joint_count, 1);
+    }
+
+    #[cfg(feature = "rapier")]
+    #[test]
+    fn rapier_backend_vehicle_creation_update_and_destroy_updates_stats() {
+        let mut backend = RapierPhysicsBackend::new();
+        let ground = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, -0.5, 0.0),
+                    ..Transform::IDENTITY
+                },
+                kind: BodyKind::Static,
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                ground,
+                &ColliderDesc {
+                    shape: ColliderShape::Box {
+                        half_extents: Vec3::new(10.0, 0.5, 10.0),
+                    },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+        let chassis = backend
+            .create_body(&RigidbodyDesc {
+                transform: Transform {
+                    translation: Vec3::new(0.0, 1.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+                ..RigidbodyDesc::default()
+            })
+            .unwrap();
+        backend
+            .add_collider(
+                chassis,
+                &ColliderDesc {
+                    shape: ColliderShape::Box {
+                        half_extents: Vec3::new(0.8, 0.25, 1.2),
+                    },
+                    ..ColliderDesc::default()
+                },
+            )
+            .unwrap();
+
+        let vehicle = backend
+            .create_vehicle(&VehicleDesc {
+                chassis,
+                wheels: vec![
+                    WheelDesc {
+                        chassis_connection: Vec3::new(-0.5, 0.0, 0.7),
+                        is_steered: true,
+                        ..WheelDesc::default()
+                    },
+                    WheelDesc {
+                        chassis_connection: Vec3::new(0.5, 0.0, 0.7),
+                        is_steered: true,
+                        ..WheelDesc::default()
+                    },
+                    WheelDesc {
+                        chassis_connection: Vec3::new(-0.5, 0.0, -0.7),
+                        is_steered: false,
+                        ..WheelDesc::default()
+                    },
+                    WheelDesc {
+                        chassis_connection: Vec3::new(0.5, 0.0, -0.7),
+                        is_steered: false,
+                        ..WheelDesc::default()
+                    },
+                ],
+                tuning: VehicleTuning::default(),
+            })
+            .unwrap();
+
+        backend.fixed_update(1.0 / 60.0);
+        let state = backend
+            .update_vehicle(
+                vehicle,
+                VehicleInput {
+                    throttle: 1.0,
+                    steering: 0.25,
+                    ..VehicleInput::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(state.wheel_transforms.len(), 4);
+        assert_eq!(state.suspension_displacements.len(), 4);
+        assert_eq!(backend.stats().vehicle_count, 1);
+
+        backend.destroy_vehicle(vehicle).unwrap();
+        backend.fixed_update(1.0 / 60.0);
+        assert_eq!(backend.stats().vehicle_count, 0);
     }
 
     #[cfg(feature = "rapier")]

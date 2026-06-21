@@ -21,11 +21,12 @@ pub use scene::{
     AcousticRoomComponentData, AnimationPlayerComponentData, AudioListenerComponentData,
     AudioSourceComponentData, AudioStreamPlayer2DComponentData, AudioStreamPlayer3DComponentData,
     AudioZoneComponentData, Camera2DComponentData, CameraComponentData, CameraRole,
-    ColliderComponentData, ComponentData, GameObject, LifecycleStage, Light2DComponentData,
-    LightComponentData, MaterialRef, MeshRendererComponentData, ObjectIdAllocator,
-    Occluder2DComponentData, ParticleEmitterComponentData, RigidbodyComponentData, Scene,
-    SceneFile, SceneMode, ScriptComponentProxy, SkinnedMeshRendererComponentData,
-    SkyboxComponentData, Sprite2DComponentData, TileMap2DComponentData,
+    ColliderComponentData, ComponentData, FluidVolumeComponentData, GameObject, LifecycleStage,
+    Light2DComponentData, LightComponentData, MaterialRef, MeshRendererComponentData,
+    ObjectIdAllocator, Occluder2DComponentData, ParticleEmitterComponentData,
+    RigidbodyComponentData, Scene, SceneFile, SceneMode, ScriptComponentProxy,
+    SkinnedMeshRendererComponentData, SkyboxComponentData, Sprite2DComponentData,
+    TileMap2DComponentData,
 };
 pub use schema::{
     BuildConfiguration, BuildRenderSettings, ComponentFieldKind, ComponentFieldSchema,

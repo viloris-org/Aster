@@ -5478,6 +5478,7 @@ fn on_update(entity, dt) {
             "MeshRenderer" => ComponentData::MeshRenderer(Default::default()),
             "Rigidbody" => ComponentData::Rigidbody(Default::default()),
             "Collider" => ComponentData::Collider(Default::default()),
+            "FluidVolume" => ComponentData::FluidVolume(Default::default()),
             "AudioSource" => ComponentData::AudioSource(Default::default()),
             "AudioListener" => ComponentData::AudioListener(Default::default()),
             "AcousticMaterial" => ComponentData::AcousticMaterial(Default::default()),

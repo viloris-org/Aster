@@ -300,6 +300,61 @@ fn default_collider_mask() -> u32 {
     !0
 }
 
+/// Serializable fluid volume component.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct FluidVolumeComponentData {
+    /// Axis-aligned volume size in local space.
+    pub size: Vec3,
+    /// Fluid density in kg/m³.
+    #[serde(default = "default_fluid_density")]
+    pub density: f32,
+    /// Scales the upward buoyancy force.
+    #[serde(default = "default_buoyancy_scale")]
+    pub buoyancy_scale: f32,
+    /// Linear drag applied against relative velocity.
+    #[serde(default = "default_fluid_linear_drag")]
+    pub linear_drag: f32,
+    /// Angular drag hint for future rotational damping.
+    #[serde(default = "default_fluid_angular_drag")]
+    pub angular_drag: f32,
+    /// Constant current velocity applied by the volume.
+    #[serde(default)]
+    pub flow_velocity: Vec3,
+    /// Offset from the volume top used as the fluid surface.
+    #[serde(default)]
+    pub surface_offset: f32,
+}
+
+fn default_fluid_density() -> f32 {
+    1000.0
+}
+
+fn default_buoyancy_scale() -> f32 {
+    1.0
+}
+
+fn default_fluid_linear_drag() -> f32 {
+    2.0
+}
+
+fn default_fluid_angular_drag() -> f32 {
+    0.5
+}
+
+impl Default for FluidVolumeComponentData {
+    fn default() -> Self {
+        Self {
+            size: Vec3::new(4.0, 2.0, 4.0),
+            density: default_fluid_density(),
+            buoyancy_scale: default_buoyancy_scale(),
+            linear_drag: default_fluid_linear_drag(),
+            angular_drag: default_fluid_angular_drag(),
+            flow_velocity: Vec3::ZERO,
+            surface_offset: 0.0,
+        }
+    }
+}
+
 /// Serializable audio source component.
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct AudioSourceComponentData {
@@ -1016,6 +1071,8 @@ pub enum ComponentData {
     Rigidbody(RigidbodyComponentData),
     /// Collider component.
     Collider(ColliderComponentData),
+    /// Fluid volume component.
+    FluidVolume(FluidVolumeComponentData),
     /// Audio source component.
     AudioSource(AudioSourceComponentData),
     /// Audio listener component.
@@ -1065,6 +1122,7 @@ impl ComponentData {
             Self::Light(_) => "Light",
             Self::Rigidbody(_) => "Rigidbody",
             Self::Collider(_) => "Collider",
+            Self::FluidVolume(_) => "FluidVolume",
             Self::AudioSource(_) => "AudioSource",
             Self::AudioListener(_) => "AudioListener",
             Self::AcousticMaterial(_) => "AcousticMaterial",

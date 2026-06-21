@@ -1,8 +1,8 @@
 use engine_core::math::{Transform, Vec3};
 use engine_ecs::{
     AudioSourceComponentData, CameraComponentData, ColliderComponentData, ComponentData,
-    MaterialRef, MeshRendererComponentData, ParticleEmitterComponentData, RigidbodyComponentData,
-    Scene,
+    FluidVolumeComponentData, MaterialRef, MeshRendererComponentData, ParticleEmitterComponentData,
+    RigidbodyComponentData, Scene,
 };
 
 /// Test that a scene with all component types can be serialized to JSON and
@@ -108,6 +108,19 @@ fn scene_with_all_components_round_trip() {
                 lifetime: 1.5,
                 elapsed: 0.25,
                 ..ParticleEmitterComponentData::default()
+            }),
+        )
+        .unwrap();
+
+    // Create a fluid volume object
+    let fluid = scene.create_object("WaterVolume").unwrap();
+    scene
+        .upsert_component(
+            fluid,
+            ComponentData::FluidVolume(FluidVolumeComponentData {
+                size: Vec3::new(8.0, 2.0, 8.0),
+                flow_velocity: Vec3::new(1.0, 0.0, 0.0),
+                ..FluidVolumeComponentData::default()
             }),
         )
         .unwrap();

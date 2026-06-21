@@ -1,5 +1,7 @@
 use engine_core::{EngineConfig, math::Transform, math::Vec3};
-use engine_ecs::{ColliderComponentData, ComponentData, RigidbodyComponentData, Scene};
+use engine_ecs::{
+    ColliderComponentData, ComponentData, FluidVolumeComponentData, RigidbodyComponentData, Scene,
+};
 use runtime_min::headless_services_from_scene;
 use std::time::Duration;
 
@@ -175,5 +177,211 @@ fn windowless_scene_simulation_with_physics() {
     assert!(
         services.stats.physics_steps > 0,
         "Physics steps should have been executed"
+    );
+}
+
+#[test]
+#[cfg(feature = "physics")]
+fn fluid_volume_applies_buoyancy_and_drag_to_dynamic_body() {
+    fn scene_with_optional_water(include_water: bool) -> (Scene, engine_core::EntityId) {
+        let mut scene = Scene::default();
+
+        let cube = scene.create_object("FloatingCube").unwrap();
+        let cube_id = scene.object(cube).unwrap().id;
+        scene
+            .upsert_component(
+                cube,
+                ComponentData::Rigidbody(RigidbodyComponentData {
+                    body_type: "dynamic".to_string(),
+                    mass: 1.0,
+                    use_gravity: true,
+                    linear_damping: 0.0,
+                    angular_damping: 0.05,
+                    lock_position: [false; 3],
+                    lock_rotation: [false; 3],
+                }),
+            )
+            .unwrap();
+        scene
+            .upsert_component(
+                cube,
+                ComponentData::Collider(ColliderComponentData {
+                    shape: "box".to_string(),
+                    size: Vec3::ONE,
+                    is_trigger: false,
+                    mask: !0,
+                    physics_material: "default".to_string(),
+                }),
+            )
+            .unwrap();
+        scene.transforms_mut().set_local(
+            cube,
+            Transform {
+                translation: Vec3::new(0.0, 0.0, 0.0),
+                ..Transform::IDENTITY
+            },
+        );
+
+        if include_water {
+            let water = scene.create_object("WaterVolume").unwrap();
+            scene
+                .upsert_component(
+                    water,
+                    ComponentData::FluidVolume(FluidVolumeComponentData {
+                        size: Vec3::new(10.0, 4.0, 10.0),
+                        buoyancy_scale: 1.25,
+                        linear_drag: 6.0,
+                        ..FluidVolumeComponentData::default()
+                    }),
+                )
+                .unwrap();
+            scene.transforms_mut().set_local(
+                water,
+                Transform {
+                    translation: Vec3::new(0.0, 0.0, 0.0),
+                    ..Transform::IDENTITY
+                },
+            );
+        }
+
+        (scene, cube_id)
+    }
+
+    let (dry_scene, dry_cube_id) = scene_with_optional_water(false);
+    let (wet_scene, wet_cube_id) = scene_with_optional_water(true);
+
+    let mut dry_services = headless_services_from_scene(
+        EngineConfig::default(),
+        std::env::current_dir().unwrap(),
+        &dry_scene,
+    )
+    .unwrap();
+    let mut wet_services = headless_services_from_scene(
+        EngineConfig::default(),
+        std::env::current_dir().unwrap(),
+        &wet_scene,
+    )
+    .unwrap();
+
+    let fixed_dt = Duration::from_secs_f32(1.0 / 60.0);
+    for _ in 0..60 {
+        dry_services.run_frame(fixed_dt, false).unwrap();
+        wet_services.run_frame(fixed_dt, false).unwrap();
+    }
+
+    let dry_cube = dry_services.scene.find_by_id(dry_cube_id).unwrap();
+    let wet_cube = wet_services.scene.find_by_id(wet_cube_id).unwrap();
+    let dry_y = dry_services
+        .scene
+        .transforms()
+        .local(dry_cube)
+        .unwrap()
+        .translation
+        .y;
+    let wet_y = wet_services
+        .scene
+        .transforms()
+        .local(wet_cube)
+        .unwrap()
+        .translation
+        .y;
+
+    assert!(
+        wet_y > dry_y,
+        "fluid volume should slow or reverse falling motion: wet_y={wet_y}, dry_y={dry_y}"
+    );
+}
+
+#[test]
+#[cfg(feature = "physics")]
+fn fluid_volume_uses_displaced_volume_for_light_and_heavy_bodies() {
+    let mut scene = Scene::default();
+
+    let water = scene.create_object("WaterVolume").unwrap();
+    scene
+        .upsert_component(
+            water,
+            ComponentData::FluidVolume(FluidVolumeComponentData {
+                size: Vec3::new(12.0, 6.0, 12.0),
+                linear_drag: 8.0,
+                ..FluidVolumeComponentData::default()
+            }),
+        )
+        .unwrap();
+
+    fn cube(scene: &mut Scene, name: &str, x: f32, mass: f32) -> engine_core::EntityId {
+        let entity = scene.create_object(name).unwrap();
+        let id = scene.object(entity).unwrap().id;
+        scene
+            .upsert_component(
+                entity,
+                ComponentData::Rigidbody(RigidbodyComponentData {
+                    body_type: "dynamic".to_string(),
+                    mass,
+                    use_gravity: true,
+                    linear_damping: 0.0,
+                    angular_damping: 0.05,
+                    lock_position: [false; 3],
+                    lock_rotation: [false; 3],
+                }),
+            )
+            .unwrap();
+        scene
+            .upsert_component(
+                entity,
+                ComponentData::Collider(ColliderComponentData {
+                    shape: "box".to_string(),
+                    size: Vec3::ONE,
+                    is_trigger: false,
+                    mask: !0,
+                    physics_material: "default".to_string(),
+                }),
+            )
+            .unwrap();
+        scene.transforms_mut().set_local(
+            entity,
+            Transform {
+                translation: Vec3::new(x, 0.0, 0.0),
+                ..Transform::IDENTITY
+            },
+        );
+        id
+    }
+
+    let light_id = cube(&mut scene, "LightCube", -1.5, 0.5);
+    let heavy_id = cube(&mut scene, "HeavyCube", 1.5, 2000.0);
+
+    let mut services = headless_services_from_scene(
+        EngineConfig::default(),
+        std::env::current_dir().unwrap(),
+        &scene,
+    )
+    .unwrap();
+
+    let fixed_dt = Duration::from_secs_f32(1.0 / 60.0);
+    for _ in 0..60 {
+        services.run_frame(fixed_dt, false).unwrap();
+    }
+
+    let light = services.scene.find_by_id(light_id).unwrap();
+    let heavy = services.scene.find_by_id(heavy_id).unwrap();
+    let light_y = services
+        .scene
+        .transforms()
+        .local(light)
+        .unwrap()
+        .translation
+        .y;
+    let heavy_y = services
+        .scene
+        .transforms()
+        .local(heavy)
+        .unwrap()
+        .translation
+        .y;
+
+    assert!(
+        light_y > heavy_y,
+        "lighter body should displace enough water to ride higher: light_y={light_y}, heavy_y={heavy_y}"
     );
 }
