@@ -1,6 +1,7 @@
 use engine_core::{EngineConfig, math::Transform, math::Vec3};
 use engine_ecs::{
     ColliderComponentData, ComponentData, FluidVolumeComponentData, RigidbodyComponentData, Scene,
+    WindZoneComponentData,
 };
 use runtime_min::headless_services_from_scene;
 use std::time::Duration;
@@ -289,6 +290,104 @@ fn fluid_volume_applies_buoyancy_and_drag_to_dynamic_body() {
     assert!(
         wet_y > dry_y,
         "fluid volume should slow or reverse falling motion: wet_y={wet_y}, dry_y={dry_y}"
+    );
+}
+
+#[test]
+#[cfg(feature = "physics")]
+fn wind_zone_pushes_dynamic_body_toward_air_velocity() {
+    fn scene_with_optional_wind(include_wind: bool) -> (Scene, engine_core::EntityId) {
+        let mut scene = Scene::default();
+
+        let cube = scene.create_object("WindCube").unwrap();
+        let cube_id = scene.object(cube).unwrap().id;
+        scene
+            .upsert_component(
+                cube,
+                ComponentData::Rigidbody(RigidbodyComponentData {
+                    body_type: "dynamic".to_string(),
+                    mass: 1.0,
+                    use_gravity: false,
+                    linear_damping: 0.0,
+                    angular_damping: 0.05,
+                    lock_position: [false; 3],
+                    lock_rotation: [false; 3],
+                }),
+            )
+            .unwrap();
+        scene
+            .upsert_component(
+                cube,
+                ComponentData::Collider(ColliderComponentData {
+                    shape: "box".to_string(),
+                    size: Vec3::ONE,
+                    is_trigger: false,
+                    mask: !0,
+                    physics_material: "default".to_string(),
+                }),
+            )
+            .unwrap();
+
+        if include_wind {
+            let wind = scene.create_object("WindZone").unwrap();
+            scene
+                .upsert_component(
+                    wind,
+                    ComponentData::WindZone(WindZoneComponentData {
+                        size: Vec3::new(20.0, 20.0, 20.0),
+                        wind_velocity: Vec3::new(8.0, 0.0, 0.0),
+                        strength: 2.0,
+                        linear_drag: 1.0,
+                    }),
+                )
+                .unwrap();
+        }
+
+        (scene, cube_id)
+    }
+
+    let (calm_scene, calm_cube_id) = scene_with_optional_wind(false);
+    let (windy_scene, windy_cube_id) = scene_with_optional_wind(true);
+
+    let mut calm_services = headless_services_from_scene(
+        EngineConfig::default(),
+        std::env::current_dir().unwrap(),
+        &calm_scene,
+    )
+    .unwrap();
+    let mut windy_services = headless_services_from_scene(
+        EngineConfig::default(),
+        std::env::current_dir().unwrap(),
+        &windy_scene,
+    )
+    .unwrap();
+
+    let fixed_dt = Duration::from_secs_f32(1.0 / 60.0);
+    for _ in 0..60 {
+        calm_services.run_frame(fixed_dt, false).unwrap();
+        windy_services.run_frame(fixed_dt, false).unwrap();
+    }
+
+    let calm_cube = calm_services.scene.find_by_id(calm_cube_id).unwrap();
+    let windy_cube = windy_services.scene.find_by_id(windy_cube_id).unwrap();
+    let calm_x = calm_services
+        .scene
+        .transforms()
+        .local(calm_cube)
+        .unwrap()
+        .translation
+        .x;
+    let windy_x = windy_services
+        .scene
+        .transforms()
+        .local(windy_cube)
+        .unwrap()
+        .translation
+        .x;
+
+    assert!(
+        windy_x > calm_x + 0.1,
+        "wind zone should push body along wind velocity: windy_x={windy_x}, calm_x={calm_x}"
     );
 }
 

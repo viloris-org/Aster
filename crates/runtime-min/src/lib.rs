@@ -447,7 +447,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 {
                     let fixed_dt = self.time.fixed_delta_seconds;
                     self.sync_scene_to_physics()?;
-                    self.apply_fluid_volumes(fixed_dt)?;
+                    self.apply_environment_forces(fixed_dt)?;
                     self.physics.fixed_update(fixed_dt);
                     self.report_physics_events();
                     self.sync_physics_to_scene()?;
@@ -1147,32 +1147,36 @@ impl<R: RenderDevice> RuntimeServices<R> {
     }
 
     #[cfg(feature = "physics")]
-    fn apply_fluid_volumes(&mut self, dt: f32) -> EngineResult<()> {
+    fn apply_environment_forces(&mut self, dt: f32) -> EngineResult<()> {
         if dt <= f32::EPSILON {
             return Ok(());
         }
 
-        let mut volumes = Vec::new();
+        let mut fluid_volumes = Vec::new();
+        let mut wind_zones = Vec::new();
         for (entity, object) in self.scene.iter_objects() {
-            let Some(fluid) = object
-                .components
-                .iter()
-                .find_map(|component| match component {
-                    ComponentData::FluidVolume(fluid) => Some(fluid),
-                    _ => None,
-                })
-            else {
-                continue;
-            };
             let transform = self.scene.transforms().world(entity).unwrap_or_default();
-            let half_extents = (fluid.size * transform.scale) * 0.5;
-            let min = transform.translation - half_extents;
-            let max = transform.translation + half_extents;
-            let surface_y = (max.y + fluid.surface_offset).clamp(min.y, max.y);
-            volumes.push((fluid.clone(), min, max, surface_y));
+            for component in &object.components {
+                match component {
+                    ComponentData::FluidVolume(fluid) => {
+                        let half_extents = (fluid.size * transform.scale) * 0.5;
+                        let min = transform.translation - half_extents;
+                        let max = transform.translation + half_extents;
+                        let surface_y = (max.y + fluid.surface_offset).clamp(min.y, max.y);
+                        fluid_volumes.push((fluid.clone(), min, max, surface_y));
+                    }
+                    ComponentData::WindZone(wind) => {
+                        let half_extents = (wind.size * transform.scale) * 0.5;
+                        let min = transform.translation - half_extents;
+                        let max = transform.translation + half_extents;
+                        wind_zones.push((wind.clone(), min, max));
+                    }
+                    _ => {}
+                }
+            }
         }
 
-        if volumes.is_empty() {
+        if fluid_volumes.is_empty() && wind_zones.is_empty() {
             return Ok(());
         }
 
@@ -1216,7 +1220,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 .unwrap_or(1.0)
                 .max(0.001);
 
-            for (fluid, volume_min, volume_max, surface_y) in &volumes {
+            for (fluid, volume_min, volume_max, surface_y) in &fluid_volumes {
                 let overlap_min = Vec3::new(
                     body_min.x.max(volume_min.x),
                     body_min.y.max(volume_min.y),
@@ -1256,6 +1260,28 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 let drag =
                     relative_velocity * (-fluid.linear_drag.max(0.0) * mass) * submerged_fraction;
                 let force = buoyancy + drag;
+                if force.length_squared() > f32::EPSILON {
+                    self.physics
+                        .backend_mut()
+                        .apply_force(binding.body, force)?;
+                }
+            }
+
+            for (wind, zone_min, zone_max) in &wind_zones {
+                if transform.translation.x < zone_min.x
+                    || transform.translation.x > zone_max.x
+                    || transform.translation.y < zone_min.y
+                    || transform.translation.y > zone_max.y
+                    || transform.translation.z < zone_min.z
+                    || transform.translation.z > zone_max.z
+                {
+                    continue;
+                }
+
+                let mass = rigidbody.mass.max(0.001);
+                let relative_velocity = velocity - wind.wind_velocity;
+                let force = relative_velocity
+                    * (-wind.linear_drag.max(0.0) * wind.strength.max(0.0) * mass);
                 if force.length_squared() > f32::EPSILON {
                     self.physics
                         .backend_mut()

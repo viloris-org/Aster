@@ -675,6 +675,22 @@ impl ProjectContext {
                 "size": [c.size.x, c.size.y, c.size.z],
                 "is_trigger": c.is_trigger,
             }),
+            ComponentData::FluidVolume(f) => serde_json::json!({
+                "type": "FluidVolume",
+                "size": [f.size.x, f.size.y, f.size.z],
+                "density": f.density,
+                "buoyancy_scale": f.buoyancy_scale,
+                "linear_drag": f.linear_drag,
+                "flow_velocity": [f.flow_velocity.x, f.flow_velocity.y, f.flow_velocity.z],
+                "surface_offset": f.surface_offset,
+            }),
+            ComponentData::WindZone(w) => serde_json::json!({
+                "type": "WindZone",
+                "size": [w.size.x, w.size.y, w.size.z],
+                "wind_velocity": [w.wind_velocity.x, w.wind_velocity.y, w.wind_velocity.z],
+                "strength": w.strength,
+                "linear_drag": w.linear_drag,
+            }),
             ComponentData::Script(s) => serde_json::json!({
                 "type": "Script",
                 "backend": s.backend,

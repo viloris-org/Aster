@@ -195,6 +195,18 @@ impl ComponentSchemaRegistry {
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
+            type_id: "WindZone".to_string(),
+            display_name: "Wind Zone".to_string(),
+            version: 1,
+            fields: vec![
+                field("size", ComponentFieldKind::Vec3, "20,10,20"),
+                field("wind_velocity", ComponentFieldKind::Vec3, "6,0,0"),
+                field("strength", ComponentFieldKind::F32, "1"),
+                field("linear_drag", ComponentFieldKind::F32, "0.35"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
             type_id: "AudioSource".to_string(),
             display_name: "Audio Source".to_string(),
             version: 3,

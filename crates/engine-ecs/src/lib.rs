@@ -26,7 +26,7 @@ pub use scene::{
     ObjectIdAllocator, Occluder2DComponentData, ParticleEmitterComponentData,
     RigidbodyComponentData, Scene, SceneFile, SceneMode, ScriptComponentProxy,
     SkinnedMeshRendererComponentData, SkyboxComponentData, Sprite2DComponentData,
-    TileMap2DComponentData,
+    TileMap2DComponentData, WindZoneComponentData,
 };
 pub use schema::{
     BuildConfiguration, BuildRenderSettings, ComponentFieldKind, ComponentFieldSchema,

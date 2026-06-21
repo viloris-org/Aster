@@ -355,6 +355,40 @@ impl Default for FluidVolumeComponentData {
     }
 }
 
+/// Serializable wind zone component.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct WindZoneComponentData {
+    /// Axis-aligned zone size in local space.
+    pub size: Vec3,
+    /// Target air velocity in world units per second.
+    pub wind_velocity: Vec3,
+    /// Scales the wind response applied to dynamic rigidbodies.
+    #[serde(default = "default_wind_strength")]
+    pub strength: f32,
+    /// Drag applied against velocity relative to the moving air mass.
+    #[serde(default = "default_wind_linear_drag")]
+    pub linear_drag: f32,
+}
+
+fn default_wind_strength() -> f32 {
+    1.0
+}
+
+fn default_wind_linear_drag() -> f32 {
+    0.35
+}
+
+impl Default for WindZoneComponentData {
+    fn default() -> Self {
+        Self {
+            size: Vec3::new(20.0, 10.0, 20.0),
+            wind_velocity: Vec3::new(6.0, 0.0, 0.0),
+            strength: default_wind_strength(),
+            linear_drag: default_wind_linear_drag(),
+        }
+    }
+}
+
 /// Serializable audio source component.
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct AudioSourceComponentData {
@@ -1073,6 +1107,8 @@ pub enum ComponentData {
     Collider(ColliderComponentData),
     /// Fluid volume component.
     FluidVolume(FluidVolumeComponentData),
+    /// Wind zone component.
+    WindZone(WindZoneComponentData),
     /// Audio source component.
     AudioSource(AudioSourceComponentData),
     /// Audio listener component.
@@ -1123,6 +1159,7 @@ impl ComponentData {
             Self::Rigidbody(_) => "Rigidbody",
             Self::Collider(_) => "Collider",
             Self::FluidVolume(_) => "FluidVolume",
+            Self::WindZone(_) => "WindZone",
             Self::AudioSource(_) => "AudioSource",
             Self::AudioListener(_) => "AudioListener",
             Self::AcousticMaterial(_) => "AcousticMaterial",

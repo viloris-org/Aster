@@ -2454,6 +2454,8 @@ export default function EditorPage({
                   <button className={gameClass.createButton} onClick={() => createPresetObject('Audio Source', 'AudioSource')}><IconPlus /> Audio</button>
                   <button className={gameClass.createButton} onClick={() => createPresetObject('Rigid Body', 'Rigidbody')}><IconPlus /> Rigidbody</button>
                   <button className={gameClass.createButton} onClick={() => createPresetObject('Collider', 'Collider')}><IconPlus /> Collider</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Water Volume', 'FluidVolume')}><IconPlus /> Water</button>
+                  <button className={gameClass.createButton} onClick={() => createPresetObject('Wind Zone', 'WindZone')}><IconPlus /> Wind</button>
                   <button className={gameClass.createButton} onClick={createBehaviorObject}><IconCode /> Behavior</button>
                 </div>
                 <div className={gameClass.previewCanvas} onClick={handleViewportClick}>
@@ -2564,7 +2566,7 @@ export default function EditorPage({
                       ))}
                       <div className={inspectorClass.addRow}>
                         <select className={inspectorClass.select} value={addComponentType} onChange={event => setAddComponentType(event.target.value)}>
-                          {['Camera', 'Light', 'MeshRenderer', 'Rigidbody', 'Collider', 'AudioSource', 'AudioListener', 'Script'].map(type => (
+                          {['Camera', 'Light', 'MeshRenderer', 'Rigidbody', 'Collider', 'FluidVolume', 'WindZone', 'AudioSource', 'AudioListener', 'Script'].map(type => (
                             <option key={type} value={type}>{type}</option>
                           ))}
                         </select>
