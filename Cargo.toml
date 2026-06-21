@@ -28,10 +28,10 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MPL-2.0"
 repository = "https://github.com/viloris-org/Aster"
-rust-version = "1.78"
+rust-version = "1.85"
 
 [workspace.dependencies]
 bitflags = "2.6"

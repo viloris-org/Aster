@@ -61,8 +61,11 @@ fn forward_shader_selects_cascades_with_linear_camera_depth() {
     assert!(FORWARD_SHADER.contains(
         "dot(input.world_position - camera.camera_position.xyz, camera.camera_forward.xyz)"
     ));
-    assert!(!FORWARD_SHADER
-        .contains("let view_pos = camera.view_projection * vec4<f32>(input.world_position, 1.0)"));
+    assert!(
+        !FORWARD_SHADER.contains(
+            "let view_pos = camera.view_projection * vec4<f32>(input.world_position, 1.0)"
+        )
+    );
     assert!(FORWARD_SHADER.contains("light.spot_angles.z > 0.5"));
 }
 
@@ -85,10 +88,9 @@ fn csm_uniform_exposes_shadow_sampling_params() {
 
 #[test]
 fn csm_bounds_snap_to_shadow_texel_grid() {
-    let (min_x, max_x, min_y, max_y) =
-        snap_csm_bounds_to_texel_grid(-3.217, 8.911, -2.603, 4.119);
-    let texel_size = ((8.911_f32 + 3.217).max(4.119 + 2.603) / CSM_SHADOW_RESOLUTION as f32)
-        .max(f32::EPSILON);
+    let (min_x, max_x, min_y, max_y) = snap_csm_bounds_to_texel_grid(-3.217, 8.911, -2.603, 4.119);
+    let texel_size =
+        ((8.911_f32 + 3.217).max(4.119 + 2.603) / CSM_SHADOW_RESOLUTION as f32).max(f32::EPSILON);
 
     for value in [min_x, max_x, min_y, max_y] {
         let snapped = value / texel_size;
@@ -502,12 +504,16 @@ fn selects_directional_budget_then_highest_scored_local_lights() {
     assert_eq!(selected.len(), MAX_FORWARD_LIGHTS);
     assert_eq!(selected[0].object, engine_core::EntityId::from_u128(3));
     assert_eq!(selected[1].object, engine_core::EntityId::from_u128(4));
-    assert!(selected
-        .iter()
-        .all(|light| light.object != engine_core::EntityId::from_u128(5)));
-    assert!(selected
-        .iter()
-        .any(|light| light.object == engine_core::EntityId::from_u128(10)));
+    assert!(
+        selected
+            .iter()
+            .all(|light| light.object != engine_core::EntityId::from_u128(5))
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|light| light.object == engine_core::EntityId::from_u128(10))
+    );
 
     let uniform = lighting_uniform_from_world(&world);
     assert_eq!(uniform.lights[0].spot_angles[2], 1.0);

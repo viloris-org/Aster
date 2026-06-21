@@ -200,7 +200,7 @@ fn topological_sort(
 
     let mut queue: Vec<PassId> = in_degree
         .iter()
-        .filter(|(_, &d)| d == 0)
+        .filter(|&(_, &d)| d == 0)
         .map(|(&id, _)| id)
         .collect();
     queue.sort_by_key(|id| id.0);

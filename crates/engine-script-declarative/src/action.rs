@@ -479,7 +479,7 @@ mod action_de {
                             "sequence",
                             "idle",
                         ],
-                    ))
+                    ));
                 }
             };
             Ok(result)
@@ -915,10 +915,10 @@ impl ActionExpr {
 
         // Try parsing as entity ID "slot:generation"
         if let Some((slot_str, gen_str)) = name.split_once(':') {
-            if let (Ok(slot), Ok(gen)) = (slot_str.parse::<u32>(), gen_str.parse::<u32>()) {
+            if let (Ok(slot), Ok(r#gen)) = (slot_str.parse::<u32>(), gen_str.parse::<u32>()) {
                 use engine_core::{Generation, Handle};
                 let generation = Generation::FIRST; // We'd need to parse properly
-                if gen == generation.get() {
+                if r#gen == generation.get() {
                     let handle = Handle::new(slot, generation);
                     return Some(Entity::from_handle(handle));
                 }

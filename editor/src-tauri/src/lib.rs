@@ -15,7 +15,7 @@ use std::{
 };
 
 use base64::Engine as _;
-use engine_ai::{AgentPlan, AgentSession};
+use engine_ai::{AgentOutcome, AgentPlan, AgentSession};
 use engine_core::{EngineConfig, EngineError, EngineResult, RuntimeProfile};
 use engine_editor::agent::{PermissionPolicy, SandboxPolicy, TraceEntry};
 use engine_editor::{
@@ -26,14 +26,14 @@ use engine_editor::{EditorShell, HubState, ProjectDeletionDecision, ProjectDelet
 use engine_i18n::{Locale, Translations};
 use engine_render::ImageFormat;
 use engine_render_wgpu::{WgpuOffscreenConfig, WgpuRenderDevice};
-use runtime_min::{headless_services_from_scene, RuntimeServices};
+use runtime_min::{RuntimeServices, headless_services_from_scene};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{
+    Emitter, Manager, State,
     image::Image,
     utils::config::Color,
     webview::{PageLoadEvent, WebviewWindowBuilder},
-    Emitter, Manager, State,
 };
 
 mod game_window;
@@ -41,14 +41,99 @@ mod quest;
 mod scene_window;
 
 use quest::{
-    transaction_groups_from_changed_files, ChangedFile, QuestExplorationAttempt, QuestMode,
-    QuestModelConfig, QuestProject, QuestReview, QuestReviewAction, QuestReviewFinding,
-    QuestReviewMetrics, QuestStatus, QuestStore, ValidationResult,
+    ChangedFile, QuestExplorationAttempt, QuestMode, QuestModelConfig, QuestProject, QuestReview,
+    QuestReviewAction, QuestReviewFinding, QuestReviewMetrics, QuestStatus, QuestStore,
+    ValidationResult, transaction_groups_from_changed_files,
 };
 
 const APP_WINDOW_ICON: Image<'static> = tauri::include_image!("./icons/128x128.png");
 
 const WINDOW_BACKGROUND: &str = "#181818";
+const SOLO_REPAIR_LIMIT: usize = 1;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QuestApplyDecision {
+    AutoApply,
+    NeedsReview,
+    Blocked,
+}
+
+struct QuestApplyPolicy;
+
+impl QuestApplyPolicy {
+    fn classify(review: &QuestReview, autonomy: &quest::QuestAutonomyPolicy) -> QuestApplyDecision {
+        let has_failed_validation = review
+            .validations
+            .iter()
+            .any(|validation| validation.status != "passed" && validation.status != "skipped");
+        if has_failed_validation || !review.unresolved_issues.is_empty() {
+            return QuestApplyDecision::Blocked;
+        }
+        if review.risk == "low"
+            && !review.changed_files.is_empty()
+            && !autonomy.active_project_apply_requires_approval
+        {
+            return QuestApplyDecision::AutoApply;
+        }
+        QuestApplyDecision::NeedsReview
+    }
+
+    fn as_str(decision: QuestApplyDecision) -> &'static str {
+        match decision {
+            QuestApplyDecision::AutoApply => "auto_apply",
+            QuestApplyDecision::NeedsReview => "needs_review",
+            QuestApplyDecision::Blocked => "blocked",
+        }
+    }
+}
+
+struct AgentCommandPolicy;
+
+impl AgentCommandPolicy {
+    fn validation_registry_summary() -> Vec<Value> {
+        quest_validation_registry()
+            .into_iter()
+            .map(|command| {
+                serde_json::json!({
+                    "id": command.id,
+                    "program": command.program,
+                    "args": command.args,
+                    "destructive": false,
+                    "sandbox": "workspace",
+                    "approval": "allowlisted_registry",
+                })
+            })
+            .collect()
+    }
+}
+
+struct SoloQuestRunner;
+
+impl SoloQuestRunner {
+    const REPAIR_LIMIT: usize = SOLO_REPAIR_LIMIT;
+
+    fn initial_prompt(spec: &str, knowledge_context: &str) -> String {
+        format!(
+            "Execute this Quest inside the isolated workspace only. \
+             Produce concrete Aster editor operations. Do not request shell commands. \
+             When done, emit a complete operation with a concise summary.\n\n{}{}",
+            spec, knowledge_context
+        )
+    }
+
+    fn repair_prompt(spec: &str, validations: &[ValidationResult], attempt: usize) -> String {
+        let failures = validation_failure_summaries(validations).join("\n\n");
+        format!(
+            "Continue this Solo Quest inside the isolated workspace only. \
+             Repair the validation failures below without broad unrelated changes. \
+             Do not request shell commands. Emit a complete operation when finished.\n\n\
+             Repair attempt: {attempt}/{}\n\n\
+             Quest spec:\n{spec}\n\n\
+             Validation failures:\n{failures}",
+            Self::REPAIR_LIMIT
+        )
+    }
+}
 
 fn normalize_relative_path(path: &str) -> EngineResult<PathBuf> {
     let mut normalized = PathBuf::new();
@@ -636,6 +721,64 @@ fn quest_review_actions_for_result(
         ));
     }
     actions
+}
+
+fn validations_failed(validations: &[ValidationResult]) -> bool {
+    validations
+        .iter()
+        .any(|validation| validation.status != "passed" && validation.status != "skipped")
+}
+
+fn validation_failure_summaries(validations: &[ValidationResult]) -> Vec<String> {
+    validations
+        .iter()
+        .filter(|validation| validation.status == "failed")
+        .map(|validation| format!("{}: {}", validation.name, validation.summary))
+        .collect()
+}
+
+fn append_validation_events(
+    quest_store: &QuestStore,
+    id: &str,
+    validations: &[ValidationResult],
+    repair_attempt: Option<usize>,
+) -> EngineResult<()> {
+    for validation in validations {
+        let summary = match repair_attempt {
+            Some(0) => format!("baseline {}: {}", validation.name, validation.status),
+            Some(attempt) => format!(
+                "repair attempt {attempt} {}: {}",
+                validation.name, validation.status
+            ),
+            None => format!("{}: {}", validation.name, validation.status),
+        };
+        quest_store.append_timeline_event(
+            id,
+            "validation",
+            &summary,
+            serde_json::json!({
+                "repair_attempt": repair_attempt.filter(|attempt| *attempt > 0),
+                "attempt_id": if repair_attempt == Some(0) { Some("baseline") } else { None },
+                "name": validation.name,
+                "status": validation.status,
+                "summary": validation.summary,
+                "policy_registry": AgentCommandPolicy::validation_registry_summary(),
+            }),
+        )?;
+    }
+    Ok(())
+}
+
+fn merge_agent_outcome(outcome: &mut AgentOutcome, repair_outcome: AgentOutcome) {
+    outcome.operations_performed += repair_outcome.operations_performed;
+    outcome
+        .console_entries
+        .extend(repair_outcome.console_entries);
+    outcome.trace_entries = repair_outcome.trace_entries;
+    outcome.completed = repair_outcome.completed;
+    if repair_outcome.summary.is_some() {
+        outcome.summary = repair_outcome.summary;
+    }
 }
 
 fn selected_review_paths_from_params(
@@ -1594,6 +1737,16 @@ impl EditorHost {
                 "workspace": workspace_root,
             }),
         )?;
+        self.quest_store.append_timeline_event(
+            id,
+            "command_policy",
+            "Registered Solo sandbox command policy",
+            serde_json::json!({
+                "sandbox_commands": AgentCommandPolicy::validation_registry_summary(),
+                "outside_sandbox_commands": "approval_required",
+                "destructive_commands": "denied_by_default",
+            }),
+        )?;
         detail = self.quest_store.record_checkpoint(
             id,
             "isolated-workspace",
@@ -1616,7 +1769,7 @@ impl EditorHost {
 
         let before = collect_workspace_snapshot(&workspace_root)?;
         let baseline_before = collect_workspace_snapshot(&baseline_workspace_root)?;
-        let mut context = engine_editor::ProjectContext::open(&workspace_root)?;
+        let context = engine_editor::ProjectContext::open(&workspace_root)?;
         let knowledge_context = if detail.attached_knowledge.is_empty() {
             String::new()
         } else {
@@ -1628,12 +1781,7 @@ impl EditorHost {
                 .join("\n");
             format!("\n\nApproved project Knowledge attached to this Quest:\n{entries}")
         };
-        let prompt = format!(
-            "Execute this Quest inside the isolated workspace only. \
-             Produce concrete Aster editor operations. Do not request shell commands. \
-             When done, emit a complete operation with a concise summary.\n\n{}{}",
-            detail.spec, knowledge_context
-        );
+        let prompt = SoloQuestRunner::initial_prompt(&detail.spec, &knowledge_context);
         let mut session = AgentSession::new(context)?;
         let model = self.create_quest_model(&detail.record.model_config)?;
         let first_action_started_at = Instant::now();
@@ -1662,10 +1810,9 @@ impl EditorHost {
         )?;
 
         let apply_started_at = Instant::now();
-        let outcome = session.apply_plan(&plan)?;
-        let tool_call_latency_ms = plan_latency_ms + elapsed_millis(apply_started_at);
-        context = session.context;
-        save_project_context_scene(&context)?;
+        let mut outcome = session.apply_plan(&plan)?;
+        let mut tool_call_latency_ms = plan_latency_ms + elapsed_millis(apply_started_at);
+        save_project_context_scene(&session.context)?;
         self.quest_store.append_timeline_event(
             id,
             "execution",
@@ -1681,6 +1828,78 @@ impl EditorHost {
                 })).collect::<Vec<_>>(),
             }),
         )?;
+
+        self.quest_store.transition(id, QuestStatus::Validating)?;
+        let validation_started_at = Instant::now();
+        let mut validations = validate_quest_workspace(&workspace_root);
+        append_validation_events(&self.quest_store, id, &validations, None)?;
+        let mut repair_attempts = 0usize;
+        while validations_failed(&validations) && repair_attempts < SoloQuestRunner::REPAIR_LIMIT {
+            repair_attempts += 1;
+            self.quest_store.transition(id, QuestStatus::Repairing)?;
+            let repair_prompt =
+                SoloQuestRunner::repair_prompt(&detail.spec, &validations, repair_attempts);
+            self.quest_store.append_timeline_event(
+                id,
+                "repair",
+                &format!("Solo repair attempt {repair_attempts} started"),
+                serde_json::json!({
+                    "attempt": repair_attempts,
+                    "failed_validations": validation_failure_summaries(&validations),
+                }),
+            )?;
+            let repair_started_at = Instant::now();
+            let repair_plan = session.plan_with_history_streaming(
+                model.as_ref(),
+                &repair_prompt,
+                &[],
+                PermissionPolicy::worktree_write(),
+                parse_thinking_effort(&detail.record.model_config.thinking_effort),
+                &mut |_| {},
+            )?;
+            let repair_plan_latency_ms = elapsed_millis(repair_started_at);
+            let planned_repair: Vec<String> = repair_plan
+                .operations
+                .iter()
+                .map(|operation| operation.preview.clone())
+                .collect();
+            self.quest_store.append_timeline_event(
+                id,
+                "repair_plan",
+                &format!("Model produced Solo repair plan {repair_attempts}"),
+                serde_json::json!({
+                    "attempt": repair_attempts,
+                    "operations": planned_repair,
+                    "requires_write": repair_plan.requires_write,
+                }),
+            )?;
+            let repair_apply_started_at = Instant::now();
+            let repair_outcome = session.apply_plan(&repair_plan)?;
+            tool_call_latency_ms +=
+                repair_plan_latency_ms + elapsed_millis(repair_apply_started_at);
+            merge_agent_outcome(&mut outcome, repair_outcome);
+            save_project_context_scene(&session.context)?;
+            self.quest_store.append_timeline_event(
+                id,
+                "repair",
+                &format!("Solo repair attempt {repair_attempts} applied"),
+                serde_json::json!({
+                    "attempt": repair_attempts,
+                    "operations_performed": outcome.operations_performed,
+                    "trace": outcome.trace_entries.iter().map(|entry| serde_json::json!({
+                        "tool": entry.tool,
+                        "result": entry.result,
+                        "recovery_hint": entry.recovery_hint,
+                    })).collect::<Vec<_>>(),
+                }),
+            )?;
+            self.quest_store.transition(id, QuestStatus::Validating)?;
+            validations = validate_quest_workspace(&workspace_root);
+            append_validation_events(&self.quest_store, id, &validations, Some(repair_attempts))?;
+        }
+        let baseline_validations = validate_quest_workspace(&baseline_workspace_root);
+        append_validation_events(&self.quest_store, id, &baseline_validations, Some(0))?;
+        let validator_turnaround_ms = elapsed_millis(validation_started_at);
 
         let after = collect_workspace_snapshot(&workspace_root)?;
         let changed_files = diff_workspace_snapshots(&before, &after);
@@ -1699,53 +1918,6 @@ impl EditorHost {
                 }),
             )?;
         }
-
-        let validation_started_at = Instant::now();
-        let validations = validate_quest_workspace(&workspace_root);
-        let baseline_validations = validate_quest_workspace(&baseline_workspace_root);
-        let validator_turnaround_ms = elapsed_millis(validation_started_at);
-        for validation in &validations {
-            self.quest_store.append_timeline_event(
-                id,
-                "validation",
-                &format!("{}: {}", validation.name, validation.status),
-                serde_json::json!({
-                    "name": validation.name,
-                    "status": validation.status,
-                    "summary": validation.summary,
-                    "policy_registry": quest_validation_registry()
-                        .into_iter()
-                        .map(|command| serde_json::json!({
-                            "id": command.id,
-                            "program": command.program,
-                            "args": command.args,
-                        }))
-                        .collect::<Vec<_>>(),
-                }),
-            )?;
-        }
-        for validation in &baseline_validations {
-            self.quest_store.append_timeline_event(
-                id,
-                "validation",
-                &format!("baseline {}: {}", validation.name, validation.status),
-                serde_json::json!({
-                    "attempt_id": "baseline",
-                    "name": validation.name,
-                    "status": validation.status,
-                    "summary": validation.summary,
-                    "policy_registry": quest_validation_registry()
-                        .into_iter()
-                        .map(|command| serde_json::json!({
-                            "id": command.id,
-                            "program": command.program,
-                            "args": command.args,
-                        }))
-                        .collect::<Vec<_>>(),
-                }),
-            )?;
-        }
-
         let has_failed_validation = validations
             .iter()
             .any(|validation| validation.status != "passed" && validation.status != "skipped");
@@ -1880,7 +2052,7 @@ impl EditorHost {
             unresolved_issues,
             next_actions,
             project_fingerprint: Some(project_fingerprint(&project_root)?),
-            metrics: QuestReviewMetrics {
+                metrics: QuestReviewMetrics {
                 intent_to_first_action_ms: Some(elapsed_millis(quest_started_at)),
                 tool_call_latency_ms: Some(tool_call_latency_ms),
                 validator_turnaround_ms: Some(validator_turnaround_ms),
@@ -1894,6 +2066,10 @@ impl EditorHost {
                 notes: vec![
                     "Metrics are captured from the isolated Quest execution path.".to_owned(),
                     "Baseline attempt is preserved for comparison against the selected implementation.".to_owned(),
+                    format!(
+                        "Solo repair attempts used: {repair_attempts}/{}.",
+                        SoloQuestRunner::REPAIR_LIMIT
+                    ),
                 ],
             },
             risk: if has_failed_validation {
@@ -1903,7 +2079,19 @@ impl EditorHost {
             }
             .to_owned(),
         };
+        let apply_decision = QuestApplyPolicy::classify(&review, &detail.record.autonomy);
         let detail = self.quest_store.set_review(id, status, review)?;
+        self.quest_store.append_timeline_event(
+            id,
+            "apply_policy",
+            "Quest apply policy classified Solo result",
+            serde_json::json!({
+                "decision": QuestApplyPolicy::as_str(apply_decision),
+                "risk": detail.record.review.as_ref().map(|review| review.risk.as_str()),
+                "active_project_apply_requires_approval": detail.record.autonomy.active_project_apply_requires_approval,
+                "changed_files": detail.record.review.as_ref().map(|review| review.changed_files.len()).unwrap_or_default(),
+            }),
+        )?;
         self.quest_store.append_timeline_event(
             id,
             if status == QuestStatus::ReadyForReview {
@@ -1918,6 +2106,10 @@ impl EditorHost {
             },
             serde_json::json!({ "workspace": workspace_root }),
         )?;
+        if apply_decision == QuestApplyDecision::AutoApply && status == QuestStatus::ReadyForReview
+        {
+            return self.quest_apply(&serde_json::json!({ "id": id }));
+        }
         serde_json::to_value(detail).map_err(|error| EngineError::other(error.to_string()))
     }
 
@@ -3759,8 +3951,8 @@ fn on_update(entity, dt) {
             .ok_or_else(|| EngineError::other("failed to create RGBA image"))?;
         let mut png_bytes = Vec::new();
         {
-            use image::codecs::png::PngEncoder;
             use image::ImageEncoder;
+            use image::codecs::png::PngEncoder;
             let encoder = PngEncoder::new(&mut png_bytes);
             encoder
                 .write_image(
@@ -5210,7 +5402,7 @@ fn on_update(entity, dt) {
             _ => {
                 return Err(EngineError::config(format!(
                     "unknown component type: {comp_type}"
-                )))
+                )));
             }
         };
 
@@ -5868,7 +6060,9 @@ fn write_launcher(package_root: &Path, runtime_name: &str) -> EngineResult<()> {
     #[cfg(target_os = "windows")]
     let launcher = format!("@echo off\r\n\"%~dp0bin\\{runtime_name}\" \"%~dp0project\"\r\n");
     #[cfg(not(target_os = "windows"))]
-    let launcher = format!("#!/usr/bin/env sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/bin/{runtime_name}\" \"$DIR/project\"\n");
+    let launcher = format!(
+        "#!/usr/bin/env sh\nDIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$DIR/bin/{runtime_name}\" \"$DIR/project\"\n"
+    );
 
     std::fs::write(&launcher_path, launcher).map_err(|source| EngineError::Filesystem {
         path: launcher_path.clone(),
@@ -7485,7 +7679,8 @@ fn apply_pre_gtk_desktop_environment() {
     if has_wayland_display && !backend_already_selected {
         // Ask GTK/WebKit/Tao to try native Wayland first, while keeping X11 as a
         // fallback for systems where the Wayland backend is unavailable at runtime.
-        std::env::set_var("GDK_BACKEND", "wayland,x11");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("GDK_BACKEND", "wayland,x11") };
     }
 }
 
@@ -7508,7 +7703,7 @@ pub fn run() {
     // We intentionally leak it since run() never returns.
     std::mem::forget(_guard);
 
-    use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter, Registry};
+    use tracing_subscriber::{EnvFilter, Registry, fmt, layer::SubscriberExt};
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let fmt_layer = fmt::layer()
         .with_target(true)
@@ -7578,13 +7773,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        asset_meta_path_for_source, copilot_execution_summary, extract_codex_account_id,
-        model_detection_config, normalize_relative_path, parse_generated_quest_tools,
-        project_fingerprint, quest_review_actions_for_result, resolve_existing_relative_path,
-        resolve_writable_relative_path, should_continue_copilot,
-        transaction_groups_from_changed_files, validate_quest_workspace, ChangedFile,
-        DesktopEnvironment, EditorHost, QuestProject, QuestReview, QuestReviewMetrics, QuestStatus,
-        ValidationResult,
+        ChangedFile, DesktopEnvironment, EditorHost, QuestApplyDecision, QuestApplyPolicy,
+        QuestProject, QuestReview, QuestReviewMetrics, QuestStatus, SoloQuestRunner,
+        ValidationResult, asset_meta_path_for_source, copilot_execution_summary,
+        extract_codex_account_id, model_detection_config, normalize_relative_path,
+        parse_generated_quest_tools, project_fingerprint, quest, quest_review_actions_for_result,
+        resolve_existing_relative_path, resolve_writable_relative_path, should_continue_copilot,
+        transaction_groups_from_changed_files, validate_quest_workspace, validations_failed,
     };
     use base64::Engine as _;
     use engine_editor::{CopilotProvider, FileEditorStore};
@@ -7714,9 +7909,11 @@ mod tests {
         let issues = vec!["Quest execution completed without producing file changes.".to_owned()];
         let actions = quest_review_actions_for_result(&issues, false, true);
 
-        assert!(actions
-            .iter()
-            .any(|action| action.kind == "open_review_finding"));
+        assert!(
+            actions
+                .iter()
+                .any(|action| action.kind == "open_review_finding")
+        );
         assert!(actions.iter().any(|action| action.kind == "revise"));
         assert!(actions.iter().any(|action| action.kind == "archive"));
     }
@@ -7991,12 +8188,16 @@ mod tests {
 
         assert_eq!(prepared.knowledge_entries_used, 1);
         let user_message = prepared.request.messages.last().unwrap();
-        assert!(user_message
-            .content
-            .contains("[Approved Project Knowledge]"));
-        assert!(user_message
-            .content
-            .contains("Use the render graph for frame orchestration."));
+        assert!(
+            user_message
+                .content
+                .contains("[Approved Project Knowledge]")
+        );
+        assert!(
+            user_message
+                .content
+                .contains("Use the render graph for frame orchestration.")
+        );
     }
 
     #[test]
@@ -8123,6 +8324,70 @@ mod tests {
     }
 
     #[test]
+    fn quest_apply_policy_classifies_solo_results() {
+        let changed_files = vec![ChangedFile {
+            path: "src/main.rs".to_owned(),
+            additions: 1,
+            deletions: 0,
+            status: "modified".to_owned(),
+            diff: "diff".to_owned(),
+        }];
+        let mut review = QuestReview {
+            summary: "Solo result".to_owned(),
+            transaction_groups: transaction_groups_from_changed_files(&changed_files),
+            changed_files,
+            exploration_attempts: Vec::new(),
+            findings: Vec::new(),
+            validations: vec![ValidationResult::new("Project load", "passed", "ok")],
+            unresolved_issues: Vec::new(),
+            next_actions: Vec::new(),
+            project_fingerprint: None,
+            metrics: QuestReviewMetrics::default(),
+            risk: "low".to_owned(),
+        };
+        let mut autonomy = quest::QuestAutonomyPolicy {
+            active_project_apply_requires_approval: false,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            QuestApplyPolicy::classify(&review, &autonomy),
+            QuestApplyDecision::AutoApply
+        );
+
+        autonomy.active_project_apply_requires_approval = true;
+        assert_eq!(
+            QuestApplyPolicy::classify(&review, &autonomy),
+            QuestApplyDecision::NeedsReview
+        );
+
+        review.validations.push(ValidationResult::new(
+            "cargo check",
+            "failed",
+            "compile error",
+        ));
+        assert_eq!(
+            QuestApplyPolicy::classify(&review, &autonomy),
+            QuestApplyDecision::Blocked
+        );
+    }
+
+    #[test]
+    fn solo_repair_prompt_carries_validation_failures_and_limit() {
+        let validations = vec![
+            ValidationResult::new("Project load", "passed", "ok"),
+            ValidationResult::new("cargo check", "failed", "missing semicolon"),
+        ];
+
+        let prompt = SoloQuestRunner::repair_prompt("# Spec", &validations, 1);
+
+        assert!(validations_failed(&validations));
+        assert!(prompt.contains("Repair attempt: 1/1"));
+        assert!(prompt.contains("cargo check: missing semicolon"));
+        assert!(prompt.contains("isolated workspace only"));
+    }
+
+    #[test]
     fn quest_apply_copies_reviewed_workspace_files_and_rollback_restores_active_project() {
         let temp = tempfile::tempdir().unwrap();
         let project_root = temp.path().join("project");
@@ -8177,11 +8442,13 @@ mod tests {
             fs::read_to_string(project_root.join("src/main.rs")).unwrap(),
             "fn main() {\n    old();\n}\n"
         );
-        assert!(rolled_back["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|decision| decision["kind"] == "rollback"));
+        assert!(
+            rolled_back["decisions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|decision| decision["kind"] == "rollback")
+        );
     }
 
     #[test]
@@ -8265,12 +8532,14 @@ mod tests {
             fs::read_to_string(project_root.join("src/b.rs")).unwrap(),
             "old b\n"
         );
-        assert!(applied["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|decision| decision["kind"] == "partial_apply"
-                && decision["files"].as_array().unwrap().len() == 1));
+        assert!(
+            applied["decisions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|decision| decision["kind"] == "partial_apply"
+                    && decision["files"].as_array().unwrap().len() == 1)
+        );
         let remaining_files = applied["review"]["changed_files"].as_array().unwrap();
         assert_eq!(remaining_files.len(), 1);
         assert_eq!(remaining_files[0]["path"], "src/b.rs");
@@ -8333,12 +8602,14 @@ mod tests {
             fs::read_to_string(project_root.join("src/b.rs")).unwrap(),
             "old b\n"
         );
-        assert!(discarded["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|decision| decision["kind"] == "discard"
-                && decision["files"].as_array().unwrap().len() == 1));
+        assert!(
+            discarded["decisions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|decision| decision["kind"] == "discard"
+                    && decision["files"].as_array().unwrap().len() == 1)
+        );
         let remaining_files = discarded["review"]["changed_files"].as_array().unwrap();
         assert_eq!(remaining_files.len(), 1);
         assert_eq!(remaining_files[0]["path"], "src/b.rs");
@@ -8403,12 +8674,14 @@ mod tests {
             fs::read_to_string(project_root.join("src/a.rs")).unwrap(),
             "old a\n"
         );
-        assert!(discarded["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|decision| decision["kind"] == "discard"
-                && decision["files"].as_array().unwrap().len() == 1));
+        assert!(
+            discarded["decisions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|decision| decision["kind"] == "discard"
+                    && decision["files"].as_array().unwrap().len() == 1)
+        );
         let knowledge = host.quest_store.list_knowledge().unwrap();
         assert!(knowledge.iter().any(|entry| {
             entry.status == "pending"
@@ -8449,10 +8722,12 @@ mod tests {
         assert!(export_root.join("intent.md").is_file());
         assert!(export_root.join("spec.md").is_file());
         assert!(export_root.join("events.jsonl").is_file());
-        assert!(exported["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|decision| decision["kind"] == "export"));
+        assert!(
+            exported["decisions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|decision| decision["kind"] == "export")
+        );
     }
 }

@@ -15,24 +15,28 @@ mod physics_tests {
     #[test]
     fn physics_world_null_backend_raycast_returns_none() {
         let world = PhysicsWorld::null();
-        assert!(world
-            .backend()
-            .raycast(
-                Vec3::ZERO,
-                Vec3::new(0.0, 0.0, 1.0),
-                100.0,
-                QueryFilter::default()
-            )
-            .is_none());
+        assert!(
+            world
+                .backend()
+                .raycast(
+                    Vec3::ZERO,
+                    Vec3::new(0.0, 0.0, 1.0),
+                    100.0,
+                    QueryFilter::default()
+                )
+                .is_none()
+        );
     }
 
     #[test]
     fn physics_world_null_backend_overlap_returns_empty() {
         let world = PhysicsWorld::null();
-        assert!(world
-            .backend()
-            .overlap_sphere(Vec3::ZERO, 1.0, QueryFilter::default())
-            .is_empty());
+        assert!(
+            world
+                .backend()
+                .overlap_sphere(Vec3::ZERO, 1.0, QueryFilter::default())
+                .is_empty()
+        );
     }
 
     #[test]
@@ -125,9 +129,9 @@ mod audio_tests {
 #[cfg(feature = "editor")]
 mod editor_tests {
     use engine_editor::{
-        register_core_commands, register_core_panels, CommandRegistry, ConsoleEntry, ConsoleFilter,
-        ConsoleLevel, ConsoleService, ConsoleSource, EditorPreferences, EditorShell, HubPage,
-        HubState, PanelRegistry, Selection, SelectionService,
+        CommandRegistry, ConsoleEntry, ConsoleFilter, ConsoleLevel, ConsoleService, ConsoleSource,
+        EditorPreferences, EditorShell, HubPage, HubState, PanelRegistry, Selection,
+        SelectionService, register_core_commands, register_core_panels,
     };
 
     #[test]

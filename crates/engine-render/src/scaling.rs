@@ -204,11 +204,7 @@ impl RenderScalingSettings {
 }
 
 fn finite_scale(value: f32, fallback: f32) -> f32 {
-    if value.is_finite() {
-        value
-    } else {
-        fallback
-    }
+    if value.is_finite() { value } else { fallback }
 }
 
 /// Runtime conditions that influence automatic selection.
@@ -744,21 +740,25 @@ mod tests {
             platform: RenderPlatformClass::AppleMobile,
             ..Default::default()
         });
-        assert!(apple
-            .upscaler(UpscalerKind::MetalFx)
-            .unwrap()
-            .reason
-            .contains("native Metal adapter"));
+        assert!(
+            apple
+                .upscaler(UpscalerKind::MetalFx)
+                .unwrap()
+                .reason
+                .contains("native Metal adapter")
+        );
 
         let android = RenderScalingCapabilities::mobile_prototype(RenderScalingContext {
             platform: RenderPlatformClass::Android,
             ..Default::default()
         });
-        assert!(android
-            .upscaler(UpscalerKind::SnapdragonGsr)
-            .unwrap()
-            .reason
-            .contains("SDK/runtime detection"));
+        assert!(
+            android
+                .upscaler(UpscalerKind::SnapdragonGsr)
+                .unwrap()
+                .reason
+                .contains("SDK/runtime detection")
+        );
     }
 
     #[test]

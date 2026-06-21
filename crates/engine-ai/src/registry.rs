@@ -928,8 +928,8 @@ fn detect_openai_compatible_typed(
 #[cfg(test)]
 mod tests {
     use super::{
-        detect_available_models, is_openai_chat_model, GlmEndpoints, MimoEndpoints, ProviderConfig,
-        ProviderKind,
+        GlmEndpoints, MimoEndpoints, ProviderConfig, ProviderKind, detect_available_models,
+        is_openai_chat_model,
     };
     use engine_editor::{BillingMode, GlmRegion, MimoRegion};
     use std::io::Write;

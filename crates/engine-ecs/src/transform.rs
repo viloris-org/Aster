@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use engine_core::{math::Transform, EngineError, EngineResult};
+use engine_core::{EngineError, EngineResult, math::Transform};
 
 use crate::Entity;
 
@@ -200,8 +200,8 @@ impl TransformHierarchy {
 
 #[cfg(test)]
 mod tests {
-    use engine_core::math::{Transform, Vec3};
     use engine_core::HandleAllocator;
+    use engine_core::math::{Transform, Vec3};
 
     use super::*;
 

@@ -29,8 +29,8 @@ use engine_core::{EngineError, EngineResult};
 use serde::{Deserialize, Serialize};
 
 pub use crate::acoustics::{
-    solve_direct_propagation, AcousticAabb, AcousticMaterial, AcousticQuality,
-    AcousticSceneSnapshot, AcousticSolverConfig, AcousticSourceSample,
+    AcousticAabb, AcousticMaterial, AcousticQuality, AcousticSceneSnapshot, AcousticSolverConfig,
+    AcousticSourceSample, solve_direct_propagation,
 };
 pub use crate::bus::{AudioBus, AudioBusGraph};
 #[cfg(feature = "device-output")]
@@ -40,8 +40,8 @@ pub use crate::effects::{
     LimiterEffect, ReverbEffect,
 };
 pub use crate::spatial::{
-    compute_attenuation, compute_directivity, compute_doppler_rate, compute_effective_distance,
-    compute_pan, AttenuationModel,
+    AttenuationModel, compute_attenuation, compute_directivity, compute_doppler_rate,
+    compute_effective_distance, compute_pan,
 };
 pub use crate::stream_player::{
     AudioStreamPlayer2DComponentData, AudioStreamPlayer3DComponentData,

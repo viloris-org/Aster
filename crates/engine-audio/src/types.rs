@@ -191,11 +191,7 @@ impl PropagationFrame {
 }
 
 fn finite_or(value: f32, fallback: f32) -> f32 {
-    if value.is_finite() {
-        value
-    } else {
-        fallback
-    }
+    if value.is_finite() { value } else { fallback }
 }
 
 /// Lightweight renderer debug state for editor overlays and tests.

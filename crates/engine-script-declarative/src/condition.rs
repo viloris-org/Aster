@@ -293,7 +293,7 @@ mod condition_de {
                             "always",
                             "never",
                         ],
-                    ))
+                    ));
                 }
             };
             Ok(result)

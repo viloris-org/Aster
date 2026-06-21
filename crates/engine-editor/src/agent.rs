@@ -286,9 +286,11 @@ mod tests {
     #[test]
     fn worktree_manager_refuses_active_project_path() {
         let mut manager = WorktreeManager::default();
-        assert!(manager
-            .create("/project", "/project", "HEAD", "agent-tools", "agent-a")
-            .is_err());
+        assert!(
+            manager
+                .create("/project", "/project", "HEAD", "agent-tools", "agent-a")
+                .is_err()
+        );
 
         let worktree = manager
             .create(

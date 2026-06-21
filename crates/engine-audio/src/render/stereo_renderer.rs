@@ -1,10 +1,10 @@
 //! Universal stereo/speaker panner.
 
+use crate::SpatialMode;
 use crate::render::{SpatialRenderContext, SpatialRenderer, SpatialVoiceParams};
 use crate::spatial::{
     compute_attenuation, compute_directivity, compute_effective_distance, compute_spread_pan,
 };
-use crate::SpatialMode;
 
 /// Stateless stereo panner that applies distance attenuation, directivity,
 /// spread-based panning, and optional rear attenuation.

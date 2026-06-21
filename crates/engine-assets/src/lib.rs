@@ -9,10 +9,10 @@ pub mod resource_trait;
 pub mod resource_types;
 
 pub use amdl::{
-    compile_amdl, diagnose_amdl, parse_amdl, AmdlColliderDecl, AmdlColliderShape, AmdlDiagnostic,
-    AmdlDocument, AmdlLodDecl, AmdlMaterialDecl, AmdlMeshDecl, AmdlMeshSource, AmdlModelDecl,
-    AmdlParserError, AmdlPrimitiveKind, AmdlRigidbodyDecl, AmdlRigidbodyMode, AmdlSocketDecl,
-    AmdlValidator, AmdlValue, AMDL_HEADER,
+    AMDL_HEADER, AmdlColliderDecl, AmdlColliderShape, AmdlDiagnostic, AmdlDocument, AmdlLodDecl,
+    AmdlMaterialDecl, AmdlMeshDecl, AmdlMeshSource, AmdlModelDecl, AmdlParserError,
+    AmdlPrimitiveKind, AmdlRigidbodyDecl, AmdlRigidbodyMode, AmdlSocketDecl, AmdlValidator,
+    AmdlValue, compile_amdl, diagnose_amdl, parse_amdl,
 };
 pub use registry::ResourceTypeRegistry;
 pub use resource_trait::{Resource, ResourceHandle as TypedResourceHandle};
@@ -28,9 +28,9 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::{
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
-        Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::{SystemTime, UNIX_EPOCH},
@@ -1652,11 +1652,10 @@ impl ImportWorker {
                 PngImporter::import(&job.asset_path, &job.import_options).unwrap_or_else(|error| {
                     ImportOutcome {
                         guid,
-                        diagnostics: vec![AssetDiagnostic::new(format!(
-                            "Texture import failed: {}",
-                            error
-                        ))
-                        .with_path(&job.asset_path)],
+                        diagnostics: vec![
+                            AssetDiagnostic::new(format!("Texture import failed: {}", error))
+                                .with_path(&job.asset_path),
+                        ],
                         upload: None,
                     }
                 })
@@ -1665,11 +1664,10 @@ impl ImportWorker {
                 // Use GltfImporter for model imports
                 GltfImporter::import(&job.asset_path).unwrap_or_else(|error| ImportOutcome {
                     guid,
-                    diagnostics: vec![AssetDiagnostic::new(format!(
-                        "Model import failed: {}",
-                        error
-                    ))
-                    .with_path(&job.asset_path)],
+                    diagnostics: vec![
+                        AssetDiagnostic::new(format!("Model import failed: {}", error))
+                            .with_path(&job.asset_path),
+                    ],
                     upload: None,
                 })
             }
@@ -1677,11 +1675,13 @@ impl ImportWorker {
                 // Unsupported resource kind
                 ImportOutcome {
                     guid,
-                    diagnostics: vec![AssetDiagnostic::new(format!(
-                        "Unsupported resource kind for import: {:?}",
-                        job.resource_kind
-                    ))
-                    .with_path(&job.asset_path)],
+                    diagnostics: vec![
+                        AssetDiagnostic::new(format!(
+                            "Unsupported resource kind for import: {:?}",
+                            job.resource_kind
+                        ))
+                        .with_path(&job.asset_path),
+                    ],
                     upload: None,
                 }
             }
@@ -1733,10 +1733,9 @@ impl ImportQueue {
 
     /// Drains all pending GPU upload tasks.
     pub fn drain_gpu_uploads(&mut self) -> Vec<GpuUploadTask> {
-        if let Ok(mut uploads) = self.uploads.lock() {
-            uploads.drain(..).collect()
-        } else {
-            Vec::new()
+        match self.uploads.lock() {
+            Ok(mut uploads) => uploads.drain(..).collect(),
+            _ => Vec::new(),
         }
     }
 
@@ -2561,27 +2560,27 @@ fn import_model_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedCp
                         .join("; ")
                 })
             }) {
-            Ok(document) => {
-                match serde_json::to_vec(&document) {
-                    Ok(encoded) => {
-                        let model_count = document.models.len();
-                        (
+            Ok(document) => match serde_json::to_vec(&document) {
+                Ok(encoded) => {
+                    let model_count = document.models.len();
+                    (
                         Arc::from(encoded),
-                        format!("Aster model declaration imported by {importer}: {model_count} models"),
+                        format!(
+                            "Aster model declaration imported by {importer}: {model_count} models"
+                        ),
                     )
-                    }
-                    Err(error) => {
-                        diagnostics.push(
-                            AssetDiagnostic::new(format!("Aster model encode failed: {error}"))
-                                .with_path(path),
-                        );
-                        (
-                            Arc::from(bytes),
-                            format!("{} bytes model source imported by {importer}", bytes.len()),
-                        )
-                    }
                 }
-            }
+                Err(error) => {
+                    diagnostics.push(
+                        AssetDiagnostic::new(format!("Aster model encode failed: {error}"))
+                            .with_path(path),
+                    );
+                    (
+                        Arc::from(bytes),
+                        format!("{} bytes model source imported by {importer}", bytes.len()),
+                    )
+                }
+            },
             Err(error) => {
                 diagnostics.push(
                     AssetDiagnostic::new(format!("Aster model parse failed: {error}"))
@@ -3280,12 +3279,16 @@ mod tests {
         database.scan(&root).unwrap();
 
         assert_eq!(database.iter_entries().count(), 1);
-        assert!(database
-            .entry_for_path(&PathBuf::from("textures/a.png"))
-            .is_some());
-        assert!(database
-            .entry_for_path(&PathBuf::from("textures/b.png"))
-            .is_none());
+        assert!(
+            database
+                .entry_for_path(&PathBuf::from("textures/a.png"))
+                .is_some()
+        );
+        assert!(
+            database
+                .entry_for_path(&PathBuf::from("textures/b.png"))
+                .is_none()
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -4414,12 +4417,14 @@ mod tests {
         let record = registry.record(handle).unwrap();
         assert_eq!(record.state, ResourceState::Failed);
         assert!(record.preview.is_some());
-        assert!(record
-            .preview
-            .as_ref()
-            .unwrap()
-            .summary
-            .contains("Import failed"));
+        assert!(
+            record
+                .preview
+                .as_ref()
+                .unwrap()
+                .summary
+                .contains("Import failed")
+        );
 
         // Verify caches were cleared
         assert!(registry.cpu_resource(handle).is_none());

@@ -530,10 +530,7 @@ pub fn parse_preset(
                 .get("shoot_range")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(10.0) as f32;
-            let damage = params
-                .get("damage")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(5) as i32;
+            let damage = params.get("damage").and_then(|v| v.as_i64()).unwrap_or(5) as i32;
             let fire_rate = params
                 .get("fire_rate")
                 .and_then(|v| v.as_f64())

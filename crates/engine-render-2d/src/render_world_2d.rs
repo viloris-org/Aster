@@ -1,7 +1,7 @@
 //! 2D render world extraction from scene.
 
-use engine_core::math::Transform;
 use engine_core::EntityId;
+use engine_core::math::Transform;
 
 /// Camera data extracted for 2D rendering.
 #[derive(Clone, Debug, PartialEq)]

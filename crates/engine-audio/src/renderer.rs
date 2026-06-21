@@ -4,15 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::{
-    compute_attenuation, compute_doppler_rate,
+    AudioDebugSnapshot, AudioDiagnostics, AudioListenerDesc, AudioObjectTransform,
+    AudioRendererConfig, AudioSourceDesc, ClipHandle, HrtfQuality, OutputMode, PlaybackState,
+    PropagationFrame, SourceHandle, SpatialMode, VirtualizationPolicy, compute_attenuation,
+    compute_doppler_rate,
     hrtf::default_dataset,
     render::{
         HrtfRenderer, SpatialRenderContext, SpatialRenderer, SpatialVoiceParams, StereoRenderer,
     },
-    voice::{select_voices, VoiceScoreInput},
-    AudioDebugSnapshot, AudioDiagnostics, AudioListenerDesc, AudioObjectTransform,
-    AudioRendererConfig, AudioSourceDesc, ClipHandle, HrtfQuality, OutputMode, PlaybackState,
-    PropagationFrame, SourceHandle, SpatialMode, VirtualizationPolicy,
+    voice::{VoiceScoreInput, select_voices},
 };
 
 /// Immutable decoded PCM clip consumed by the real-time renderer.
@@ -991,9 +991,11 @@ mod tests {
         let mut output = [0.0; 2048];
         renderer.render(&mut output);
         assert!(output.iter().all(|sample| sample.abs() <= 0.98));
-        assert!(output[output.len() - 16..]
-            .iter()
-            .all(|sample| sample.abs() < 0.1));
+        assert!(
+            output[output.len() - 16..]
+                .iter()
+                .all(|sample| sample.abs() < 0.1)
+        );
     }
 
     #[test]

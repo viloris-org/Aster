@@ -44,7 +44,7 @@ pub use behavior::{BehaviorNode, BehaviorTree, NodeResult};
 pub use compiler::BehaviorCompiler;
 pub use condition::{Condition, ConditionContext, ConditionExpr, FloatComparison};
 pub use runtime::DeclarativeScriptBackend;
-pub use schema::{generate_json_schema, BehaviorSchema, EntityBehaviorConfig};
+pub use schema::{BehaviorSchema, EntityBehaviorConfig, generate_json_schema};
 
 // Scene system (three.js-like)
 pub use scene::{

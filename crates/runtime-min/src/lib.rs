@@ -16,18 +16,18 @@ use engine_script_rhai::RhaiScriptBackend;
 use std::time::Instant;
 
 use engine_assets::{
-    import_builtin_asset, scan_project_assets, AssetDatabase, AssetGuid, AssetRegistry,
-    DecodedTextureResource, GpuResource, HotReloadTracker, ImportTask, MaterialFormat,
-    ModelResource, ResourceKind,
+    AssetDatabase, AssetGuid, AssetRegistry, DecodedTextureResource, GpuResource, HotReloadTracker,
+    ImportTask, MaterialFormat, ModelResource, ResourceKind, import_builtin_asset,
+    scan_project_assets,
 };
 #[cfg(feature = "audio")]
 use engine_audio::{
-    solve_direct_propagation, AcousticAabb, AcousticMaterial, AcousticSceneSnapshot,
-    AcousticSolverConfig, AcousticSourceSample, AttenuationModel, AudioContext, AudioListenerDesc,
-    AudioObjectTransform, AudioSourceDesc, AudioSourceShape, ClipHandle, HrtfQuality,
-    MemoryAudioBackend, OutputMode, SourceHandle, SpatialMode, VirtualizationPolicy, VoiceCategory,
+    AcousticAabb, AcousticMaterial, AcousticSceneSnapshot, AcousticSolverConfig,
+    AcousticSourceSample, AttenuationModel, AudioContext, AudioListenerDesc, AudioObjectTransform,
+    AudioSourceDesc, AudioSourceShape, ClipHandle, HrtfQuality, MemoryAudioBackend, OutputMode,
+    SourceHandle, SpatialMode, VirtualizationPolicy, VoiceCategory, solve_direct_propagation,
 };
-use engine_core::{logging, EngineConfig, EngineError, EngineResult, FrameCounter, TimeState};
+use engine_core::{EngineConfig, EngineError, EngineResult, FrameCounter, TimeState, logging};
 #[cfg(feature = "audio")]
 use engine_ecs::AudioSourceComponentData;
 #[cfg(feature = "script-python")]
@@ -2686,10 +2686,12 @@ mod tests {
 
         assert!(services.stats.entity_count >= 2);
         assert!(services.stats.draw_calls >= 1);
-        assert!(services
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.source == "script"));
+        assert!(
+            services
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source == "script")
+        );
     }
 
     #[cfg(feature = "script-python")]
@@ -2738,17 +2740,19 @@ mod tests {
         let transform = services.scene.transforms().local(entity).unwrap();
         assert_eq!(transform.translation.x, 2.0);
         assert_eq!(transform.translation.z, 1.0);
-        assert!(services
-            .scene
-            .object(entity)
-            .unwrap()
-            .scripts
-            .first()
-            .unwrap()
-            .state_json
-            .as_ref()
-            .unwrap()
-            .contains("started"));
+        assert!(
+            services
+                .scene
+                .object(entity)
+                .unwrap()
+                .scripts
+                .first()
+                .unwrap()
+                .state_json
+                .as_ref()
+                .unwrap()
+                .contains("started")
+        );
     }
 
     #[cfg(feature = "script-python")]
@@ -2795,10 +2799,12 @@ mod tests {
             .tick_game_frame(Duration::from_millis(16), false)
             .unwrap();
 
-        assert!(services
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("timed out")));
+        assert!(
+            services
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("timed out"))
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3069,9 +3075,11 @@ mod tests {
             .tick_game_frame(Duration::from_millis(16), false)
             .unwrap();
 
-        assert!(services
-            .input
-            .gamepad_button_down(engine_platform::GamepadButton::A));
+        assert!(
+            services
+                .input
+                .gamepad_button_down(engine_platform::GamepadButton::A)
+        );
         assert_eq!(services.input.gamepad_states().len(), 1);
         assert_eq!(services.input.gamepad_states()[0].left_stick_x, 0.75);
     }

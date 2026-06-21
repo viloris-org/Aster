@@ -1,9 +1,9 @@
 //! CPAL-backed production PCM output.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use engine_core::{EngineError, EngineResult};

@@ -26,12 +26,12 @@ pub mod ui_state;
 
 // Re-export the key UI state types for convenience
 pub use ui_state::{
-    resource_kind_label, ConfirmDeleteDialog, DesignTokens, EditorAction,
-    EditorSceneViewOrientation, EditorSceneViewProjection, EditorShell, EditorSnapSettings,
-    EditorTransformSpace, EditorTransformTool, HubAction, HubPage, HubState, NewProjectDialog,
-    PlayModeRequest, ProjectContext, ProjectDeletionDecision, ProjectDeletionMode,
-    ScriptEditorState, ScriptTemplateBackend, ViewportTargetState, ViewportTexture,
-    ViewportTransformDragMode, ViewportTransformDragState,
+    ConfirmDeleteDialog, DesignTokens, EditorAction, EditorSceneViewOrientation,
+    EditorSceneViewProjection, EditorShell, EditorSnapSettings, EditorTransformSpace,
+    EditorTransformTool, HubAction, HubPage, HubState, NewProjectDialog, PlayModeRequest,
+    ProjectContext, ProjectDeletionDecision, ProjectDeletionMode, ScriptEditorState,
+    ScriptTemplateBackend, ViewportTargetState, ViewportTexture, ViewportTransformDragMode,
+    ViewportTransformDragState, resource_kind_label,
 };
 
 pub use native::{

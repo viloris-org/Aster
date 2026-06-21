@@ -1,4 +1,4 @@
-use engine_core::{math::Transform, math::Vec3, EngineConfig};
+use engine_core::{EngineConfig, math::Transform, math::Vec3};
 use engine_ecs::{ColliderComponentData, ComponentData, RigidbodyComponentData, Scene};
 use runtime_min::headless_services_from_scene;
 use std::time::Duration;

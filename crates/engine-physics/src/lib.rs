@@ -1940,12 +1940,9 @@ impl PhysicsBackend for SimplePhysicsBackend {
             .get_mut(&joint)
             .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
         match &mut desc.joint_type {
-            JointType::Hinge {
-                motor: ref mut m, ..
+            JointType::Hinge { motor: m, .. } | JointType::Slider { motor: m, .. } => {
+                *m = Some(motor)
             }
-            | JointType::Slider {
-                motor: ref mut m, ..
-            } => *m = Some(motor),
             _ => {}
         }
         Ok(())
@@ -1957,12 +1954,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
             .get_mut(&joint)
             .ok_or_else(|| EngineError::invalid_handle("joint does not exist"))?;
         match &mut desc.joint_type {
-            JointType::Hinge {
-                limits: ref mut l, ..
-            }
-            | JointType::Slider {
-                limits: ref mut l, ..
-            } => *l = limits,
+            JointType::Hinge { limits: l, .. } | JointType::Slider { limits: l, .. } => *l = limits,
             _ => {}
         }
         Ok(())
@@ -2118,7 +2110,7 @@ mod rapier_backend {
 
     use rapier3d::{
         control as rpc,
-        crossbeam::channel::{unbounded, Receiver},
+        crossbeam::channel::{Receiver, unbounded},
         na::{self, Point3, Quaternion, Translation3, UnitQuaternion, Vector3},
         parry::query::ShapeCastOptions,
         prelude as rp,
@@ -3591,9 +3583,11 @@ mod tests {
                 .len(),
             1
         );
-        assert!(backend
-            .overlap_sphere(Vec3::ZERO, 2.0, QueryFilter { mask: 1 << 2 })
-            .is_empty());
+        assert!(
+            backend
+                .overlap_sphere(Vec3::ZERO, 2.0, QueryFilter { mask: 1 << 2 })
+                .is_empty()
+        );
     }
 
     #[test]
@@ -3664,14 +3658,16 @@ mod tests {
             )
             .unwrap();
 
-        assert!(backend
-            .raycast(
-                Vec3::ZERO,
-                Vec3::new(0.0, 0.0, 1.0),
-                10.0,
-                QueryFilter { mask: 1 << 3 },
-            )
-            .is_none());
+        assert!(
+            backend
+                .raycast(
+                    Vec3::ZERO,
+                    Vec3::new(0.0, 0.0, 1.0),
+                    10.0,
+                    QueryFilter { mask: 1 << 3 },
+                )
+                .is_none()
+        );
 
         let hit = backend
             .raycast(
@@ -3716,9 +3712,11 @@ mod tests {
         backend.fixed_update(1.0 / 60.0);
         let contacts = backend.drain_contacts();
 
-        assert!(contacts
-            .iter()
-            .any(|event| event.entered && event.is_trigger));
+        assert!(
+            contacts
+                .iter()
+                .any(|event| event.entered && event.is_trigger)
+        );
     }
 
     #[cfg(feature = "rapier")]

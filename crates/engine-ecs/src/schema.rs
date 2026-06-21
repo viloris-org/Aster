@@ -4,7 +4,7 @@ use std::{fs, path::Path};
 
 use engine_core::{EngineError, EngineResult};
 
-use crate::scene::{SceneFile, SCENE_FILE_VERSION};
+use crate::scene::{SCENE_FILE_VERSION, SceneFile};
 
 /// Current project manifest schema version.
 pub const PROJECT_MANIFEST_VERSION: u32 = 1;

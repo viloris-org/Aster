@@ -694,9 +694,11 @@ fn apply_thinking_config(
     match format {
         ThinkingFormat::OpenAI => {
             let effort = match thinking_effort {
-                ThinkingEffort::Off => return Err(EngineError::config(
-                    "OpenAI reasoning models do not support disabling reasoning. Use 'low' effort instead."
-                )),
+                ThinkingEffort::Off => {
+                    return Err(EngineError::config(
+                        "OpenAI reasoning models do not support disabling reasoning. Use 'low' effort instead.",
+                    ));
+                }
                 ThinkingEffort::Low => "low",
                 ThinkingEffort::Medium => "medium",
                 ThinkingEffort::High => "high",
@@ -1224,28 +1226,36 @@ pub fn create_provider(
             )))
         }
         "mimo" => {
-            let config = mimo_config.ok_or_else(|| {
-                EngineError::config("MiMo configuration is required.")
-            })?;
+            let config = mimo_config
+                .ok_or_else(|| EngineError::config("MiMo configuration is required."))?;
             let ep = endpoint.unwrap_or_else(|| {
                 crate::registry::MimoEndpoints::base_url(&config.billing, &config.region)
             });
             let key = api_key.ok_or_else(|| {
                 EngineError::config("Xiaomi MiMo API key is required but not configured.")
             })?;
-            Ok(Box::new(OpenAIProvider::new(model, key, Some(ep), max_tokens)))
+            Ok(Box::new(OpenAIProvider::new(
+                model,
+                key,
+                Some(ep),
+                max_tokens,
+            )))
         }
         "deepseek" => {
             let key = api_key.ok_or_else(|| {
                 EngineError::config("DeepSeek API key is required but not configured.")
             })?;
             let ep = endpoint.unwrap_or("https://api.deepseek.com");
-            Ok(Box::new(OpenAIProvider::new(model, key, Some(ep), max_tokens)))
+            Ok(Box::new(OpenAIProvider::new(
+                model,
+                key,
+                Some(ep),
+                max_tokens,
+            )))
         }
         "glm" => {
-            let config = glm_config.ok_or_else(|| {
-                EngineError::config("GLM configuration is required.")
-            })?;
+            let config =
+                glm_config.ok_or_else(|| EngineError::config("GLM configuration is required."))?;
             let ep = endpoint.unwrap_or_else(|| {
                 crate::registry::GlmEndpoints::base_url(&config.billing, &config.region)
             });

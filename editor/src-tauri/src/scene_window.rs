@@ -189,7 +189,8 @@ fn run_scene_window(
         dragging: None,
         last_cursor: None,
     };
-    if let Err(error) = event_loop.run_app(&mut app) {
+    let run_result = event_loop.run_app(&mut app);
+    if let Err(error) = run_result {
         let _ = app
             .event_tx
             .send(SceneEvent::Error(format!("run: {error}")));

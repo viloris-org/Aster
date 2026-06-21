@@ -552,7 +552,7 @@ impl<'a> Parser<'a> {
             _ => {
                 return Err(ParseError {
                     message: "expected an expression".to_string(),
-                })
+                });
             }
         };
 

@@ -5,8 +5,8 @@ use engine_render::{
     RenderScalingContext, RenderScalingSettings, UiCompositionPolicy, UpscalerKind,
 };
 use runtime_min::{
-    build_default_render_graph, render_scaling_settings_from_build, smoke_runtime_min,
-    RuntimeServices,
+    RuntimeServices, build_default_render_graph, render_scaling_settings_from_build,
+    smoke_runtime_min,
 };
 
 #[test]

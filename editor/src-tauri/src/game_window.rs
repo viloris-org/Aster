@@ -194,7 +194,8 @@ fn run_game_window(
         visible: true,
     };
 
-    if let Err(e) = event_loop.run_app(&mut app) {
+    let run_result = event_loop.run_app(&mut app);
+    if let Err(e) = run_result {
         let _ = app.event_tx.send(GameEvent::Error(format!("run: {e}")));
     }
 }

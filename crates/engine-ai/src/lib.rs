@@ -23,9 +23,9 @@ fn default_true() -> bool {
     true
 }
 use engine_editor::{
-    agent::{AgentWriteMode, PermissionPolicy, TraceEntry, TraceRecorder},
     CommandContext, CommandRegistry, ConsoleEntry, ConsoleLevel, ConsoleService, ConsoleSource,
     ProjectContext, SelectionService, UndoRedoStack,
+    agent::{AgentWriteMode, PermissionPolicy, TraceEntry, TraceRecorder},
 };
 
 /// Abstract AI model backend.
@@ -2094,8 +2094,7 @@ fn recovery_hint_for_success(operation: &AgentOperation) -> &'static str {
         AgentOperation::CheckScript { .. } | AgentOperation::CheckAmdl { .. } => {
             "No recovery needed; language-service validation is read-only."
         }
-        AgentOperation::ReadFile { .. }
-        | AgentOperation::QuerySceneSemantic { .. } => {
+        AgentOperation::ReadFile { .. } | AgentOperation::QuerySceneSemantic { .. } => {
             "No recovery needed; this operation only read project data."
         }
         AgentOperation::Complete { .. } => {
@@ -2113,9 +2112,7 @@ fn recovery_hint_for_success(operation: &AgentOperation) -> &'static str {
         AgentOperation::GenerateAsset { .. } => {
             "Delete the generated asset file from the project to revert."
         }
-        AgentOperation::ShowInViewport { .. } => {
-            "No recovery needed; viewport state is transient."
-        }
+        AgentOperation::ShowInViewport { .. } => "No recovery needed; viewport state is transient.",
         AgentOperation::BatchOperation { .. } => {
             "Use editor undo to revert the batch, or undo individual operations if rollback was disabled."
         }
@@ -2949,9 +2946,11 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(session.console.entries().len(), 1);
-        assert!(session.console.entries()[0]
-            .message
-            .contains("parse_response"));
+        assert!(
+            session.console.entries()[0]
+                .message
+                .contains("parse_response")
+        );
     }
 
     #[test]
@@ -2995,10 +2994,12 @@ mod tests {
         let result = session.execute_batch_operation_inner(&operations, true, 0);
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("in-memory transactional"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("in-memory transactional")
+        );
     }
 
     #[cfg(unix)]

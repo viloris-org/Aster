@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use engine_core::EngineResult;
 use engine_ecs::Entity;
 use engine_editor::{ConsoleEntry, ConsoleLevel, ConsoleSource};
-use rhai::{ParseErrorType, Scope, AST};
+use rhai::{AST, ParseErrorType, Scope};
 use threesh::scene::SceneContext;
 
 // ── UI draw commands (immediate-mode) ────────────────────────────────────────
@@ -3679,12 +3679,16 @@ fn on_start() {
 
         // All lifecycle calls should succeed even though only on_start is defined
         assert!(backend.run_start("entity_abc", &script_path).is_ok());
-        assert!(backend
-            .run_update("entity_abc", &script_path, 0.016)
-            .is_ok());
-        assert!(backend
-            .run_fixed_update("entity_abc", &script_path, 1.0 / 60.0)
-            .is_ok());
+        assert!(
+            backend
+                .run_update("entity_abc", &script_path, 0.016)
+                .is_ok()
+        );
+        assert!(
+            backend
+                .run_fixed_update("entity_abc", &script_path, 1.0 / 60.0)
+                .is_ok()
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -4923,10 +4927,12 @@ fn on_update(dt) {
         // Event should be consumed
         {
             let guard = backend.event_queue.lock().unwrap();
-            assert!(guard
-                .get("coin_collected")
-                .map(|e| e.is_empty())
-                .unwrap_or(true));
+            assert!(
+                guard
+                    .get("coin_collected")
+                    .map(|e| e.is_empty())
+                    .unwrap_or(true)
+            );
         }
     }
 

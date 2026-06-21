@@ -1,7 +1,7 @@
 //! Background, bounded audio decoding for long-form assets.
 
-use std::sync::mpsc::{sync_channel, Receiver};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, sync_channel};
 
 use engine_core::{EngineError, EngineResult};
 

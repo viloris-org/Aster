@@ -2108,10 +2108,12 @@ mod tests {
             .unwrap(),
             "# Updated intent\n\nManual constraints stay user-authored."
         );
-        assert!(updated
-            .events
-            .iter()
-            .any(|event| event.kind == "intent_updated"));
+        assert!(
+            updated
+                .events
+                .iter()
+                .any(|event| event.kind == "intent_updated")
+        );
     }
 
     #[test]
@@ -2139,10 +2141,12 @@ mod tests {
         assert_eq!(decided.record.decisions.len(), 1);
         assert_eq!(decided.record.decisions[0].kind, "partial_apply");
         assert_eq!(decided.record.decisions[0].files, ["src/main.rs"]);
-        assert!(decided
-            .events
-            .iter()
-            .any(|event| event.kind == "user_decision"));
+        assert!(
+            decided
+                .events
+                .iter()
+                .any(|event| event.kind == "user_decision")
+        );
     }
 
     #[test]
@@ -2197,10 +2201,12 @@ mod tests {
             reloaded.record.attached_knowledge_ids,
             [approved[0].id.clone()]
         );
-        assert!(parent
-            .events
-            .iter()
-            .any(|event| event.kind == "branch_created"));
+        assert!(
+            parent
+                .events
+                .iter()
+                .any(|event| event.kind == "branch_created")
+        );
         assert!(reloaded.events.iter().any(|event| event.kind == "branched"));
     }
 
@@ -2231,10 +2237,12 @@ mod tests {
             decided.record.decisions[0].rollback_id.as_deref(),
             Some("rollback-1")
         );
-        assert!(decided
-            .events
-            .iter()
-            .any(|event| event.details["rollback_id"] == "rollback-1"));
+        assert!(
+            decided
+                .events
+                .iter()
+                .any(|event| event.details["rollback_id"] == "rollback-1")
+        );
     }
 
     #[test]
@@ -2290,9 +2298,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(quest_sourced[0].reference_status, "valid");
-        assert!(quest_sourced[0]
-            .reference_summary
-            .contains("exists in the local Quest store"));
+        assert!(
+            quest_sourced[0]
+                .reference_summary
+                .contains("exists in the local Quest store")
+        );
 
         let manual = store
             .propose_knowledge("workflow", "User prefers focused tests.", "manual")
@@ -2344,9 +2354,11 @@ mod tests {
         let pending = store
             .propose_knowledge("workflow", "Run focused tests first.", "manual")
             .unwrap();
-        assert!(store
-            .update_knowledge_context(&created.record.id, vec![pending[0].id.clone()])
-            .is_err());
+        assert!(
+            store
+                .update_knowledge_context(&created.record.id, vec![pending[0].id.clone()])
+                .is_err()
+        );
 
         let approved = store.approve_knowledge(&pending[0].id).unwrap();
         let updated = store
@@ -2362,10 +2374,12 @@ mod tests {
             updated.attached_knowledge[0].content,
             "Run focused tests first."
         );
-        assert!(updated
-            .events
-            .iter()
-            .any(|event| event.kind == "knowledge_context_updated"));
+        assert!(
+            updated
+                .events
+                .iter()
+                .any(|event| event.kind == "knowledge_context_updated")
+        );
     }
 
     #[test]
@@ -2388,10 +2402,12 @@ mod tests {
                 "Prefer a smaller validation slice.",
             )
             .unwrap();
-        assert!(steered
-            .events
-            .iter()
-            .any(|event| event.kind == "user_steering"));
+        assert!(
+            steered
+                .events
+                .iter()
+                .any(|event| event.kind == "user_steering")
+        );
 
         let paused = store
             .add_user_note(
@@ -2401,10 +2417,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(paused.record.status, QuestStatus::WaitingForUser);
-        assert!(paused
-            .events
-            .iter()
-            .any(|event| event.kind == "manual_intervention_request"));
+        assert!(
+            paused
+                .events
+                .iter()
+                .any(|event| event.kind == "manual_intervention_request")
+        );
     }
 
     #[test]
@@ -2433,11 +2451,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(continued.record.status, QuestStatus::Running);
-        assert!(continued
-            .events
-            .iter()
-            .any(|event| event.kind == "continued"
-                && event.summary == "Quest continued from current evidence"));
+        assert!(
+            continued
+                .events
+                .iter()
+                .any(|event| event.kind == "continued"
+                    && event.summary == "Quest continued from current evidence")
+        );
         assert!(continued.events.iter().any(|event| {
             event.kind == "user_decision"
                 && event
@@ -2506,10 +2526,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(repairing.record.status, QuestStatus::Repairing);
-        assert!(repairing
-            .events
-            .iter()
-            .any(|event| event.kind == "quick_fix_requested"));
+        assert!(
+            repairing
+                .events
+                .iter()
+                .any(|event| event.kind == "quick_fix_requested")
+        );
     }
 
     #[test]
@@ -2541,19 +2563,23 @@ mod tests {
             finding.artifact_path.as_deref(),
             Some("findings/validation-failed-0.md")
         );
-        assert!(store
-            .quest_path(&created.record.id)
-            .unwrap()
-            .join("findings/validation-failed-0.md")
-            .is_file());
+        assert!(
+            store
+                .quest_path(&created.record.id)
+                .unwrap()
+                .join("findings/validation-failed-0.md")
+                .is_file()
+        );
         assert!(detail.record.artifact_links.iter().any(|artifact| {
             artifact.kind == "review_finding" && artifact.path == "findings/validation-failed-0.md"
         }));
-        assert!(detail
-            .events
-            .iter()
-            .any(|event| event.kind == "review_finding"
-                && event.summary == "Validation failed: cargo check"));
+        assert!(
+            detail
+                .events
+                .iter()
+                .any(|event| event.kind == "review_finding"
+                    && event.summary == "Validation failed: cargo check")
+        );
     }
 
     #[test]
@@ -2573,21 +2599,25 @@ mod tests {
             .cancel(&created.record.id, "User stopped this Quest")
             .unwrap();
         assert_eq!(canceled.record.status, QuestStatus::Canceled);
-        assert!(canceled
-            .record
-            .decisions
-            .iter()
-            .any(|decision| decision.kind == "cancel"));
+        assert!(
+            canceled
+                .record
+                .decisions
+                .iter()
+                .any(|decision| decision.kind == "cancel")
+        );
 
         let reopened = store
             .reopen(&created.record.id, "Try again with a smaller scope")
             .unwrap();
         assert_eq!(reopened.record.status, QuestStatus::Specified);
-        assert!(reopened
-            .record
-            .decisions
-            .iter()
-            .any(|decision| decision.kind == "reopen"));
+        assert!(
+            reopened
+                .record
+                .decisions
+                .iter()
+                .any(|decision| decision.kind == "reopen")
+        );
     }
 
     #[test]
@@ -2628,10 +2658,12 @@ mod tests {
         assert_eq!(reviewed.record.status, QuestStatus::ReadyForReview);
         assert!(reviewed.record.review.is_some());
         let review = reviewed.record.review.as_ref().unwrap();
-        assert!(review
-            .changed_files
-            .iter()
-            .all(|file| !file.diff.is_empty()));
+        assert!(
+            review
+                .changed_files
+                .iter()
+                .all(|file| !file.diff.is_empty())
+        );
         assert_eq!(review.metrics.isolated_attempt_count, 2);
         assert_eq!(review.metrics.validation_count, 2);
         assert_eq!(review.metrics.validation_failure_count, 0);
@@ -2648,12 +2680,14 @@ mod tests {
             reviewed.record.checkpoints[0].workspace_id.as_deref(),
             reviewed.record.workspace_id.as_deref()
         );
-        assert!(reviewed
-            .record
-            .artifact_links
-            .iter()
-            .any(|artifact| artifact.kind == "checkpoint"
-                && artifact.path == "checkpoints/mock-workspace.md"));
+        assert!(
+            reviewed
+                .record
+                .artifact_links
+                .iter()
+                .any(|artifact| artifact.kind == "checkpoint"
+                    && artifact.path == "checkpoints/mock-workspace.md")
+        );
         assert!(reviewed.events.iter().any(
             |event| event.kind == "checkpoint" && event.summary == "Mock workspace checkpoint"
         ));

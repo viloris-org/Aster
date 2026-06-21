@@ -194,7 +194,7 @@ mod tests {
     fn fixed_step_accumulator_three_steps() {
         let mut ts = TimeState::new();
         let fixed_dt = ts.fixed_delta_seconds; // 1/60
-                                               // Use delta = 3 * fixed_dt + small remainder to guarantee exactly 3 steps
+        // Use delta = 3 * fixed_dt + small remainder to guarantee exactly 3 steps
         let delta = fixed_dt * 3.0 + 0.001;
         ts.update(delta);
         let mut steps = 0;

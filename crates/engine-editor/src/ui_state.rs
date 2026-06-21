@@ -13,12 +13,12 @@ use std::{
 };
 
 use engine_assets::{
-    import_builtin_asset, scan_project_assets, AssetDatabase, AssetRegistry, ImportTask,
-    ResourceKind, ResourceMetaFormat,
+    AssetDatabase, AssetRegistry, ImportTask, ResourceKind, ResourceMetaFormat,
+    import_builtin_asset, scan_project_assets,
 };
 use engine_core::{
-    math::{Transform, Vec3},
     EngineError, EngineResult, EntityId,
+    math::{Transform, Vec3},
 };
 use engine_ecs::{
     CameraComponentData, CameraRole, ComponentData, LightComponentData, MeshRendererComponentData,

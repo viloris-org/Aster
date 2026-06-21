@@ -350,11 +350,13 @@ fn project_lists_scene_references_for_script_assets() {
         )
         .expect("list references");
     let rows = references["references"].as_array().unwrap();
-    assert!(rows.iter().any(|row| row["kind"] == "scene"
-        && row["label"] == "Script component"
-        && row["detail"]
-            .as_str()
-            .is_some_and(|detail| detail.contains("Scripted Object"))));
+    assert!(rows.iter().any(|row| {
+        row["kind"] == "scene"
+            && row["label"] == "Script component"
+            && row["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("Scripted Object"))
+    }));
 }
 
 #[test]
