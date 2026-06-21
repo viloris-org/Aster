@@ -1484,7 +1484,7 @@ export default function QuestPage({
                     value={questMode}
                     options={[
                       { value: 'solo', label: t('quest_mode_solo') },
-                      { value: 'extra', label: t('quest_mode_experts') },
+                      { value: 'extra', label: t('quest_mode_extra') },
                     ]}
                     onChange={value => setQuestMode(value as QuestMode)}
                     disabled={busy}
