@@ -290,6 +290,127 @@ impl ComponentSchemaRegistry {
             evolution: SchemaEvolution::default(),
         });
         registry.register(ComponentSchema {
+            type_id: "Skybox".to_string(),
+            display_name: "Skybox".to_string(),
+            version: 1,
+            fields: vec![
+                field("cubemap", ComponentFieldKind::AssetRef, ""),
+                field("zenith_color", ComponentFieldKind::Object, "[0.15,0.35,0.65]"),
+                field("horizon_color", ComponentFieldKind::Object, "[0.55,0.7,0.85]"),
+                field("rotation_degrees", ComponentFieldKind::F32, "0"),
+                field("intensity", ComponentFieldKind::F32, "1"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "Sprite2D".to_string(),
+            display_name: "Sprite 2D".to_string(),
+            version: 1,
+            fields: vec![
+                field("texture", ComponentFieldKind::AssetRef, ""),
+                field("color", ComponentFieldKind::Object, "[1,1,1,1]"),
+                field("flip_h", ComponentFieldKind::Bool, "false"),
+                field("flip_v", ComponentFieldKind::Bool, "false"),
+                field("order_in_layer", ComponentFieldKind::String, "0"),
+                field("layer", ComponentFieldKind::String, "Default"),
+                field("centered", ComponentFieldKind::Bool, "true"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "TileMap".to_string(),
+            display_name: "Tile Map".to_string(),
+            version: 1,
+            fields: vec![
+                field("tileset", ComponentFieldKind::AssetRef, ""),
+                field("tile_size", ComponentFieldKind::String, "16"),
+                field("map_size", ComponentFieldKind::Object, "[1,1]"),
+                field("layer", ComponentFieldKind::String, "Default"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "Camera2D".to_string(),
+            display_name: "Camera 2D".to_string(),
+            version: 1,
+            fields: vec![
+                field("zoom", ComponentFieldKind::F32, "1"),
+                field("clear_color", ComponentFieldKind::Vec3, "0.1,0.1,0.1"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "Light2D".to_string(),
+            display_name: "Light 2D".to_string(),
+            version: 1,
+            fields: vec![
+                field("color", ComponentFieldKind::Vec3, "1,1,1"),
+                field("intensity", ComponentFieldKind::F32, "1"),
+                field("range", ComponentFieldKind::F32, "10"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "Occluder2D".to_string(),
+            display_name: "Occluder 2D".to_string(),
+            version: 1,
+            fields: vec![field(
+                "polygon",
+                ComponentFieldKind::Object,
+                "[[-0.5,-0.5],[0.5,-0.5],[0.5,0.5],[-0.5,0.5]]",
+            )],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "AnimationPlayer".to_string(),
+            display_name: "Animation Player".to_string(),
+            version: 1,
+            fields: vec![
+                field("clip", ComponentFieldKind::AssetRef, ""),
+                field("auto_play", ComponentFieldKind::Bool, "false"),
+                field("speed", ComponentFieldKind::F32, "1"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "SkinnedMeshRenderer".to_string(),
+            display_name: "Skinned Mesh Renderer".to_string(),
+            version: 1,
+            fields: vec![
+                field("mesh", ComponentFieldKind::AssetRef, ""),
+                field("material", ComponentFieldKind::Object, "debug/default"),
+                field("casts_shadows", ComponentFieldKind::Bool, "true"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "AudioStreamPlayer2D".to_string(),
+            display_name: "Audio Stream Player 2D".to_string(),
+            version: 1,
+            fields: vec![
+                field("clip", ComponentFieldKind::AssetRef, ""),
+                field("bus", ComponentFieldKind::String, "SFX"),
+                field("volume", ComponentFieldKind::F32, "1"),
+                field("looping", ComponentFieldKind::Bool, "false"),
+                field("play_on_start", ComponentFieldKind::Bool, "false"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
+            type_id: "AudioStreamPlayer3D".to_string(),
+            display_name: "Audio Stream Player 3D".to_string(),
+            version: 1,
+            fields: vec![
+                field("clip", ComponentFieldKind::AssetRef, ""),
+                field("bus", ComponentFieldKind::String, "SFX"),
+                field("volume", ComponentFieldKind::F32, "1"),
+                field("looping", ComponentFieldKind::Bool, "false"),
+                field("play_on_start", ComponentFieldKind::Bool, "false"),
+                field("spatial_blend", ComponentFieldKind::F32, "1"),
+            ],
+            evolution: SchemaEvolution::default(),
+        });
+        registry.register(ComponentSchema {
             type_id: "Script".to_string(),
             display_name: "Script".to_string(),
             version: 1,

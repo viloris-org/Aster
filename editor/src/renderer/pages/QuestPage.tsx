@@ -74,6 +74,7 @@ interface Props {
   currentProjectPath: string | null;
   initialQuestId?: string | null;
   onOpenEditor: (projectPath: string, artifact?: QuestEditorArtifact) => Promise<void>;
+  onReturnToEditor: () => Promise<void> | void;
   onCloseProject: () => void;
 }
 
@@ -147,9 +148,9 @@ function cn(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }
 
-const buttonBase = 'inline-flex h-[30px] cursor-pointer items-center gap-[6px] whitespace-nowrap rounded-[5px] border border-[var(--border-light)] bg-[var(--bg-surface)] px-[10px] text-[11px] font-semibold text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40';
+const buttonBase = 'inline-flex min-h-9 cursor-pointer items-center gap-2 whitespace-nowrap rounded-[10px] border border-white/[0.10] bg-white/[0.035] px-3 text-[12px] font-semibold text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-[background,border-color,color,transform] duration-150 hover:-translate-y-px hover:border-[var(--accent)] hover:bg-[var(--accent-dim)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--accent)] disabled:cursor-default disabled:opacity-40 disabled:hover:translate-y-0';
 const sectionHeadingButton = buttonBase;
-const primaryButton = 'border-[var(--accent-hover)] bg-[var(--accent-hover)] text-[var(--bg-base)] hover:border-[var(--text-primary)] hover:bg-[var(--text-primary)]';
+const primaryButton = 'border-[var(--accent-hover)] bg-[var(--accent-hover)] text-[var(--bg-base)] shadow-[0_0_0_1px_var(--brand-dim),0_14px_30px_rgba(var(--brand-rgb),0.24)] hover:border-[var(--text-primary)] hover:bg-[var(--text-primary)]';
 const mutedText = 'm-0 text-[12px] text-[var(--text-muted)]';
 const panelSection = '[&_section]:mb-5 [&_section]:border-b [&_section]:border-[var(--border)] [&_section]:pb-4 [&_h2]:mb-[10px] [&_h2]:mt-0 [&_h2]:flex [&_h2]:items-center [&_h2]:justify-between [&_h2]:gap-[10px] [&_h2]:text-[12px] [&_h2]:font-medium [&_h2]:text-[var(--text-secondary)] [&_h2_b]:text-[11px] [&_h2_b]:font-medium [&_h2_b]:text-[var(--text-muted)]';
 const artifactRowClass = 'box-border grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)] items-center gap-[9px] rounded-[5px] border-0 bg-transparent py-2 text-left text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-50 [&_small]:mt-[3px] [&_small]:block [&_small]:overflow-hidden [&_small]:text-ellipsis [&_small]:whitespace-nowrap [&_small]:text-[11px] [&_small]:text-[var(--text-muted)] [&_span]:min-w-0 [&_strong]:block [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[12px] [&_strong]:font-medium [&_strong]:text-[var(--text-primary)]';
@@ -172,14 +173,14 @@ const modeSwitchButtonClass = (active: boolean) => cn(
 );
 
 const questClasses = {
-  shell: 'grid h-screen w-screen grid-rows-[48px_minmax(0,1fr)_24px] overflow-hidden bg-[var(--bg-base)] font-[Inter,var(--font-sans)] text-[var(--text-primary)]',
-  globalHeader: 'grid grid-cols-[220px_minmax(0,1fr)_auto] items-center border-b border-[var(--border)] bg-[var(--bg-overlay)] text-[var(--text-primary)] max-[900px]:grid-cols-[150px_minmax(0,1fr)_auto] [&_nav]:flex [&_nav]:h-full [&_nav]:items-stretch [&_nav]:gap-0.5',
-  brand: 'flex items-baseline gap-2 px-4 [&_span]:text-[13px] [&_span]:font-extrabold [&_span]:text-[var(--text-primary)] [&_strong]:text-[11px] [&_strong]:text-[var(--text-secondary)]',
-  topNavButton: 'cursor-pointer border-0 border-b-2 border-transparent bg-transparent px-[14px] text-[11px] font-semibold text-[var(--text-secondary)] disabled:cursor-default disabled:opacity-40 max-[900px]:px-[7px]',
-  topNavButtonActive: 'border-b-[var(--text-primary)] text-[var(--text-primary)]',
-  globalActions: 'flex gap-[6px] pr-[10px]',
-  layout: 'grid min-h-0 grid-cols-[280px_minmax(0,1fr)] bg-[var(--bg-base)] max-[900px]:grid-cols-[220px_minmax(0,1fr)]',
-  sidebar: 'grid grid-rows-[auto_minmax(0,auto)_minmax(0,auto)_1fr] overflow-y-auto border-r border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-primary)]',
+  shell: 'grid h-screen w-screen grid-rows-[54px_minmax(0,1fr)_28px] overflow-hidden bg-[var(--bg-base)] font-[var(--font-sans)] text-[var(--text-primary)]',
+  globalHeader: 'grid grid-cols-[260px_minmax(0,1fr)_auto] items-center border-b border-white/[0.08] bg-[rgba(7,10,16,0.82)] text-[var(--text-primary)] shadow-[0_12px_34px_rgba(0,0,0,0.24)] backdrop-blur-2xl max-[900px]:grid-cols-[170px_minmax(0,1fr)_auto] [&_nav]:flex [&_nav]:h-full [&_nav]:items-stretch [&_nav]:gap-0.5',
+  brand: 'flex items-baseline gap-2 px-4 [&_span]:text-[13px] [&_span]:font-extrabold [&_span]:tracking-[-0.02em] [&_span]:text-[var(--text-primary)] [&_strong]:text-[12px] [&_strong]:font-semibold [&_strong]:text-[var(--accent)]',
+  topNavButton: 'cursor-pointer border-0 border-b-2 border-transparent bg-transparent px-[16px] text-[12px] font-semibold text-[var(--text-secondary)] transition-[color,border-color,background] duration-150 hover:bg-white/[0.035] hover:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-40 max-[900px]:px-[7px]',
+  topNavButtonActive: 'border-b-[var(--accent)] bg-[var(--accent-dim)] text-[var(--accent-hover)]',
+  globalActions: 'flex items-center gap-2 pr-3',
+  layout: 'grid min-h-0 grid-cols-[270px_minmax(0,1fr)] bg-[var(--bg-base)] max-[900px]:grid-cols-[220px_minmax(0,1fr)]',
+  sidebar: 'grid grid-rows-[auto_minmax(0,auto)_minmax(0,auto)_1fr] overflow-y-auto border-r border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent_42%),rgba(7,12,22,0.90)] text-[var(--text-primary)] shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)] backdrop-blur-2xl',
   sidebarHeading: 'flex min-h-[88px] items-center justify-between px-3 py-[14px]',
   newButton: 'grid h-[38px] w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-[var(--border-light)] bg-[var(--bg-elevated)] px-[11px] text-left text-[13px] text-[var(--text-primary)] shadow-[var(--shadow-sm)] disabled:cursor-default disabled:opacity-40 [&_kbd]:font-mono [&_kbd]:text-[10px] [&_kbd]:text-[var(--text-muted)] [&_svg]:text-[var(--text-primary)]',
   sidebarFooter: 'self-end grid gap-1 p-3 [&_button]:h-8 [&_button]:rounded-[7px] [&_button]:border-0 [&_button]:bg-transparent [&_button]:text-left [&_button]:text-[12px] [&_button]:text-[var(--text-secondary)] hover:[&_button]:bg-[var(--bg-hover)]',
@@ -188,16 +189,23 @@ const questClasses = {
   startLine: 'mb-7 flex flex-wrap items-center justify-center gap-[9px] text-[12px] text-[var(--text-muted)] [&_b]:font-medium [&_b]:text-[var(--text-primary)] [&_span]:font-medium',
   promptBox: 'w-[min(800px,calc(100vw-360px))] min-w-[min(800px,calc(100vw-360px))] rounded-lg border border-[var(--border-light)] bg-[var(--bg-surface)] shadow-[var(--shadow-lg)] max-[900px]:w-[min(680px,calc(100vw-280px))] max-[900px]:min-w-0 [&_footer]:flex [&_footer]:min-h-[42px] [&_footer]:items-center [&_footer]:justify-between [&_footer]:gap-2 [&_footer]:pb-2 [&_footer]:pl-[13px] [&_footer]:pr-[9px] [&_textarea]:box-border [&_textarea]:h-[94px] [&_textarea]:w-full [&_textarea]:resize-none [&_textarea]:border-0 [&_textarea]:bg-transparent [&_textarea]:px-[14px] [&_textarea]:pb-2 [&_textarea]:pt-[14px] [&_textarea]:font-[Inter,var(--font-sans)] [&_textarea]:text-[14px] [&_textarea]:leading-[1.5] [&_textarea]:text-[var(--text-primary)] [&_textarea]:outline-none [&_textarea::placeholder]:text-[var(--text-muted)]',
   promptIconButton: 'grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-[7px] border-0 bg-transparent text-[var(--text-muted)] hover:enabled:bg-[var(--bg-hover)] hover:enabled:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-35',
-  promptSubmit: 'grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-[7px] border border-[var(--brand)] bg-[var(--brand)] text-[var(--bg-base)] shadow-[0_0_0_1px_var(--brand-dim),0_8px_18px_rgba(34,197,94,0.24)] hover:enabled:border-[var(--brand-hover)] hover:enabled:bg-[var(--brand-hover)] disabled:cursor-default disabled:opacity-45 [&_svg]:stroke-[2.25]',
+  promptSubmit: 'grid h-[30px] w-[30px] cursor-pointer place-items-center rounded-[7px] border border-[var(--brand)] bg-[var(--brand)] text-[var(--bg-base)] shadow-[0_0_0_1px_var(--brand-dim),0_8px_18px_rgba(var(--brand-rgb),0.24)] hover:enabled:border-[var(--brand-hover)] hover:enabled:bg-[var(--brand-hover)] disabled:cursor-default disabled:opacity-45 [&_svg]:stroke-[2.25]',
   introCard: 'mt-16 grid w-[min(640px,calc(100vw-440px))] grid-cols-[96px_minmax(0,1fr)] gap-[18px] rounded-lg border border-dashed border-[var(--border-light)] bg-[var(--bg-surface)] p-3 text-[var(--text-secondary)] max-[900px]:w-[min(680px,calc(100vw-280px))] max-[900px]:grid-cols-1 max-[900px]:min-w-0 [&>svg]:h-[70px] [&>svg]:w-24 [&>svg]:rounded-md [&>svg]:bg-[var(--brand-dim)] [&>svg]:p-4 [&>svg]:text-[var(--brand)] [&_p]:m-0 [&_p]:text-[12px] [&_p]:leading-[1.5] [&_p]:text-[var(--text-muted)] [&_strong]:mb-2 [&_strong]:mt-1 [&_strong]:block [&_strong]:text-[14px] [&_strong]:text-[var(--text-primary)]',
-  workspace: 'grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[var(--bg-surface)]',
-  header: 'flex min-h-[78px] items-center justify-between gap-[18px] border-b border-[var(--border)] bg-[var(--bg-surface)] px-[18px] py-[10px] max-[900px]:flex-col max-[900px]:items-start [&_h1]:mb-[3px] [&_h1]:mt-1 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h1]:text-[var(--text-primary)] [&_p]:m-0 [&_p]:max-w-[820px] [&_p]:text-[11px] [&_p]:leading-[1.45] [&_p]:text-[var(--text-secondary)]',
+  workspace: 'grid min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[linear-gradient(135deg,rgba(255,255,255,0.025),transparent_36%),var(--bg-base)]',
+  header: 'flex min-h-[104px] items-center justify-between gap-[18px] border-b border-white/[0.08] bg-[rgba(7,10,16,0.70)] px-5 py-4 backdrop-blur-2xl max-[900px]:flex-col max-[900px]:items-start [&_h1]:mb-[5px] [&_h1]:mt-1 [&_h1]:text-[22px] [&_h1]:font-[720] [&_h1]:tracking-[-0.03em] [&_h1]:text-[var(--text-primary)] [&_p]:m-0 [&_p]:max-w-[840px] [&_p]:text-[12px] [&_p]:leading-[1.55] [&_p]:text-[var(--text-secondary)]',
+  labKicker: 'mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--accent)]/25 bg-[var(--accent-dim)] px-2.5 py-1 text-[11px] font-semibold tracking-[0.02em] text-[var(--accent-hover)]',
   projectLine: 'flex items-center gap-[5px] font-mono text-[10px] text-[var(--text-muted)] [&_svg]:w-[9px]',
   titleEdit: 'my-[7px] flex items-center gap-[6px] [&_button]:inline-flex [&_button]:h-[30px] [&_button]:cursor-pointer [&_button]:items-center [&_button]:gap-[5px] [&_button]:rounded-[5px] [&_button]:border [&_button]:border-[var(--border-light)] [&_button]:bg-[var(--bg-surface)] [&_button]:px-[9px] [&_button]:text-[9px] [&_button]:font-semibold [&_button]:text-[var(--text-secondary)] [&_button:disabled]:cursor-default [&_button:disabled]:opacity-40 [&_input]:h-[31px] [&_input]:w-[min(520px,50vw)] [&_input]:rounded-[5px] [&_input]:border [&_input]:border-[#52525b] [&_input]:bg-[#0d0e12] [&_input]:px-[10px] [&_input]:text-[15px] [&_input]:font-bold [&_input]:text-[#f1f5f9] [&_input]:outline-none',
   headerActions: 'flex flex-wrap items-center justify-end gap-[6px] max-[900px]:justify-start',
-  cockpit: 'grid min-h-0 grid-cols-[minmax(420px,1fr)_minmax(380px,44%)] overflow-hidden bg-[var(--bg-surface)] max-[900px]:grid-cols-1 max-[900px]:grid-rows-[minmax(0,1fr)_minmax(360px,44vh)]',
-  runStream: 'grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_52px] border-r border-[var(--border)] bg-[var(--bg-base)] max-[900px]:border-b max-[900px]:border-r-0',
-  streamPrompt: 'mx-[22px] mb-2 mt-4 rounded-[7px] border border-[var(--border)] bg-[var(--bg-hover)] px-3 py-[9px] text-[13px] text-[var(--text-primary)]',
+  flowBar: 'grid grid-cols-[auto_minmax(0,1fr)] gap-4 border-b border-white/[0.08] bg-[rgba(8,13,24,0.58)] px-5 py-3 backdrop-blur-xl max-[1050px]:grid-cols-1',
+  flowIntro: 'min-w-[210px] max-w-[260px] [&_strong]:block [&_strong]:text-[13px] [&_strong]:font-semibold [&_strong]:text-[var(--text-primary)] [&_span]:mt-1 [&_span]:block [&_span]:text-[11px] [&_span]:leading-[1.45] [&_span]:text-[var(--text-muted)]',
+  flowList: 'grid min-w-0 grid-cols-6 gap-2 max-[1180px]:grid-cols-3 max-[720px]:grid-cols-2',
+  flowStep: 'relative min-h-[70px] rounded-[14px] border border-white/[0.08] bg-white/[0.032] px-3 py-2.5 shadow-[var(--shadow-sm)] [&_b]:mb-1 [&_b]:block [&_b]:font-mono [&_b]:text-[10px] [&_b]:text-[var(--text-muted)] [&_small]:block [&_small]:text-[10px] [&_small]:leading-[1.35] [&_small]:text-[var(--text-muted)] [&_strong]:block [&_strong]:text-[12px] [&_strong]:font-semibold [&_strong]:text-[var(--text-secondary)]',
+  flowStepDone: 'border-[rgba(73,217,139,0.22)] bg-[rgba(73,217,139,0.07)] [&_b]:text-[var(--success)] [&_strong]:text-[var(--text-primary)]',
+  flowStepCurrent: 'border-[rgba(var(--brand-hover-rgb),0.48)] bg-[rgba(var(--brand-hover-rgb),0.12)] shadow-[0_0_0_1px_var(--brand-dim),0_18px_42px_rgba(var(--brand-rgb),0.10)] [&_b]:text-[var(--accent-hover)] [&_strong]:text-[var(--text-primary)]',
+  cockpit: 'grid min-h-0 grid-cols-[minmax(420px,1fr)_minmax(390px,40%)] overflow-hidden bg-transparent max-[900px]:grid-cols-1 max-[900px]:grid-rows-[minmax(0,1fr)_minmax(360px,44vh)]',
+  runStream: 'grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_58px] border-r border-white/[0.08] bg-[rgba(6,10,14,0.62)] max-[900px]:border-b max-[900px]:border-r-0',
+  streamPrompt: 'mx-[22px] mb-2 mt-4 rounded-[13px] border border-white/[0.09] bg-white/[0.035] px-3 py-[10px] text-[13px] leading-[1.5] text-[var(--text-primary)] shadow-[var(--shadow-sm)]',
   streamList: 'min-h-0 overflow-auto px-[22px] pb-[22px]',
   streamEntry: 'grid grid-cols-[16px_minmax(0,1fr)] gap-[9px] my-[6px] [&>div]:min-w-0 [&>div]:rounded-[5px] [&>div]:border [&>div]:border-[var(--border)] [&>div]:bg-[var(--bg-surface)] [&>div]:px-[10px] [&>div]:py-2 [&_details]:mt-[6px] [&_details]:text-[10px] [&_details]:text-[var(--text-secondary)] [&_header]:flex [&_header]:items-center [&_header]:justify-between [&_header]:gap-[10px] [&_pre]:mt-[7px] [&_pre]:max-h-[260px] [&_pre]:overflow-auto [&_pre]:rounded-[5px] [&_pre]:bg-[var(--bg-base)] [&_pre]:p-[9px] [&_pre]:font-mono [&_pre]:text-[10px] [&_pre]:leading-[1.55] [&_pre]:text-[var(--text-secondary)] [&_small]:mt-1 [&_small]:block [&_small]:text-[11px] [&_small]:text-[var(--text-muted)] [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[12px] [&_strong]:font-medium [&_strong]:text-[var(--text-primary)] [&_summary]:cursor-pointer [&_time]:shrink-0 [&_time]:font-mono [&_time]:text-[10px] [&_time]:text-[var(--text-muted)]',
   nextEntry: '[&>div]:border-[var(--border-light)] [&_time]:font-bold [&_time]:text-[var(--text-primary)]',
@@ -442,6 +450,68 @@ function defaultPanelForQuest(detail: QuestDetail): QuestPanel {
   return detail.status === 'draft' || detail.status === 'specified' ? 'spec' : 'overview';
 }
 
+function questStatusLabel(status: QuestStatus, t: (key: string) => string): string {
+  const labels: Record<QuestStatus, string> = {
+    draft: t('quest_status_draft'),
+    clarifying: t('quest_status_clarifying'),
+    specified: t('quest_status_specified'),
+    planning: t('quest_status_planning'),
+    prepared: t('quest_status_prepared'),
+    running: t('quest_status_running'),
+    waiting_for_user: t('quest_status_waiting_for_user'),
+    validating: t('quest_status_validating'),
+    repairing: t('quest_status_repairing'),
+    ready_for_review: t('quest_status_ready_for_review'),
+    applying: t('quest_status_applying'),
+    completed: t('quest_status_completed'),
+    blocked: t('quest_status_blocked'),
+    canceled: t('quest_status_canceled'),
+    archived: t('quest_status_archived'),
+  };
+  return labels[status] ?? status;
+}
+
+function questPhaseIndex(status: QuestStatus): number {
+  if (status === 'completed' || status === 'archived') return 5;
+  if (status === 'ready_for_review' || status === 'applying') return 4;
+  if (status === 'validating' || status === 'repairing') return 5;
+  if (status === 'running') return 3;
+  if (status === 'prepared' || status === 'planning') return 2;
+  if (status === 'clarifying' || status === 'waiting_for_user' || status === 'blocked') return 1;
+  return 0;
+}
+
+function questPhaseSteps(
+  detail: QuestDetail,
+  t: (key: string) => string,
+): Array<{ title: string; description: string; state: 'done' | 'current' | 'pending' }> {
+  const current = questPhaseIndex(detail.status);
+  const reviewCount = detail.review?.changed_files.length ?? 0;
+  return [
+    { title: t('quest_phase_idea'), description: detail.goal || t('quest_phase_idea_desc') },
+    { title: t('quest_phase_clarify'), description: t('quest_phase_clarify_desc') },
+    { title: t('quest_phase_breakdown'), description: t('quest_phase_breakdown_desc') },
+    { title: t('quest_phase_execute'), description: t('quest_phase_execute_desc') },
+    { title: t('quest_phase_review'), description: reviewCount > 0 ? t_fmt_fallback(t, 'quest_phase_review_changed', { count: String(reviewCount) }) : t('quest_phase_review_desc') },
+    { title: t('quest_phase_verify'), description: t('quest_phase_verify_desc') },
+  ].map((step, index) => ({
+    ...step,
+    state: index < current ? 'done' : index === current ? 'current' : 'pending',
+  }));
+}
+
+function t_fmt_fallback(
+  t: (key: string) => string,
+  key: string,
+  args: Record<string, string>,
+): string {
+  let result = t(key);
+  for (const [name, value] of Object.entries(args)) {
+    result = result.replace(`{${name}}`, value);
+  }
+  return result;
+}
+
 function progressItems(
   detail: QuestDetail,
   t: (key: string) => string,
@@ -478,6 +548,7 @@ export default function QuestPage({
   currentProjectPath,
   initialQuestId,
   onOpenEditor,
+  onReturnToEditor,
   onCloseProject,
 }: Props) {
   const { t, t_fmt } = useTranslation();
@@ -1036,7 +1107,7 @@ export default function QuestPage({
         questId: quest.id,
         questTitle: quest.title,
         kind: 'intent',
-        label: 'Quest intent',
+        label: '任务意图',
         path: quest.intent_path,
       });
       return;
@@ -1433,7 +1504,10 @@ export default function QuestPage({
           <button className={cn(questClasses.topNavButton, questClasses.topNavButtonActive)}>{t('quest_title')}</button>
         </nav>
         <div className={questClasses.globalActions}>
-          <button className={buttonBase} onClick={onCloseProject} title={t('quest_close_project')}><IconX /></button>
+          <button className={buttonBase} onClick={onReturnToEditor} disabled={!currentProjectPath}>
+            <IconChevronRight className="rotate-180" /> {t('quest_return_editor')}
+          </button>
+          <button className={buttonBase} onClick={onCloseProject} title={t('quest_close_project')}><IconX /> {t('quest_close_project')}</button>
         </div>
       </header>
 
@@ -1565,6 +1639,7 @@ export default function QuestPage({
           <main className={questClasses.workspace}>
             <header className={questClasses.header}>
               <div>
+                <span className={questClasses.labKicker}>{t('quest_lab_kicker')}</span>
                 <div className={questClasses.projectLine}>
                   <span>{selected.project.name}</span>
                   <IconChevronRight />
@@ -1599,7 +1674,7 @@ export default function QuestPage({
                 <p>{selected.goal}</p>
               </div>
               <div className={questClasses.headerActions}>
-                <span className={cn('rounded-full border border-current px-2 py-[5px] text-[10px] font-extrabold uppercase', statusTextClass(selected.status))}>{selected.status}</span>
+                <span className={cn('rounded-full border border-current px-2.5 py-[6px] text-[11px] font-extrabold', statusTextClass(selected.status))}>{questStatusLabel(selected.status, t)}</span>
                 <button className={buttonBase} onClick={() => onOpenEditor(
                   selected.project.path,
                   artifactFor('intent', t('quest_artifact_intent'), selected.intent_path),
@@ -1620,6 +1695,30 @@ export default function QuestPage({
                 )}
               </div>
             </header>
+
+            <section className={questClasses.flowBar} aria-label={t('quest_phase_flow')}>
+              <div className={questClasses.flowIntro}>
+                <strong>{t('quest_phase_flow')}</strong>
+                <span>{t('quest_phase_flow_desc')}</span>
+              </div>
+              <ol className={questClasses.flowList}>
+                {questPhaseSteps(selected, t).map((step, index) => (
+                  <li
+                    key={step.title}
+                    className={cn(
+                      questClasses.flowStep,
+                      step.state === 'done' && questClasses.flowStepDone,
+                      step.state === 'current' && questClasses.flowStepCurrent,
+                    )}
+                    aria-current={step.state === 'current' ? 'step' : undefined}
+                  >
+                    <b>{String(index + 1).padStart(2, '0')}</b>
+                    <strong>{step.title}</strong>
+                    <small>{step.description}</small>
+                  </li>
+                ))}
+              </ol>
+            </section>
 
             <section className={questClasses.cockpit}>
               <div className={questClasses.runStream}>
@@ -1699,7 +1798,13 @@ export default function QuestPage({
                     placeholder={t('quest_input_placeholder')}
                     disabled={busy || !selected}
                   />
-                  <button className={questClasses.sendButton} onClick={submitQuestInput} disabled={busy || !questInput.trim()}>
+                  <button
+                    className={questClasses.sendButton}
+                    onClick={submitQuestInput}
+                    disabled={busy || !questInput.trim()}
+                    title={t('quest_send_note')}
+                    aria-label={t('quest_send_note')}
+                  >
                     <IconSend />
                   </button>
                 </div>

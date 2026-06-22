@@ -26,13 +26,13 @@ const listClass = 'flex-1 overflow-y-auto py-1';
 const groupClass = 'mb-0.5';
 const categoryClass = 'px-3.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)]';
 const itemLabelClass = 'flex-1';
-const shortcutClass = 'ml-4 font-[var(--font-mono)] text-[11px] text-[var(--text-muted)] group-hover:text-white/70 group-[.selected]:text-white/70';
+const shortcutClass = 'ml-4 font-[var(--font-mono)] text-[11px] text-[var(--text-muted)] group-hover:text-[var(--text-on-brand)]/80 group-[.selected]:text-[var(--text-on-brand)]/80';
 const emptyClass = 'p-6 text-center text-[13px] text-[var(--text-muted)]';
 
 function itemClass(selected: boolean, disabled?: boolean): string {
   return [
-    'group flex w-full cursor-pointer items-center justify-between border-0 bg-transparent px-3.5 py-1.5 text-left font-[var(--font-sans)] text-[13px] text-[var(--text-primary)] hover:bg-[var(--accent)] hover:text-white',
-    selected ? 'selected bg-[var(--accent)] text-white' : '',
+    'group flex w-full cursor-pointer items-center justify-between border-0 bg-transparent px-3.5 py-1.5 text-left font-[var(--font-sans)] text-[13px] text-[var(--text-primary)] hover:bg-[var(--brand)] hover:text-[var(--text-on-brand)]',
+    selected ? 'selected bg-[var(--brand)] text-[var(--text-on-brand)]' : '',
     disabled ? 'pointer-events-none opacity-35' : '',
   ].filter(Boolean).join(' ');
 }
@@ -215,7 +215,7 @@ export function buildDefaultCommands(t: (key: string) => string, actions: {
     // Assets
     { id: 'import-asset',   label: t('menu_import_asset'),   shortcut: '', category: t('menu_assets'), action: actions.handleImportAsset, disabled: !hasProject },
     // Help
-    { id: 'command-palette', label: 'Command Palette',        shortcut: 'Ctrl+Shift+K', category: t('menu_help'), action: actions.handleKeyboardShortcuts },
+    { id: 'command-palette', label: t('command_palette'), shortcut: 'Ctrl+Shift+K', category: t('menu_help'), action: actions.handleKeyboardShortcuts },
     { id: 'about',           label: t('menu_about'),          shortcut: '',             category: t('menu_help'), action: actions.handleAbout },
     { id: 'documentation',   label: t('menu_documentation'),  shortcut: '',             category: t('menu_help'), action: actions.handleDocumentation },
     { id: 'report-issue',    label: t('menu_report_issue'),   shortcut: '',             category: t('menu_help'), action: actions.handleReportIssue },

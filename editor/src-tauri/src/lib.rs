@@ -5,7 +5,7 @@
 
 use std::{
     cell::UnsafeCell,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     hash::{DefaultHasher, Hash, Hasher},
     path::{Component, Path, PathBuf},
     process::Command,
@@ -966,6 +966,10 @@ impl EditorHost {
             "console/clear" => self.console_clear(params),
             "console/push_entry" => self.console_push_entry(params),
 
+            // ── Diagnostics ──
+            "diagnostics/run_health_check" => self.diagnostics_run_health_check(params),
+            "diagnostics/apply_fix" => self.diagnostics_apply_fix(params),
+
             // ── Viewport ──
             "viewport/readback" => self.viewport_readback(params),
 
@@ -983,6 +987,7 @@ impl EditorHost {
             "copilot/get_conversation_length" => self.copilot_get_conversation_length(params),
             "app/get_copilot_settings" => self.get_copilot_settings(params),
             "app/update_copilot_settings" => self.update_copilot_settings(params),
+            "app/test_copilot_connection" => self.test_copilot_connection(params),
             "app/detect_models" => self.detect_models(params),
             "app/get_model_registry" => self.get_model_registry(params),
             "app/codex_oauth_status" => self.codex_oauth_status(params),
@@ -994,6 +999,7 @@ impl EditorHost {
             "shell/get_state" => self.shell_get_state(params),
             "shell/get_scene_tree" => self.shell_get_scene_tree(params),
             "shell/get_entity" => self.shell_get_entity(params),
+            "shell/list_component_schemas" => self.shell_list_component_schemas(params),
             "shell/select_entity" => self.shell_select_entity(params),
             "shell/save_scene" => self.shell_save_scene(params),
             "shell/open_scene" => self.shell_open_scene(params),
@@ -3501,6 +3507,884 @@ fn on_update(entity, dt) {
         Ok(serde_json::json!({}))
     }
 
+    fn diagnostics_run_health_check(&mut self, _params: &Value) -> EngineResult<Value> {
+        let mut groups: Vec<Value> = Vec::new();
+
+        let project_group = if let Some(project) = self.shell.project_mut() {
+            let mut project_items = Vec::new();
+            let project_root = project.root.clone();
+            let asset_root = project.root.join(&project.manifest.asset_root);
+            let scene_path = project.scene_path.clone();
+            let object_count = project.scene.objects().len();
+            let scene_dirty = project.scene_dirty;
+            let project_name = project.name().to_owned();
+
+            project_items.push(diagnostics_item(
+                "project.open",
+                "项目已打开",
+                "ok",
+                format!("{project_name} 正在编辑中。"),
+                format!("项目目录：{}", project_root.display()),
+                vec![
+                    format!("root={}", project_root.display()),
+                    format!("asset_root={}", asset_root.display()),
+                ],
+                vec![],
+            ));
+            project_items.push(diagnostics_item(
+                "project.root",
+                "项目目录存在",
+                if project_root.is_dir() { "ok" } else { "error" },
+                if project_root.is_dir() {
+                    "项目目录可以访问。".to_owned()
+                } else {
+                    "项目目录不存在或不可访问。".to_owned()
+                },
+                "这是所有资源、场景和构建输出的根目录。".to_owned(),
+                vec![project_root.display().to_string()],
+                vec![],
+            ));
+            project_items.push(diagnostics_item(
+                "project.scene_file",
+                "默认场景文件",
+                if scene_path.is_file() { "ok" } else { "error" },
+                if scene_path.is_file() {
+                    "默认场景文件存在。".to_owned()
+                } else {
+                    "默认场景文件缺失，保存场景可以重新写入。".to_owned()
+                },
+                format!("场景路径：{}", scene_path.display()),
+                vec![scene_path.display().to_string()],
+                if scene_path.is_file() {
+                    vec![]
+                } else {
+                    vec![diagnostics_fix(
+                        "save_scene",
+                        "保存当前场景",
+                        "把内存中的当前场景写回默认场景文件。",
+                    )]
+                },
+            ));
+            project_items.push(diagnostics_item(
+                "project.scene_dirty",
+                "场景保存状态",
+                if scene_dirty { "warning" } else { "ok" },
+                if scene_dirty {
+                    "当前场景有未保存修改。".to_owned()
+                } else {
+                    "当前场景已保存。".to_owned()
+                },
+                "关闭项目前建议先保存，避免误以为 AI 改动已经落盘。".to_owned(),
+                vec![format!("scene_dirty={scene_dirty}")],
+                if scene_dirty {
+                    vec![diagnostics_fix(
+                        "save_scene",
+                        "保存当前场景",
+                        "安全写入场景 JSON，并保留旧文件备份。",
+                    )]
+                } else {
+                    vec![]
+                },
+            ));
+
+            let registry = engine_ecs::ComponentSchemaRegistry::builtin();
+            let schemas = registry.all();
+            let missing_schemas = [
+                "Transform",
+                "Camera",
+                "MeshRenderer",
+                "AudioSource",
+                "Script",
+                "Skybox",
+                "Sprite2D",
+                "TileMap",
+                "AnimationPlayer",
+                "SkinnedMeshRenderer",
+            ]
+            .into_iter()
+            .filter(|required| !schemas.iter().any(|schema| schema.type_id == *required))
+            .collect::<Vec<_>>();
+            project_items.push(diagnostics_item(
+                "editor.component_schema",
+                "Inspector 组件清单",
+                if missing_schemas.is_empty() { "ok" } else { "error" },
+                if missing_schemas.is_empty() {
+                    format!("已加载 {} 个组件 Schema，Inspector 可以生成真实表单。", schemas.len())
+                } else {
+                    format!("缺少组件 Schema：{}", missing_schemas.join("、"))
+                },
+                "这个检查直接读取后端 ComponentSchemaRegistry，不是前端假列表。".to_owned(),
+                vec![format!("component_schema_count={}", schemas.len())],
+                vec![],
+            ));
+
+            let scene_round_trip = project
+                .scene
+                .to_json(project.name())
+                .and_then(|json| engine_ecs::Scene::from_json(&json).map(|_| json.len()));
+            project_items.push(match scene_round_trip {
+                Ok(bytes) => diagnostics_item(
+                    "scene.schema",
+                    "场景 JSON 结构",
+                    "ok",
+                    format!("当前场景可序列化并重新解析，大小 {bytes} 字节。"),
+                    format!("场景对象数：{object_count}。"),
+                    vec![format!("objects={object_count}"), format!("scene_bytes={bytes}")],
+                    vec![],
+                ),
+                Err(error) => diagnostics_item(
+                    "scene.schema",
+                    "场景 JSON 结构",
+                    "error",
+                    "当前场景无法通过 JSON 结构校验。".to_owned(),
+                    error.to_string(),
+                    vec![error.to_string()],
+                    vec![],
+                ),
+            });
+
+            diagnostics_group(
+                "project_scene",
+                "项目与场景",
+                "检查当前项目、默认场景、保存状态和 Inspector Schema。",
+                project_items,
+            )
+        } else {
+            diagnostics_group(
+                "project_scene",
+                "项目与场景",
+                "检查当前项目、默认场景、保存状态和 Inspector Schema。",
+                vec![diagnostics_item(
+                    "project.open",
+                    "项目已打开",
+                    "error",
+                    "当前没有打开项目。".to_owned(),
+                    "请从启动页打开或创建项目；没有项目时资源、场景、构建和 AI 工具都无法真正落地。".to_owned(),
+                    vec!["has_project=false".to_owned()],
+                    vec![],
+                )],
+            )
+        };
+        groups.push(project_group);
+
+        let editor_workspace_group = if let Some(project) = self.shell.project() {
+            let selected_entity_id = self.shell.selected_entity_id();
+            let object_count = project.scene.objects().len();
+            let root_count = project
+                .scene
+                .objects()
+                .iter()
+                .filter(|(entity, _)| project.scene.transforms().parent(*entity).is_none())
+                .count();
+            let component_count = project
+                .scene
+                .objects()
+                .iter()
+                .map(|(_, object)| object.components.len() + object.scripts.len())
+                .sum::<usize>();
+            let mut guide_count = 0usize;
+            let mut guide_kinds: BTreeMap<&'static str, usize> = BTreeMap::new();
+            for (_, object) in project.scene.objects() {
+                for component in &object.components {
+                    match component {
+                        engine_ecs::ComponentData::Camera(_) => {
+                            guide_count += 1;
+                            *guide_kinds.entry("Camera").or_insert(0) += 1;
+                        }
+                        engine_ecs::ComponentData::Light(_) => {
+                            guide_count += 1;
+                            *guide_kinds.entry("Light").or_insert(0) += 1;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let selected_label = selected_entity_id
+                .and_then(|entity_id| {
+                    project
+                        .scene
+                        .find_by_id(entity_id)
+                        .and_then(|entity| project.scene.object(entity))
+                        .map(|object| object.name.clone())
+                })
+                .unwrap_or_else(|| "未选择对象".to_owned());
+            let registry = engine_ecs::ComponentSchemaRegistry::builtin();
+            let schema_count = registry.all().len();
+            let mut guide_evidence = guide_kinds
+                .iter()
+                .map(|(kind, count)| format!("{kind}={count}"))
+                .collect::<Vec<_>>();
+            if guide_evidence.is_empty() {
+                guide_evidence.push("guides=0".to_owned());
+            }
+
+            diagnostics_group(
+                "editor_workspace",
+                "编辑器工作区",
+                "检查左侧/中间可视化编辑器是否有真实对象、Inspector、视口辅助和撤销能力。",
+                vec![
+                    diagnostics_item(
+                        "editor.scene_tree",
+                        "场景结构面板",
+                        if object_count > 0 { "ok" } else { "warning" },
+                        if object_count > 0 {
+                            format!("场景树可用，当前有 {object_count} 个对象、{root_count} 个根对象。")
+                        } else {
+                            "场景树可用，但当前场景还是空的。".to_owned()
+                        },
+                        "该数据来自 shell/get_scene_tree 使用的同一份 Scene，不是前端静态示例。".to_owned(),
+                        vec![
+                            format!("objects={object_count}"),
+                            format!("root_objects={root_count}"),
+                            "rpc=shell/get_scene_tree".to_owned(),
+                        ],
+                        vec![],
+                    ),
+                    diagnostics_item(
+                        "editor.inspector_binding",
+                        "Inspector 选中对象绑定",
+                        if schema_count > 0 { "ok" } else { "error" },
+                        format!("Inspector 可读取 {schema_count} 个组件 Schema；当前选择：{selected_label}。"),
+                        "选中对象后，右侧属性表单通过 shell/get_entity 和 shell/list_component_schemas 读取真实组件数据。".to_owned(),
+                        vec![
+                            format!("component_schema_count={schema_count}"),
+                            format!("scene_component_instances={component_count}"),
+                            format!("selected={selected_label}"),
+                            "rpc=shell/get_entity,shell/update_component".to_owned(),
+                        ],
+                        vec![],
+                    ),
+                    diagnostics_item(
+                        "editor.viewport_guides",
+                        "视口辅助标记",
+                        "ok",
+                        format!("视口可根据场景组件生成 {guide_count} 个辅助标记。"),
+                        "摄像机、灯光等辅助标记由 scene/get_guides 从真实组件推导，用来支撑可视化编辑而不是纯图片展示。".to_owned(),
+                        guide_evidence,
+                        vec![],
+                    ),
+                    diagnostics_item(
+                        "editor.undo_redo",
+                        "撤销与重做通道",
+                        "ok",
+                        "场景修改走 UndoCommand 快照，顶部撤销/重做按钮连接后端状态。".to_owned(),
+                        "AI 或人工修改场景时，必须继续把写入动作纳入可撤销路径，不能直接绕过 shell 修改文件。".to_owned(),
+                        vec![
+                            format!("can_undo={}", self.shell.undo_stack().can_undo()),
+                            format!("can_redo={}", self.shell.undo_stack().can_redo()),
+                            "rpc=shell/undo,shell/redo".to_owned(),
+                        ],
+                        vec![],
+                    ),
+                ],
+            )
+        } else {
+            diagnostics_group(
+                "editor_workspace",
+                "编辑器工作区",
+                "检查左侧/中间可视化编辑器是否有真实对象、Inspector、视口辅助和撤销能力。",
+                vec![diagnostics_item(
+                    "editor.scene_tree",
+                    "场景结构面板",
+                    "error",
+                    "没有打开项目，编辑器工作区无法读取真实场景。".to_owned(),
+                    "请先打开项目，再检查场景树、Inspector 和视口辅助。".to_owned(),
+                    vec!["has_project=false".to_owned()],
+                    vec![],
+                )],
+            )
+        };
+        groups.push(editor_workspace_group);
+
+        let asset_and_script_group = if let Some(project) = self.shell.project_mut() {
+            let mut items = Vec::new();
+            let asset_root = project.root.join(&project.manifest.asset_root);
+            let scan_result = project.rescan_assets();
+            match scan_result {
+                Ok(()) => {
+                    let assets = project.sorted_assets();
+                    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+                    let mut missing = Vec::new();
+                    let mut script_paths = Vec::new();
+                    let mut amdl_paths = Vec::new();
+                    for asset in assets {
+                        *counts.entry(format!("{:?}", asset.kind)).or_insert(0) += 1;
+                        if !asset_root.join(&asset.source_path).is_file() {
+                            missing.push(asset.source_path.display().to_string());
+                        }
+                        let lower = asset.source_path.to_string_lossy().to_ascii_lowercase();
+                        if lower.ends_with(".aster") || lower.ends_with(".rhai") {
+                            script_paths.push(asset.source_path.clone());
+                        } else if lower.ends_with(".amdl") {
+                            amdl_paths.push(asset.source_path.clone());
+                        }
+                    }
+                    let evidence = counts
+                        .iter()
+                        .map(|(kind, count)| format!("{kind}={count}"))
+                        .collect::<Vec<_>>();
+                    items.push(diagnostics_item(
+                        "assets.scan",
+                        "资源数据库扫描",
+                        if missing.is_empty() { "ok" } else { "error" },
+                        if missing.is_empty() {
+                            format!("资源数据库已扫描，识别 {} 个资源。", project.assets.len())
+                        } else {
+                            format!("有 {} 个资源记录指向不存在的文件。", missing.len())
+                        },
+                        if missing.is_empty() {
+                            "资源面板和 Inspector 下拉选择使用同一个后端资产数据库。".to_owned()
+                        } else {
+                            format!("缺失样例：{}", missing.iter().take(5).cloned().collect::<Vec<_>>().join("、"))
+                        },
+                        evidence,
+                        vec![diagnostics_fix(
+                            "rescan_assets",
+                            "重新扫描资源",
+                            "重新读取 assets 目录并更新资源数据库。",
+                        )],
+                    ));
+
+                    let backend = engine_script_rhai::RhaiScriptBackend::new();
+                    let mut script_error_count = 0usize;
+                    let mut script_warning_count = 0usize;
+                    let mut script_evidence = Vec::new();
+                    for relative in &script_paths {
+                        let full_path = asset_root.join(relative);
+                        match std::fs::read_to_string(&full_path) {
+                            Ok(source) => {
+                                let diagnostics = backend.diagnose_source(&full_path, &source);
+                                script_error_count += diagnostics
+                                    .iter()
+                                    .filter(|d| matches!(d.severity, engine_script_rhai::AsterDiagnosticSeverity::Error))
+                                    .count();
+                                script_warning_count += diagnostics
+                                    .iter()
+                                    .filter(|d| matches!(d.severity, engine_script_rhai::AsterDiagnosticSeverity::Warning))
+                                    .count();
+                                if let Some(first) = diagnostics.first() {
+                                    script_evidence.push(format!(
+                                        "{}: {} {}",
+                                        relative.display(),
+                                        first.code,
+                                        first.message
+                                    ));
+                                }
+                            }
+                            Err(error) => {
+                                script_error_count += 1;
+                                script_evidence.push(format!("{}: {error}", relative.display()));
+                            }
+                        }
+                    }
+                    let script_status = if script_error_count > 0 {
+                        "error"
+                    } else if script_warning_count > 0 {
+                        "warning"
+                    } else {
+                        "ok"
+                    };
+                    items.push(diagnostics_item(
+                        "scripts.syntax",
+                        "脚本语法检查",
+                        script_status,
+                        if script_paths.is_empty() {
+                            "当前项目还没有 Aster 脚本资源。".to_owned()
+                        } else if script_error_count == 0 && script_warning_count == 0 {
+                            format!("已检查 {} 个脚本，没有发现错误。", script_paths.len())
+                        } else {
+                            format!(
+                                "已检查 {} 个脚本，发现 {} 个错误、{} 个警告。",
+                                script_paths.len(),
+                                script_error_count,
+                                script_warning_count
+                            )
+                        },
+                        "该检查复用 project/check_script 的 Rhai/Aster 诊断后端。".to_owned(),
+                        if script_evidence.is_empty() {
+                            vec![format!("scripts={}", script_paths.len())]
+                        } else {
+                            script_evidence.into_iter().take(6).collect()
+                        },
+                        vec![],
+                    ));
+
+                    let mut amdl_issue_count = 0usize;
+                    let mut amdl_evidence = Vec::new();
+                    for relative in &amdl_paths {
+                        let full_path = asset_root.join(relative);
+                        match std::fs::read_to_string(&full_path) {
+                            Ok(source) => {
+                                let diagnostics = engine_assets::diagnose_amdl(&source);
+                                amdl_issue_count += diagnostics.len();
+                                if let Some(first) = diagnostics.first() {
+                                    amdl_evidence.push(format!(
+                                        "{}: {}",
+                                        relative.display(),
+                                        first.message
+                                    ));
+                                }
+                            }
+                            Err(error) => {
+                                amdl_issue_count += 1;
+                                amdl_evidence.push(format!("{}: {error}", relative.display()));
+                            }
+                        }
+                    }
+                    items.push(diagnostics_item(
+                        "assets.amdl",
+                        "模型文本资源检查",
+                        if amdl_issue_count == 0 { "ok" } else { "warning" },
+                        if amdl_paths.is_empty() {
+                            "当前项目没有 AMDL 文本模型。".to_owned()
+                        } else if amdl_issue_count == 0 {
+                            format!("已检查 {} 个 AMDL 文件，没有发现结构问题。", amdl_paths.len())
+                        } else {
+                            format!("AMDL 检查发现 {} 个问题。", amdl_issue_count)
+                        },
+                        "二进制 glTF/图片/音频仍由资源导入器负责识别，这里只做文本模型快速诊断。".to_owned(),
+                        if amdl_evidence.is_empty() {
+                            vec![format!("amdl={}", amdl_paths.len())]
+                        } else {
+                            amdl_evidence.into_iter().take(6).collect()
+                        },
+                        vec![],
+                    ));
+                }
+                Err(error) => {
+                    items.push(diagnostics_item(
+                        "assets.scan",
+                        "资源数据库扫描",
+                        "error",
+                        "资源数据库扫描失败。".to_owned(),
+                        error.to_string(),
+                        vec![error.to_string()],
+                        vec![diagnostics_fix(
+                            "rescan_assets",
+                            "重新扫描资源",
+                            "重新读取 assets 目录并更新资源数据库。",
+                        )],
+                    ));
+                }
+            }
+            diagnostics_group(
+                "assets_scripts",
+                "资源与脚本",
+                "检查资源数据库、资源引用、脚本语法和可导入文本资源。",
+                items,
+            )
+        } else {
+            diagnostics_group(
+                "assets_scripts",
+                "资源与脚本",
+                "检查资源数据库、资源引用、脚本语法和可导入文本资源。",
+                vec![diagnostics_item(
+                    "assets.scan",
+                    "资源数据库扫描",
+                    "error",
+                    "没有打开项目，无法扫描资源。".to_owned(),
+                    "打开项目后才能读取 assets 目录。".to_owned(),
+                    vec![],
+                    vec![],
+                )],
+            )
+        };
+        groups.push(asset_and_script_group);
+
+        let console_entries = self.console.entries();
+        let console_error_count = console_entries
+            .iter()
+            .filter(|entry| matches!(entry.level, ConsoleLevel::Error))
+            .count();
+        let console_warn_count = console_entries
+            .iter()
+            .filter(|entry| matches!(entry.level, ConsoleLevel::Warn))
+            .count();
+        groups.push(diagnostics_group(
+            "console",
+            "日志与错误",
+            "检查后端控制台记录，帮助判断最近的失败是否还在影响工作。",
+            vec![diagnostics_item(
+                "console.entries",
+                "控制台错误记录",
+                if console_error_count > 0 {
+                    "error"
+                } else if console_warn_count > 0 {
+                    "warning"
+                } else {
+                    "ok"
+                },
+                if console_entries.is_empty() {
+                    "当前没有控制台记录。".to_owned()
+                } else {
+                    format!(
+                        "共有 {} 条记录，其中错误 {} 条、警告 {} 条。",
+                        console_entries.len(),
+                        console_error_count,
+                        console_warn_count
+                    )
+                },
+                "清空日志不会修复根因，但能让下一次测试结果更容易观察。".to_owned(),
+                console_entries
+                    .iter()
+                    .rev()
+                    .take(5)
+                    .map(|entry| format!("{:?}: {}", entry.level, entry.message))
+                    .collect(),
+                if console_entries.is_empty() {
+                    vec![]
+                } else {
+                    vec![diagnostics_fix(
+                        "clear_console",
+                        "清空控制台",
+                        "清除旧日志，让下一次诊断只显示新结果。",
+                    )]
+                },
+            )],
+        ));
+
+        let provider_id = copilot_provider_id(&self.copilot_settings.provider);
+        let has_key = self.copilot_settings.api_key.is_some();
+        let has_model = !self.copilot_settings.model.trim().is_empty();
+        let has_endpoint = self
+            .copilot_settings
+            .api_endpoint
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|endpoint| !endpoint.is_empty());
+        let ai_status = if provider_id == "stub" {
+            "not_configured"
+        } else if matches!(self.copilot_settings.provider, engine_editor::CopilotProvider::Custom)
+            && (!has_key || !has_endpoint || !has_model)
+        {
+            "warning"
+        } else if provider_requires_api_key(&self.copilot_settings.provider) && !has_key {
+            "warning"
+        } else if has_model {
+            "ok"
+        } else {
+            "warning"
+        };
+        groups.push(diagnostics_group(
+            "ai_gateway",
+            "AI 与模型网关",
+            "检查 AI 是否配置到真实模型，尤其是 OpenAI 兼容中转站。",
+            vec![
+                diagnostics_item(
+                    "ai.gateway",
+                    "AI Provider 配置",
+                    ai_status,
+                    match ai_status {
+                        "ok" => {
+                            format!("已配置 {provider_id} / {}。", self.copilot_settings.model)
+                        }
+                        "not_configured" => {
+                            "当前仍是本地 Stub，AI 不会调用真实模型。".to_owned()
+                        }
+                        _ => "AI 配置不完整，聊天或任务执行可能无法使用真实模型。".to_owned(),
+                    },
+                    if matches!(
+                        self.copilot_settings.provider,
+                        engine_editor::CopilotProvider::Custom
+                    ) {
+                        "自定义中转站按 OpenAI 兼容协议调用 /chat/completions；Base URL、Key、模型 ID 都需要正确。".to_owned()
+                    } else {
+                        "官方或内置 Provider 会使用各自注册的默认端点；Key 不会回显给前端。".to_owned()
+                    },
+                    vec![
+                        format!("provider={provider_id}"),
+                        format!("model={}", self.copilot_settings.model),
+                        format!("has_api_key={has_key}"),
+                        format!("has_endpoint={has_endpoint}"),
+                    ],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "ai.workspace",
+                    "右侧 AI 工作流",
+                    if provider_id == "stub" { "not_configured" } else { "ok" },
+                    if self.last_copilot_plan.is_some() {
+                        "已有待审查的 AI 计划，必须由用户确认后才能应用。".to_owned()
+                    } else {
+                        "AI 面板支持聊天、计划生成、审批和应用；计划/证据应默认折叠，不挡聊天记录。".to_owned()
+                    },
+                    "真实写入必须经过 copilot/plan → copilot/apply；聊天记录、工具调用和证据只作为辅助层显示。".to_owned(),
+                    vec![
+                        format!("conversation_messages={}", self.copilot_conversation.len()),
+                        format!("has_pending_plan={}", self.last_copilot_plan.is_some()),
+                        "rpc=copilot/plan,copilot/apply,copilot/undo_last".to_owned(),
+                    ],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "ai.tool_permissions",
+                    "工具与命令审批",
+                    "ok",
+                    format!(
+                        "当前允许命令 {} 条；高风险命令仍应进入审查流。",
+                        self.copilot_settings.allowed_commands.len()
+                    ),
+                    "这里检查的是配置通道，不代表应该自动执行危险命令；删除、覆盖、构建发布必须给用户证据和确认。".to_owned(),
+                    vec![
+                        format!(
+                            "allowed_commands={}",
+                            self.copilot_settings.allowed_commands.len()
+                        ),
+                        "approval=required_for_writes_and_commands".to_owned(),
+                    ],
+                    vec![],
+                ),
+            ],
+        ));
+
+        let current_locale = locale_code(self.hub.preferences().locale);
+        let settings_language_status = if matches!(current_locale, "zh" | "en") {
+            "ok"
+        } else {
+            "warning"
+        };
+        groups.push(diagnostics_group(
+            "settings_language",
+            "设置与语言",
+            "检查设置入口、中文默认体验、英文切换和 OpenAI 兼容中转站表单。",
+            vec![
+                diagnostics_item(
+                    "settings.locale",
+                    "界面语言",
+                    settings_language_status,
+                    if current_locale == "zh" {
+                        "当前界面语言为中文，符合默认体验要求。".to_owned()
+                    } else if current_locale == "en" {
+                        "当前界面语言为英文；设置页保留中文/英文切换。".to_owned()
+                    } else {
+                        format!("当前语言为 {current_locale}，设置页高可见入口暂只应提供中文/英文。")
+                    },
+                    "默认 Locale 在 engine-i18n 中是中文；设置页下拉只暴露中文和英文，避免高可见界面混杂多语半成品。".to_owned(),
+                    vec![
+                        format!("current_locale={current_locale}"),
+                        "default_locale=zh".to_owned(),
+                        "visible_settings_locales=zh,en".to_owned(),
+                    ],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "settings.navigation",
+                    "设置页返回路径",
+                    "ok",
+                    "Hub 设置页通过 hub/set_page 在项目页、安装页、设置页之间切换。".to_owned(),
+                    "前端仍需要保留明显“返回编辑器/返回项目”按钮；这个检查确认后端导航状态不是死路。".to_owned(),
+                    vec![
+                        "rpc=hub/get_state,hub/set_page".to_owned(),
+                        "pages=projects,installs,settings".to_owned(),
+                    ],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "settings.openai_compatible",
+                    "OpenAI 兼容中转站",
+                    if has_endpoint || provider_id != "custom" {
+                        "ok"
+                    } else {
+                        "warning"
+                    },
+                    if provider_id == "custom" {
+                        if has_endpoint && has_key && has_model {
+                            "自定义中转站的 URL、Key、模型 ID 已配置。".to_owned()
+                        } else {
+                            "自定义中转站还缺少 URL、Key 或模型 ID。".to_owned()
+                        }
+                    } else {
+                        "设置页支持切换到 Custom/OpenAI-compatible，并填写 Base URL、Key、模型 ID。".to_owned()
+                    },
+                    "中转站 Base URL 会做规范化；Key 只保存为 secret 状态，不会通过 get_copilot_settings 回显。".to_owned(),
+                    vec![
+                        format!("provider={provider_id}"),
+                        format!("custom_endpoint_supported={}", engine_editor::CopilotProvider::Custom.endpoint_configurable()),
+                        format!("has_endpoint={has_endpoint}"),
+                        format!("has_api_key={has_key}"),
+                        format!("has_model={has_model}"),
+                    ],
+                    vec![],
+                ),
+            ],
+        ));
+
+        let quest_count = self.quest_store.list().map(|quests| quests.len()).unwrap_or(0);
+        groups.push(diagnostics_group(
+            "quest_lab",
+            "任务实验室",
+            "检查 Quest/任务实验室是否具备从想法到执行审查的记录入口。",
+            vec![
+                diagnostics_item(
+                    "quest.store",
+                    "任务记录仓库",
+                    "ok",
+                    if quest_count == 0 {
+                        "任务实验室可用，但当前还没有任务记录。".to_owned()
+                    } else {
+                        format!("已有 {quest_count} 个任务/Quest 记录。")
+                    },
+                    "推荐把它定位为：想法输入 → 需求澄清 → 任务拆分 → AI 执行 → 改动审查 → 验证记录。".to_owned(),
+                    vec![format!("quests={quest_count}")],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "quest.workflow",
+                    "任务生产流程",
+                    if provider_id == "stub" { "not_configured" } else { "ok" },
+                    "任务实验室已有执行、应用、丢弃、回滚、导出等后端命令，可承载完整审查流。".to_owned(),
+                    "还没配置真实模型时，流程入口可展示，但执行按钮必须提示先配置 AI，而不是伪造完成结果。".to_owned(),
+                    vec![
+                        "flow=想法→澄清→任务拆分→AI执行→改动审查→验证收尾".to_owned(),
+                        "rpc=quest/execute,quest/apply,quest/discard,quest/rollback,quest/export".to_owned(),
+                    ],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "quest.review_safety",
+                    "改动审查与回滚",
+                    "ok",
+                    "Quest 结果以 review bundle 呈现，支持按文件/事务组选择应用或丢弃。".to_owned(),
+                    "这保证 AI 不是直接把代码写进主项目；用户可以看差异、做部分应用，并保留 rollback snapshot。".to_owned(),
+                    vec![
+                        "review=changed_files+transaction_groups".to_owned(),
+                        "rollback=snapshot_linked_to_decision".to_owned(),
+                    ],
+                    vec![],
+                ),
+            ],
+        ));
+
+        let repo_root = aster_repo_root();
+        let runtime_manifest = repo_root.join("crates").join("runtime-min").join("Cargo.toml");
+        let runtime_binary_debug = repo_root
+            .join("target")
+            .join("debug")
+            .join(runtime_binary_file_name());
+        let runtime_binary_release = repo_root
+            .join("target")
+            .join("release")
+            .join(runtime_binary_file_name());
+        let has_runtime_manifest = runtime_manifest.is_file();
+        let has_cached_runtime_binary =
+            runtime_binary_debug.is_file() || runtime_binary_release.is_file();
+        groups.push(diagnostics_group(
+            "build_export",
+            "构建与预览",
+            "检查当前主机是否具备真实导出路径。",
+            vec![
+                diagnostics_item(
+                    "build.desktop_folder",
+                    "本机文件夹包导出",
+                    if self.shell.project().is_some() {
+                        "ok"
+                    } else {
+                        "error"
+                    },
+                    if self.shell.project().is_some() {
+                        format!(
+                            "当前主机支持 {} 的 folder 调试包导出。",
+                            current_desktop_package_target()
+                        )
+                    } else {
+                        "没有打开项目，无法构建。".to_owned()
+                    },
+                    "安装器格式（DMG/MSI/AppImage/APK/IPA）仍应显示为规划中或待补齐，不能假装可用。".to_owned(),
+                    vec![
+                        format!("target={}", current_desktop_package_target()),
+                        "format=folder".to_owned(),
+                        "rpc=project/package".to_owned(),
+                    ],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "build.runtime_source",
+                    "运行时工程",
+                    if has_runtime_manifest { "ok" } else { "error" },
+                    if has_runtime_manifest {
+                        "runtime-min 工程存在，project/package 可以按需编译运行时。".to_owned()
+                    } else {
+                        "缺少 runtime-min 工程，导出时无法编译运行时。".to_owned()
+                    },
+                    "诊断只检查工程入口和缓存二进制；真正导出仍由 project/package 执行 cargo build 并复制运行时。".to_owned(),
+                    vec![
+                        format!("manifest={}", runtime_manifest.display()),
+                        format!("cached_binary={has_cached_runtime_binary}"),
+                    ],
+                    vec![],
+                ),
+                diagnostics_item(
+                    "build.installer_formats",
+                    "安装器/移动端出口",
+                    "not_configured",
+                    "目前只承诺本机 folder 包；安装器和移动端导出还没有真实实现。".to_owned(),
+                    "前端应把 DMG/MSI/AppImage/APK/IPA 标注为规划中或禁用，不能做成点击后假成功。".to_owned(),
+                    vec![
+                        "supported_now=folder".to_owned(),
+                        "planned=dmg,msi,appimage,apk,ipa".to_owned(),
+                    ],
+                    vec![],
+                ),
+            ],
+        ));
+
+        let summary = diagnostics_summary(&groups);
+        Ok(serde_json::json!({
+            "scanned_at": unix_time_ms(),
+            "summary": summary,
+            "groups": groups,
+        }))
+    }
+
+    fn diagnostics_apply_fix(&mut self, params: &Value) -> EngineResult<Value> {
+        let fix_id = required_string(params, "fix_id")?;
+        match fix_id {
+            "clear_console" => {
+                let cleared = self.console.entries().len();
+                self.console.clear();
+                Ok(serde_json::json!({
+                    "applied": true,
+                    "fix_id": fix_id,
+                    "message": format!("已清空 {cleared} 条控制台记录。"),
+                }))
+            }
+            "rescan_assets" => {
+                let Some(project) = self.shell.project_mut() else {
+                    return Err(EngineError::config("no project open"));
+                };
+                project.rescan_assets()?;
+                let asset_count = project.assets.len();
+                self.console.push(ConsoleEntry {
+                    timestamp: timestamp_now(),
+                    level: ConsoleLevel::Info,
+                    source: engine_editor::ConsoleSource {
+                        subsystem: "diagnostics".to_owned(),
+                        file: None,
+                        line: None,
+                    },
+                    message: format!("Diagnostics rescan completed: {asset_count} assets"),
+                });
+                Ok(serde_json::json!({
+                    "applied": true,
+                    "fix_id": fix_id,
+                    "message": format!("已重新扫描资源，当前识别 {asset_count} 个资源。"),
+                }))
+            }
+            "save_scene" => {
+                let path = self.shell.save_scene()?;
+                self.drain_shell_console();
+                Ok(serde_json::json!({
+                    "applied": true,
+                    "fix_id": fix_id,
+                    "message": format!("已保存场景：{path}"),
+                }))
+            }
+            other => Err(EngineError::config(format!(
+                "unknown diagnostics fix: {other}"
+            ))),
+        }
+    }
+
     /// Increment the scene version counter so the frontend can skip redundant renders.
     fn bump_scene_version(&mut self) {
         self.scene_version = self.scene_version.wrapping_add(1);
@@ -3842,6 +4726,7 @@ fn on_update(entity, dt) {
     fn get_copilot_settings(&self, _params: &Value) -> EngineResult<Value> {
         let mut value = serde_json::to_value(&self.copilot_settings).unwrap_or_default();
         value["has_api_key"] = serde_json::json!(self.copilot_settings.api_key.is_some());
+        value["api_key"] = Value::Null; // Never expose stored credentials to the renderer.
         Ok(value)
     }
 
@@ -3863,6 +4748,8 @@ fn on_update(entity, dt) {
         {
             settings.allowed_commands = self.copilot_settings.allowed_commands.clone();
         }
+        settings.api_endpoint =
+            normalize_copilot_endpoint(&settings.provider, settings.api_endpoint.as_deref())?;
         if !settings.provider.endpoint_configurable() {
             settings.api_endpoint = None;
         }
@@ -3876,6 +4763,130 @@ fn on_update(entity, dt) {
         self.copilot_settings = settings;
         self.persist_credentials()?;
         Ok(Value::Null)
+    }
+
+    fn test_copilot_connection(&self, params: &Value) -> EngineResult<Value> {
+        let provider_str = params
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| copilot_provider_id(&self.copilot_settings.provider));
+        if provider_str == "stub" {
+            return Ok(copilot_connection_stub_result());
+        }
+        let provider_kind = provider_kind_from_str(provider_str)?;
+
+        let model = params
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&self.copilot_settings.model)
+            .to_owned();
+        let api_key = if params
+            .as_object()
+            .map_or(false, |m| m.contains_key("api_key"))
+        {
+            params
+                .get("api_key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        } else {
+            self.copilot_settings.api_key.clone()
+        };
+        let endpoint_input = params
+            .get("api_endpoint")
+            .or_else(|| params.get("endpoint"))
+            .and_then(Value::as_str)
+            .or(self.copilot_settings.api_endpoint.as_deref());
+        let provider_for_normalize = copilot_provider_from_kind(&provider_kind);
+        let endpoint = normalize_copilot_endpoint(&provider_for_normalize, endpoint_input)?;
+
+        if matches!(provider_kind, engine_ai::registry::ProviderKind::Custom)
+            && endpoint.as_deref().unwrap_or_default().is_empty()
+        {
+            return Ok(copilot_connection_result(
+                false,
+                "missing_endpoint",
+                "OpenAI 兼容中转站需要填写 Base URL，例如 https://api.example.com/v1。",
+                &provider_kind,
+                &model,
+                endpoint.as_deref(),
+                api_key.is_some(),
+                None,
+                None,
+            ));
+        }
+
+        if matches!(provider_kind, engine_ai::registry::ProviderKind::CodexOAuth) {
+            let connected = self.codex_oauth.is_some();
+            return Ok(copilot_connection_result(
+                connected,
+                if connected { "connected" } else { "oauth_required" },
+                if connected {
+                    "ChatGPT 账号已连接。"
+                } else {
+                    "请先登录 ChatGPT 账号，再测试 Codex OAuth。"
+                },
+                &provider_kind,
+                &model,
+                endpoint.as_deref(),
+                false,
+                None,
+                None,
+            ));
+        }
+
+        let config = engine_ai::registry::ProviderConfig {
+            api_key,
+            endpoint,
+        };
+        match engine_ai::registry::detect_available_models(&provider_kind, &config) {
+            Ok(models) => {
+                let model_found = if model.trim().is_empty() || models.is_empty() {
+                    None
+                } else {
+                    Some(models.iter().any(|entry| entry.id == model))
+                };
+                let ok = model_found.unwrap_or(true);
+                let code = if ok { "connected" } else { "model_not_found" };
+                let message = if ok {
+                    if models.is_empty() {
+                        "连接成功，但提供商没有返回可列出的模型；请确认模型 ID 后保存。"
+                    } else {
+                        "连接成功，已读取模型列表。"
+                    }
+                } else {
+                    "连接成功，但模型列表里没有当前填写的模型 ID。请检查模型 ID。"
+                };
+                Ok(copilot_connection_result(
+                    ok,
+                    code,
+                    message,
+                    &provider_kind,
+                    &model,
+                    config.endpoint.as_deref(),
+                    config.api_key.is_some(),
+                    Some(models.len()),
+                    Some((model_found, models)),
+                ))
+            }
+            Err(error) => {
+                let (code, message) = classify_copilot_connection_error(&error.to_string());
+                Ok(copilot_connection_result(
+                    false,
+                    code,
+                    message,
+                    &provider_kind,
+                    &model,
+                    config.endpoint.as_deref(),
+                    config.api_key.is_some(),
+                    None,
+                    None,
+                ))
+            }
+        }
     }
 
     fn copilot_allow_command(&mut self, params: &Value) -> EngineResult<Value> {
@@ -4661,6 +5672,24 @@ fn on_update(entity, dt) {
         Ok(serde_json::json!({ "objects": objects }))
     }
 
+    fn shell_list_component_schemas(&mut self, _params: &Value) -> EngineResult<Value> {
+        let registry = engine_ecs::ComponentSchemaRegistry::builtin();
+        let components = registry
+            .all()
+            .iter()
+            .map(|schema| {
+                serde_json::json!({
+                    "type_id": schema.type_id,
+                    "display_name": schema.display_name,
+                    "version": schema.version,
+                    "fields": schema.fields,
+                    "evolution": schema.evolution,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(serde_json::json!({ "components": components }))
+    }
+
     fn shell_get_entity(&mut self, params: &Value) -> EngineResult<Value> {
         let id_str = params
             .get("id")
@@ -5204,6 +6233,17 @@ fn on_update(entity, dt) {
             "AcousticRoom" => ComponentData::AcousticRoom(Default::default()),
             "AcousticPortal" => ComponentData::AcousticPortal(Default::default()),
             "AudioZone" => ComponentData::AudioZone(Default::default()),
+            "ParticleEmitter" => ComponentData::ParticleEmitter(Default::default()),
+            "Skybox" => ComponentData::Skybox(Default::default()),
+            "Sprite2D" => ComponentData::Sprite2D(Default::default()),
+            "TileMap" => ComponentData::TileMap(Default::default()),
+            "Camera2D" => ComponentData::Camera2D(Default::default()),
+            "Light2D" => ComponentData::Light2D(Default::default()),
+            "Occluder2D" => ComponentData::Occluder2D(Default::default()),
+            "AnimationPlayer" => ComponentData::AnimationPlayer(Default::default()),
+            "SkinnedMeshRenderer" => ComponentData::SkinnedMeshRenderer(Default::default()),
+            "AudioStreamPlayer2D" => ComponentData::AudioStreamPlayer2D(Default::default()),
+            "AudioStreamPlayer3D" => ComponentData::AudioStreamPlayer3D(Default::default()),
             "Script" => ComponentData::Script(engine_ecs::ScriptComponentProxy {
                 backend: "rhai".to_owned(),
                 script: String::new(),
@@ -5270,12 +6310,40 @@ fn on_update(entity, dt) {
         let mut current_val =
             serde_json::to_value(current).map_err(|e| EngineError::other(e.to_string()))?;
 
-        // Merge the new data into the existing component data
+        let registry = engine_ecs::ComponentSchemaRegistry::builtin();
+        let asset_ref_fields: HashSet<String> = registry
+            .get(comp_type)
+            .map(|schema| {
+                schema
+                    .fields
+                    .iter()
+                    .filter(|field| {
+                        matches!(
+                            field.kind,
+                            engine_ecs::ComponentFieldKind::AssetRef
+                        )
+                    })
+                    .map(|field| field.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let material_ref_fields = material_ref_field_names(comp_type);
+
+        // Merge the new data into the existing component data. AssetRef fields
+        // are normalized at the RPC boundary so the renderer can pass stable
+        // project GUID strings while ECS components keep their AssetId shape.
         if let Some(obj) = current_val.as_object_mut() {
             if let Some(data_obj) = obj.get_mut("data").and_then(|d| d.as_object_mut()) {
                 if let Some(fields) = field_data.as_object() {
                     for (key, value) in fields {
-                        data_obj.insert(key.clone(), value.clone());
+                        let value = if asset_ref_fields.contains(key) {
+                            normalize_component_asset_ref_value(value)?
+                        } else if material_ref_fields.contains(key) {
+                            normalize_component_material_ref_value(value)?
+                        } else {
+                            value.clone()
+                        };
+                        data_obj.insert(key.clone(), value);
                     }
                 }
             }
@@ -5722,6 +6790,107 @@ fn current_desktop_package_target() -> &'static str {
     {
         "desktop"
     }
+}
+
+fn diagnostics_fix(id: &str, label: &str, description: &str) -> Value {
+    serde_json::json!({
+        "id": id,
+        "label": label,
+        "description": description,
+        "safe": true,
+    })
+}
+
+fn diagnostics_item(
+    id: &str,
+    label: &str,
+    status: &str,
+    summary: impl Into<String>,
+    detail: impl Into<String>,
+    evidence: Vec<String>,
+    fixes: Vec<Value>,
+) -> Value {
+    serde_json::json!({
+        "id": id,
+        "label": label,
+        "status": status,
+        "summary": summary.into(),
+        "detail": detail.into(),
+        "evidence": evidence,
+        "fixes": fixes,
+    })
+}
+
+fn diagnostics_group(id: &str, label: &str, description: &str, items: Vec<Value>) -> Value {
+    let status = diagnostics_status_for_items(&items);
+    serde_json::json!({
+        "id": id,
+        "label": label,
+        "description": description,
+        "status": status,
+        "items": items,
+    })
+}
+
+fn diagnostics_status_for_items(items: &[Value]) -> &'static str {
+    if items
+        .iter()
+        .any(|item| item["status"].as_str() == Some("error"))
+    {
+        "error"
+    } else if items.iter().any(|item| {
+        matches!(
+            item["status"].as_str(),
+            Some("warning") | Some("not_configured")
+        )
+    }) {
+        "warning"
+    } else {
+        "ok"
+    }
+}
+
+fn diagnostics_summary(groups: &[Value]) -> Value {
+    let mut ok = 0usize;
+    let mut warning = 0usize;
+    let mut error = 0usize;
+    let mut not_configured = 0usize;
+    let mut total = 0usize;
+    for group in groups {
+        if let Some(items) = group["items"].as_array() {
+            for item in items {
+                total += 1;
+                match item["status"].as_str().unwrap_or("ok") {
+                    "error" => error += 1,
+                    "warning" => warning += 1,
+                    "not_configured" => not_configured += 1,
+                    _ => ok += 1,
+                }
+            }
+        }
+    }
+    let score = if total == 0 {
+        0
+    } else {
+        let penalty = error.saturating_mul(28) + warning.saturating_mul(11) + not_configured.saturating_mul(8);
+        100usize.saturating_sub(penalty.min(100))
+    };
+    let status = if error > 0 {
+        "error"
+    } else if warning > 0 || not_configured > 0 {
+        "warning"
+    } else {
+        "ok"
+    };
+    serde_json::json!({
+        "status": status,
+        "score": score,
+        "total": total,
+        "ok": ok,
+        "warning": warning,
+        "error": error,
+        "not_configured": not_configured,
+    })
 }
 
 fn runtime_binary_file_name() -> &'static str {
@@ -6729,6 +7898,249 @@ fn model_detection_config(
             _ => None,
         },
     }
+}
+
+fn provider_kind_from_str(provider: &str) -> EngineResult<engine_ai::registry::ProviderKind> {
+    match provider {
+        "anthropic" => Ok(engine_ai::registry::ProviderKind::Anthropic),
+        "openai" | "open_a_i" => Ok(engine_ai::registry::ProviderKind::OpenAI),
+        "codex_oauth" => Ok(engine_ai::registry::ProviderKind::CodexOAuth),
+        "gemini" => Ok(engine_ai::registry::ProviderKind::Gemini),
+        "ollama" => Ok(engine_ai::registry::ProviderKind::Ollama),
+        "custom" => Ok(engine_ai::registry::ProviderKind::Custom),
+        "mimo" => Ok(engine_ai::registry::ProviderKind::Mimo),
+        "deepseek" => Ok(engine_ai::registry::ProviderKind::DeepSeek),
+        "glm" => Ok(engine_ai::registry::ProviderKind::Glm),
+        other => Err(EngineError::config(format!("unknown provider: {other}"))),
+    }
+}
+
+fn copilot_provider_from_kind(
+    provider: &engine_ai::registry::ProviderKind,
+) -> engine_editor::CopilotProvider {
+    match provider {
+        engine_ai::registry::ProviderKind::Anthropic => engine_editor::CopilotProvider::Anthropic,
+        engine_ai::registry::ProviderKind::OpenAI => engine_editor::CopilotProvider::OpenAI,
+        engine_ai::registry::ProviderKind::CodexOAuth => {
+            engine_editor::CopilotProvider::CodexOAuth
+        }
+        engine_ai::registry::ProviderKind::Gemini => engine_editor::CopilotProvider::Gemini,
+        engine_ai::registry::ProviderKind::Ollama => engine_editor::CopilotProvider::Ollama,
+        engine_ai::registry::ProviderKind::Custom => engine_editor::CopilotProvider::Custom,
+        engine_ai::registry::ProviderKind::Mimo => engine_editor::CopilotProvider::Mimo,
+        engine_ai::registry::ProviderKind::DeepSeek => engine_editor::CopilotProvider::DeepSeek,
+        engine_ai::registry::ProviderKind::Glm => engine_editor::CopilotProvider::Glm,
+    }
+}
+
+fn copilot_provider_id(provider: &engine_editor::CopilotProvider) -> &'static str {
+    match provider {
+        engine_editor::CopilotProvider::Stub => "stub",
+        engine_editor::CopilotProvider::Anthropic => "anthropic",
+        engine_editor::CopilotProvider::OpenAI => "openai",
+        engine_editor::CopilotProvider::CodexOAuth => "codex_oauth",
+        engine_editor::CopilotProvider::Gemini => "gemini",
+        engine_editor::CopilotProvider::Ollama => "ollama",
+        engine_editor::CopilotProvider::Custom => "custom",
+        engine_editor::CopilotProvider::Mimo => "mimo",
+        engine_editor::CopilotProvider::DeepSeek => "deepseek",
+        engine_editor::CopilotProvider::Glm => "glm",
+    }
+}
+
+fn provider_requires_api_key(provider: &engine_editor::CopilotProvider) -> bool {
+    matches!(
+        provider,
+        engine_editor::CopilotProvider::Anthropic
+            | engine_editor::CopilotProvider::OpenAI
+            | engine_editor::CopilotProvider::Gemini
+            | engine_editor::CopilotProvider::Custom
+            | engine_editor::CopilotProvider::Mimo
+            | engine_editor::CopilotProvider::DeepSeek
+            | engine_editor::CopilotProvider::Glm
+    )
+}
+
+fn normalize_copilot_endpoint(
+    provider: &engine_editor::CopilotProvider,
+    endpoint: Option<&str>,
+) -> EngineResult<Option<String>> {
+    let Some(raw) = endpoint.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let normalized = raw
+        .trim_end_matches('/')
+        .trim_end_matches("/chat/completions")
+        .trim_end_matches("/responses")
+        .trim_end_matches("/models")
+        .trim_end_matches('/')
+        .to_owned();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    if !provider.endpoint_configurable() {
+        return Ok(None);
+    }
+    if matches!(provider, engine_editor::CopilotProvider::Custom) {
+        let lower = normalized.to_ascii_lowercase();
+        if !(lower.starts_with("https://") || lower.starts_with("http://localhost") || lower.starts_with("http://127.0.0.1")) {
+            return Err(EngineError::config(
+                "Custom OpenAI-compatible endpoint must use https, except localhost development URLs.",
+            ));
+        }
+    }
+    Ok(Some(normalized))
+}
+
+fn classify_copilot_connection_error(error: &str) -> (&'static str, &'static str) {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("api key") {
+        (
+            "auth_failed",
+            "连接失败：API Key 无效或缺失。请检查 Key 是否完整、是否属于当前中转站。",
+        )
+    } else if lower.contains("404") || lower.contains("not found") {
+        (
+            "not_found",
+            "连接失败：Base URL 不正确，或该中转站不支持 /models。请填写形如 https://域名/v1 的地址。",
+        )
+    } else if lower.contains("parse") || lower.contains("json") {
+        (
+            "invalid_response",
+            "连接失败：服务返回的不是 OpenAI 兼容响应。请确认它支持 /v1/models 和 /v1/chat/completions。",
+        )
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        (
+            "timeout",
+            "连接超时：请检查网络、代理或中转站地址是否可访问。",
+        )
+    } else {
+        (
+            "network_error",
+            "连接失败：无法访问该模型服务。请检查 Base URL、网络和中转站状态。",
+        )
+    }
+}
+
+fn copilot_connection_stub_result() -> Value {
+    serde_json::json!({
+        "ok": true,
+        "code": "stub",
+        "message": "当前是本地测试提供商，不会连接真实模型。",
+        "provider": "stub",
+        "provider_display": "Stub",
+        "model": "",
+        "endpoint": null,
+        "has_api_key": false,
+        "model_count": null,
+        "model_found": null,
+        "models": [],
+    })
+}
+
+fn copilot_connection_result(
+    ok: bool,
+    code: &str,
+    message: &str,
+    provider: &engine_ai::registry::ProviderKind,
+    model: &str,
+    endpoint: Option<&str>,
+    has_api_key: bool,
+    model_count: Option<usize>,
+    model_payload: Option<(Option<bool>, Vec<engine_ai::registry::ModelInfo>)>,
+) -> Value {
+    let (model_found, models) = model_payload.unwrap_or((None, Vec::new()));
+    serde_json::json!({
+        "ok": ok,
+        "code": code,
+        "message": message,
+        "provider": provider,
+        "provider_display": provider.display_name(),
+        "model": model,
+        "endpoint": endpoint,
+        "has_api_key": has_api_key,
+        "model_count": model_count,
+        "model_found": model_found,
+        "models": models.into_iter().take(20).collect::<Vec<_>>(),
+    })
+}
+
+fn normalize_component_asset_ref_value(value: &Value) -> EngineResult<Value> {
+    if value.is_null() {
+        return Ok(Value::Null);
+    }
+    if let Some(raw) = value.as_str() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(Value::Null);
+        }
+        let normalized = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+        let id = u128::from_str_radix(normalized, 16)
+            .or_else(|_| normalized.parse::<u128>())
+            .map_err(|_| EngineError::config(format!("invalid asset reference: {trimmed}")))?;
+        return serde_json::to_value(engine_core::AssetId::from_u128(id))
+            .map_err(|error| EngineError::other(error.to_string()));
+    }
+    if let Some(id) = value.as_u64() {
+        return serde_json::to_value(engine_core::AssetId::from_u128(id as u128))
+            .map_err(|error| EngineError::other(error.to_string()));
+    }
+    Ok(value.clone())
+}
+
+fn material_ref_field_names(component_type: &str) -> HashSet<String> {
+    match component_type {
+        "MeshRenderer" | "SkinnedMeshRenderer" => HashSet::from(["material".to_string()]),
+        _ => HashSet::new(),
+    }
+}
+
+fn normalize_component_material_ref_value(value: &Value) -> EngineResult<Value> {
+    if value.is_null() {
+        return Ok(serde_json::json!({ "asset": null, "builtin": null }));
+    }
+
+    if let Some(raw) = value.as_str() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(serde_json::json!({ "asset": null, "builtin": null }));
+        }
+        if let Some(asset) = trimmed.strip_prefix("asset:") {
+            return Ok(serde_json::json!({
+                "asset": normalize_component_asset_ref_value(&Value::String(asset.to_string()))?,
+                "builtin": null,
+            }));
+        }
+        if let Some(builtin) = trimmed.strip_prefix("builtin:") {
+            return Ok(serde_json::json!({
+                "asset": null,
+                "builtin": if builtin.trim().is_empty() { Value::Null } else { Value::String(builtin.trim().to_string()) },
+            }));
+        }
+        return Ok(serde_json::json!({ "asset": null, "builtin": trimmed }));
+    }
+
+    if let Some(obj) = value.as_object() {
+        let asset = obj
+            .get("asset")
+            .map(normalize_component_asset_ref_value)
+            .transpose()?
+            .unwrap_or(Value::Null);
+        let builtin = obj
+            .get("builtin")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|raw| !raw.is_empty())
+            .map(|raw| Value::String(raw.to_string()))
+            .unwrap_or(Value::Null);
+
+        return Ok(serde_json::json!({
+            "asset": asset,
+            "builtin": if asset.is_null() { builtin } else { Value::Null },
+        }));
+    }
+
+    Ok(value.clone())
 }
 
 fn should_continue_copilot(applied_read_only: bool, completed: bool) -> bool {
@@ -7955,6 +9367,107 @@ mod tests {
             host.copilot_settings.api_endpoint.as_deref(),
             Some("http://192.168.1.20:11434")
         );
+    }
+
+    #[test]
+    fn custom_copilot_endpoint_is_normalized_to_openai_compatible_base_url() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FileEditorStore::new(temp.path().join("aster-editor-state.toml"));
+        let mut host = EditorHost::new(store).unwrap();
+
+        host.update_copilot_settings(&serde_json::json!({
+            "provider": "custom",
+            "model": "vendor-model",
+            "api_endpoint": "https://relay.example.com/v1/chat/completions",
+            "api_key": "secret-test-key",
+            "max_tokens": 4096
+        }))
+        .unwrap();
+
+        assert_eq!(
+            host.copilot_settings.api_endpoint.as_deref(),
+            Some("https://relay.example.com/v1")
+        );
+    }
+
+    #[test]
+    fn custom_copilot_endpoint_rejects_plain_http_except_localhost() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FileEditorStore::new(temp.path().join("aster-editor-state.toml"));
+        let mut host = EditorHost::new(store).unwrap();
+
+        let error = host
+            .update_copilot_settings(&serde_json::json!({
+                "provider": "custom",
+                "model": "vendor-model",
+                "api_endpoint": "http://relay.example.com/v1",
+                "api_key": "secret-test-key",
+                "max_tokens": 4096
+            }))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("https"));
+    }
+
+    #[test]
+    fn test_copilot_connection_for_stub_returns_safe_success_without_secret() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FileEditorStore::new(temp.path().join("aster-editor-state.toml"));
+        let host = EditorHost::new(store).unwrap();
+
+        let result = host
+            .test_copilot_connection(&serde_json::json!({
+                "provider": "stub",
+                "api_key": "must-not-echo"
+            }))
+            .unwrap();
+
+        assert_eq!(result["ok"].as_bool(), Some(true));
+        assert_eq!(result["code"].as_str(), Some("stub"));
+        assert!(!result.to_string().contains("must-not-echo"));
+    }
+
+    #[test]
+    fn get_copilot_settings_reports_key_presence_without_exposing_secret() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FileEditorStore::new(temp.path().join("aster-editor-state.toml"));
+        let mut host = EditorHost::new(store).unwrap();
+
+        host.update_copilot_settings(&serde_json::json!({
+            "provider": "custom",
+            "model": "vendor-model",
+            "api_endpoint": "https://relay.example.com/v1",
+            "api_key": "secret-test-key",
+            "max_tokens": 4096
+        }))
+        .unwrap();
+
+        let result = host
+            .get_copilot_settings(&serde_json::json!({}))
+            .unwrap();
+
+        assert_eq!(result["has_api_key"].as_bool(), Some(true));
+        assert!(result["api_key"].is_null());
+        assert!(!result.to_string().contains("secret-test-key"));
+    }
+
+    #[test]
+    fn test_copilot_connection_requires_custom_endpoint_before_network() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FileEditorStore::new(temp.path().join("aster-editor-state.toml"));
+        let host = EditorHost::new(store).unwrap();
+
+        let result = host
+            .test_copilot_connection(&serde_json::json!({
+                "provider": "custom",
+                "model": "vendor-model",
+                "api_key": "must-not-echo"
+            }))
+            .unwrap();
+
+        assert_eq!(result["ok"].as_bool(), Some(false));
+        assert_eq!(result["code"].as_str(), Some("missing_endpoint"));
+        assert!(!result.to_string().contains("must-not-echo"));
     }
 
     #[test]

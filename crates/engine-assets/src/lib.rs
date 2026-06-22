@@ -2016,10 +2016,17 @@ pub fn infer_importer(path: &Path) -> Option<(ResourceKind, &'static str)> {
         // Legacy projects may still contain Rhai-named scripts.
         "rhai" => Some((ResourceKind::Script, "script-rhai")),
         "json" => {
-            if path.to_string_lossy().contains("material") {
+            let normalized_path = path.to_string_lossy().to_ascii_lowercase();
+            if normalized_path.contains("material") {
                 Some((ResourceKind::Material, "material-json"))
-            } else if path.to_string_lossy().contains("prefab") {
+            } else if normalized_path.contains("prefab") {
                 Some((ResourceKind::Prefab, "prefab-json"))
+            } else if normalized_path.contains(".anim.")
+                || normalized_path.contains("/animations/")
+                || normalized_path.contains("\\animations\\")
+                || normalized_path.contains("animation")
+            {
+                Some((ResourceKind::Animation, "animation-json"))
             } else {
                 infer_scene_json(path)
             }
@@ -2885,6 +2892,18 @@ mod tests {
         assert_eq!(
             manifest.get(id).unwrap().path.to_utf8().unwrap(),
             "new.mesh"
+        );
+    }
+
+    #[test]
+    fn infer_importer_detects_animation_json_files() {
+        assert_eq!(
+            infer_importer(Path::new("animations/run.anim.json")),
+            Some((ResourceKind::Animation, "animation-json"))
+        );
+        assert_eq!(
+            infer_importer(Path::new("characters/walk.animation.json")),
+            Some((ResourceKind::Animation, "animation-json"))
         );
     }
 

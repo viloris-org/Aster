@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @keyframes quest-voice-wave {
@@ -85,50 +85,53 @@
   }
 
   :root {
-    --bg-base: #0D0E10;
-    --bg-surface: #151619;
-    --bg-hover: #202124;
-    --bg-active: #3F3F46;
+    --bg-base: #060A0E;
+    --bg-surface: #0A1118;
+    --bg-hover: #111B24;
+    --bg-active: #152330;
     --bg-primary: var(--bg-base);
     --bg-secondary: var(--bg-surface);
-    --bg-elevated: #1B1C20;
-    --bg-overlay: rgba(18, 18, 20, 0.86);
-    --border: rgba(212, 212, 216, 0.14);
-    --border-light: rgba(212, 212, 216, 0.24);
-    --text-primary: #F4F4F5;
-    --text-secondary: #C3C3C7;
-    --text-muted: #85858B;
-    --accent: #A1A1AA;
-    --accent-hover: #D4D4D8;
-    --accent-dim: rgba(161, 161, 170, 0.16);
-    --accent-strong: #71717A;
-    --success: #34D399;
-    --success-dim: rgba(52, 211, 153, 0.13);
-    --danger: #F87171;
-    --danger-dim: rgba(248, 113, 113, 0.12);
+    --bg-elevated: #0D151E;
+    --bg-overlay: rgba(8, 12, 22, 0.88);
+    --border: rgba(148, 163, 184, 0.16);
+    --border-light: rgba(var(--brand-hover-rgb), 0.32);
+    --brand-rgb: 59, 195, 221;
+    --brand-hover-rgb: 120, 223, 240;
+    --text-primary: #F3F7FA;
+    --text-secondary: #BCCAD3;
+    --text-muted: #7C8C97;
+    --accent: #78DFF0;
+    --accent-hover: #A6EEF6;
+    --accent-dim: rgba(var(--brand-rgb), 0.16);
+    --accent-strong: #3BC3DD;
+    --success: #49D98B;
+    --success-dim: rgba(73, 217, 139, 0.13);
+    --danger: #FF6B7A;
+    --danger-dim: rgba(255, 107, 122, 0.12);
     --error: var(--danger);
-    --warning: #FBBF24;
-    --warning-dim: rgba(251, 191, 36, 0.13);
-    --info: #A1A1AA;
+    --warning: #F7B955;
+    --warning-dim: rgba(247, 185, 85, 0.13);
+    --info: #6AD7E5;
     /* Brand / selection accent — used only for "selected" semantics so a
        picked node or active tab reads clearly against the neutral chrome. */
-    --brand: #22C55E;
-    --brand-hover: #4ADE80;
-    --brand-dim: rgba(34, 197, 94, 0.14);
+    --brand: #3BC3DD;
+    --brand-hover: #78DFF0;
+    --brand-dim: rgba(var(--brand-rgb), 0.18);
+    --text-on-brand: #031412;
     /* Spatial axis colors — shared by every gizmo, overlay, and vector field
        so X/Y/Z always mean the same thing (red / green / blue). */
     --axis-x: #FF4D4D;
     --axis-y: #4ADE5C;
     --axis-z: #4D8DFF;
-    --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Roboto, sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-    --radius-sm: 5px;
-    --radius-md: 7px;
-    --radius-lg: 8px;
-    --radius-xl: 8px;
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.03);
-    --shadow-md: 0 10px 24px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.035);
-    --shadow-lg: 0 24px 70px rgba(0,0,0,0.48), inset 0 1px 0 rgba(255,255,255,0.04);
+    --radius-sm: 8px;
+    --radius-md: 10px;
+    --radius-lg: 12px;
+    --radius-xl: 14px;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.035);
+    --shadow-md: 0 18px 42px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.04);
+    --shadow-lg: 0 30px 90px rgba(0,0,0,0.56), inset 0 1px 0 rgba(255,255,255,0.045);
     --transition-fast: 140ms ease;
     --transition-normal: 220ms ease;
   }
@@ -145,10 +148,10 @@
     --text-primary: #111827;
     --text-secondary: #475569;
     --text-muted: #8490A2;
-    --accent: #52525B;
-    --accent-hover: #3F3F46;
-    --accent-dim: rgba(82, 82, 91, 0.12);
-    --accent-strong: #27272A;
+    --accent: #087F8C;
+    --accent-hover: #065F69;
+    --accent-dim: rgba(var(--brand-rgb), 0.12);
+    --accent-strong: #064E5A;
     --success: #059669;
     --success-dim: rgba(5, 150, 105, 0.1);
     --danger: #DC2626;
@@ -156,10 +159,13 @@
     --error: var(--danger);
     --warning: #D97706;
     --warning-dim: rgba(217, 119, 6, 0.11);
-    --info: #52525B;
-    --brand: #16A34A;
-    --brand-hover: #15803D;
-    --brand-dim: rgba(22, 163, 74, 0.12);
+    --info: #2563EB;
+    --brand: #087F8C;
+    --brand-hover: #065F69;
+    --brand-rgb: 8, 127, 140;
+    --brand-hover-rgb: 6, 95, 105;
+    --brand-dim: rgba(var(--brand-rgb), 0.12);
+    --text-on-brand: #F8FFFD;
     --shadow-sm: 0 1px 2px rgba(15,23,42,0.06), inset 0 1px 0 rgba(255,255,255,0.7);
     --shadow-md: 0 10px 24px rgba(15,23,42,0.09);
     --shadow-lg: 0 24px 70px rgba(15,23,42,0.16);
@@ -167,7 +173,7 @@
 
   html {
     font-family: var(--font-sans);
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-primary);
     background: var(--bg-base);
     -webkit-font-smoothing: antialiased;
@@ -186,6 +192,18 @@
 
   body {
     overflow: hidden;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 18% 0%, rgba(106, 215, 229, 0.10), transparent 30rem),
+      radial-gradient(circle at 82% 12%, rgba(var(--brand-rgb), 0.13), transparent 32rem),
+      linear-gradient(180deg, rgba(255,255,255,0.025), transparent 24%);
+    z-index: -1;
   }
 
   #root {

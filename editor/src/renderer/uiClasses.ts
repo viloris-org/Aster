@@ -8,10 +8,10 @@ type AiPlanItemButtonVariant = 'allow' | 'deny';
 type CopilotStatusBadgeVariant = 'planning' | 'ready' | 'executing' | 'complete' | 'error';
 type TaskOperationPermissionKind = 'write' | 'read' | 'command';
 
-const BUTTON_BASE = 'inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-transparent px-3.5 py-[7px] font-[var(--font-sans)] text-xs font-semibold leading-none shadow-[var(--shadow-sm)] transition-all duration-[var(--transition-fast)] ease-in cursor-pointer disabled:pointer-events-none disabled:cursor-default disabled:opacity-40';
+const BUTTON_BASE = 'inline-flex min-h-9 items-center gap-2 rounded-[var(--radius-md)] border border-transparent px-4 py-[8px] font-[var(--font-sans)] text-[13px] font-semibold leading-none shadow-[var(--shadow-sm)] transition-all duration-[var(--transition-fast)] ease-in cursor-pointer disabled:pointer-events-none disabled:cursor-default disabled:opacity-40';
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'border-[var(--brand)] bg-[linear-gradient(180deg,var(--brand),var(--brand-hover))] text-white enabled:hover:border-[var(--brand-hover)] enabled:hover:brightness-110',
+  primary: 'border-[var(--brand)] bg-[var(--brand)] text-[var(--text-on-brand)] enabled:hover:border-[var(--brand-hover)] enabled:hover:bg-[var(--brand-hover)]',
   secondary: 'border-[var(--border)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-light)] enabled:hover:bg-[var(--bg-hover)] enabled:hover:text-[var(--text-primary)]',
   danger: 'border-[var(--border)] bg-transparent text-[var(--danger)] enabled:hover:border-[var(--danger)] enabled:hover:bg-[var(--danger-dim)]',
   ghost: 'border-transparent bg-transparent text-[var(--text-secondary)] enabled:hover:bg-[var(--bg-hover)] enabled:hover:text-[var(--text-primary)]',
@@ -19,7 +19,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
   md: '',
-  sm: 'px-2.5 py-1 text-[11px]',
+  sm: 'min-h-8 px-3 py-1.5 text-[12px]',
 };
 
 export function buttonClass(
@@ -30,16 +30,16 @@ export function buttonClass(
   return [BUTTON_BASE, BUTTON_VARIANTS[variant], BUTTON_SIZES[size], extra].filter(Boolean).join(' ');
 }
 
-const TOOL_BUTTON_BASE = 'inline-flex cursor-pointer items-center justify-center rounded-[var(--radius-sm)] border border-transparent bg-transparent px-2 py-[2px] font-[var(--font-sans)] text-xs text-[var(--text-secondary)] transition-all duration-150 enabled:hover:border-[var(--border-light)] enabled:hover:bg-[var(--bg-hover)] enabled:hover:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-35';
+const TOOL_BUTTON_BASE = 'inline-flex min-h-8 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] border border-transparent bg-transparent px-2.5 py-[4px] font-[var(--font-sans)] text-[13px] text-[var(--text-secondary)] transition-all duration-150 enabled:hover:border-[var(--border-light)] enabled:hover:bg-[var(--bg-hover)] enabled:hover:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-35';
 const TOOL_BUTTON_VARIANTS: Record<ToolButtonVariant, string> = {
   default: '',
   play: 'font-semibold text-[var(--accent)] enabled:hover:border-[var(--accent)] enabled:hover:bg-[var(--accent-dim)] enabled:hover:text-[var(--accent)]',
 };
 const TOOL_BUTTON_SIZES: Record<ToolButtonSize, string> = {
   default: '',
-  toolbar: 'h-6 min-w-7 px-[7px]',
-  icon: 'h-[22px] min-w-[26px] px-1 py-0',
-  sm: 'h-5 px-1.5 py-px text-[10px] font-semibold uppercase tracking-[0.3px]',
+  toolbar: 'h-9 min-w-9 px-3',
+  icon: 'h-8 min-w-8 px-1.5 py-0',
+  sm: 'h-7 px-2 py-px text-[11px] font-semibold uppercase tracking-[0.3px]',
 };
 
 export function toolButtonClass({
@@ -176,8 +176,8 @@ export function aiPlanItemButtonClass(variant: AiPlanItemButtonVariant): string 
 
 const COPILOT_STATUS_BADGE_BASE = 'ml-auto rounded-[3px] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.3px]';
 const COPILOT_STATUS_BADGE_VARIANTS: Record<CopilotStatusBadgeVariant, string> = {
-  planning: 'bg-[var(--info)] text-white',
-  ready: 'bg-[var(--accent)] text-white',
+  planning: 'bg-[var(--info)] text-[#031412]',
+  ready: 'bg-[var(--brand)] text-[var(--text-on-brand)]',
   executing: 'bg-[var(--warning)] text-black',
   complete: 'bg-[var(--accent-dim)] text-[var(--accent)]',
   error: 'bg-[var(--danger-dim)] text-[var(--danger)]',

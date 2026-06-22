@@ -80,6 +80,7 @@ export default function App() {
   const [startupError, setStartupError] = useState<string | null>(null);
   const [questArtifact, setQuestArtifact] = useState<QuestEditorArtifact | null>(null);
   const [initialQuestId, setInitialQuestId] = useState<string | null>(null);
+  const [editorReturnProjectPath, setEditorReturnProjectPath] = useState<string | null>(null);
 
   // ── Refresh hub state from backend ──
   const refreshHubState = useCallback(async () => {
@@ -118,6 +119,7 @@ export default function App() {
         document.documentElement.dataset.theme = state.theme;
       }
       setHubState(state);
+      setEditorReturnProjectPath(state.open_project ?? null);
       setScreen(state.open_project ? 'editor' : 'hub');
     }).catch((err) => {
       console.error('Failed to connect to host:', err);
@@ -137,22 +139,68 @@ export default function App() {
   const handleOpenProject = useCallback(async (path: string) => {
     await rpc('hub/open_project', { path });
     const state = await refreshHubState();
+    setEditorReturnProjectPath(state?.open_project ?? path);
     if (state) setScreen('editor');
   }, [refreshHubState]);
 
   const handleCloseProject = useCallback(async () => {
     await rpc('shell/close_project');
     await refreshHubState();
+    setEditorReturnProjectPath(null);
     // Synced hub state should reflect no open project
     setScreen('hub');
   }, [refreshHubState]);
 
   const handleOpenSettings = useCallback(async () => {
-    await rpc('shell/close_project');
-    await rpc('hub/set_page', { page: 'settings' });
-    await refreshHubState();
+    const returnTarget = hubState?.open_project ?? editorReturnProjectPath;
+    if (returnTarget) setEditorReturnProjectPath(returnTarget);
+    setHubState(prev => prev ? { ...prev, page: 'settings' } : prev);
     setScreen('hub');
-  }, [refreshHubState]);
+    await rpc('hub/set_page', { page: 'settings' });
+    const state = await refreshHubState();
+    if (state?.open_project) setEditorReturnProjectPath(state.open_project);
+  }, [editorReturnProjectPath, hubState?.open_project, refreshHubState]);
+
+  const handleReturnToEditor = useCallback(async () => {
+    const returnToProjects = async () => {
+      await rpc('hub/set_page', { page: 'projects' }).catch(() => null);
+      setHubState(prev => prev ? { ...prev, page: 'projects' } : prev);
+      setScreen('hub');
+    };
+
+    const currentTarget =
+      hubState?.open_project
+      ?? editorReturnProjectPath
+      ?? null;
+    const state = await refreshHubState();
+    if (state?.open_project) {
+      setEditorReturnProjectPath(state.open_project);
+      await rpc('hub/set_page', { page: 'projects' }).catch(() => null);
+      setHubState(prev => prev ? { ...prev, page: 'projects', open_project: state.open_project } : prev);
+      setScreen('editor');
+      return;
+    }
+    const fallbackTarget =
+      currentTarget
+      ?? null;
+
+    if (!fallbackTarget) {
+      await returnToProjects();
+      return;
+    }
+
+    try {
+      await rpc('hub/open_project', { path: fallbackTarget });
+      const openedState = await refreshHubState();
+      setEditorReturnProjectPath(openedState?.open_project ?? fallbackTarget);
+      await rpc('hub/set_page', { page: 'projects' }).catch(() => null);
+      setHubState(prev => prev ? { ...prev, page: 'projects', open_project: openedState?.open_project ?? fallbackTarget } : prev);
+      setScreen('editor');
+    } catch (error) {
+      console.warn('Failed to return to editor from settings:', error);
+      await returnToProjects();
+    }
+  }, [editorReturnProjectPath, hubState?.open_project, refreshHubState]);
 
   const handleOpenQuest = useCallback(() => {
     setInitialQuestId(null);
@@ -164,13 +212,18 @@ export default function App() {
       await rpc('hub/open_project', { path: projectPath });
       await refreshHubState();
     }
+    setEditorReturnProjectPath(projectPath);
     setQuestArtifact(artifact ?? null);
     setScreen('editor');
   }, [hubState?.open_project, refreshHubState]);
 
-  const handleNavigate = useCallback(async (page: string) => {
-    await rpc('hub/set_page', { page });
+  const handleNavigate = useCallback((page: string) => {
+    // Hub page navigation is a renderer/UI concern first. Do not let a slow
+    // backend preference write trap the user inside Settings.
     setHubState(prev => prev ? { ...prev, page } : prev);
+    void rpc('hub/set_page', { page }).catch((error) => {
+      console.warn(`Failed to persist hub page "${page}":`, error);
+    });
   }, []);
 
   const handleSetTheme = useCallback(async (theme: string) => {
@@ -189,6 +242,22 @@ export default function App() {
     await rpc('hub/set_locale', { locale });
     setHubState(prev => prev ? { ...prev, locale } : prev);
   }, []);
+
+  useEffect(() => {
+    if (screen !== 'hub' || hubState?.page !== 'settings') return;
+
+    const handleSettingsShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.isComposing) return;
+      const isReturnShortcut = event.key === 'Escape' || (event.metaKey && event.key === '[');
+      if (!isReturnShortcut) return;
+      event.preventDefault();
+      void handleReturnToEditor();
+    };
+
+    window.addEventListener('keydown', handleSettingsShortcut);
+    return () => window.removeEventListener('keydown', handleSettingsShortcut);
+  }, [handleReturnToEditor, hubState?.page, screen]);
 
   // ── Render ──
 
@@ -220,6 +289,8 @@ export default function App() {
             onSetLocale={handleSetLocale}
             onRefresh={async () => { await refreshHubState(); }}
             onOpenQuests={handleOpenQuest}
+            onReturnToEditor={handleReturnToEditor}
+            returnProjectPath={editorReturnProjectPath}
           />
         </AppFrame>
       </I18nProvider>
@@ -233,6 +304,7 @@ export default function App() {
           currentProjectPath={hubState.open_project}
           initialQuestId={initialQuestId}
           onOpenEditor={handleOpenEditor}
+          onReturnToEditor={handleReturnToEditor}
           onCloseProject={handleCloseProject}
         />
       </I18nProvider>

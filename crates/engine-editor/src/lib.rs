@@ -242,7 +242,7 @@ pub struct EditorPreferences {
 impl Default for EditorPreferences {
     fn default() -> Self {
         Self {
-            theme: ThemePreference::System,
+            theme: ThemePreference::Dark,
             locale: Locale::default(),
             reopen_last_project: true,
             last_project_location: None,

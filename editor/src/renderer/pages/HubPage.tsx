@@ -53,6 +53,7 @@ import {
 import {
   IconProjects, IconInstalls, IconSettings, IconFolder, IconPlus, IconTrash, IconPlay,
   IconSun, IconMoon, IconMonitor, IconPackage, IconAlertTriangle, IconX, IconEmpty, IconSparkles,
+  IconChevronLeft, IconCheck, IconInfo, IconLoader,
   AsterLogo,
 } from '../icons';
 
@@ -89,19 +90,21 @@ interface Props {
   onSetLocale: (locale: string) => void;
   onRefresh: () => Promise<void>;
   onOpenQuests: () => void;
+  onReturnToEditor: () => Promise<void> | void;
+  returnProjectPath?: string | null;
 }
 
 // ─── Avatar helper ──────────────────────────────────────────────────────────
 
 const AVATAR_COLORS = [
-  'bg-linear-to-br from-[#6366F1] to-[#4338CA]',
-  'bg-linear-to-br from-[#14B8A6] to-[#0F766E]',
-  'bg-linear-to-br from-[#F59E0B] to-[#B45309]',
-  'bg-linear-to-br from-[#EC4899] to-[#BE185D]',
-  'bg-linear-to-br from-[#8B5CF6] to-[#6D28D9]',
-  'bg-linear-to-br from-[#22C55E] to-[#15803D]',
-  'bg-linear-to-br from-[#0EA5E9] to-[#0369A1]',
-  'bg-linear-to-br from-[#F97316] to-[#C2410C]',
+  'bg-linear-to-br from-[#3BC3DD] to-[#064E5A]',
+  'bg-linear-to-br from-[#6AD7E5] to-[#087F8C]',
+  'bg-linear-to-br from-[#78DFF0] to-[#075A64]',
+  'bg-linear-to-br from-[#49D98B] to-[#0F766E]',
+  'bg-linear-to-br from-[#168EA0] to-[#053F49]',
+  'bg-linear-to-br from-[#64748B] to-[#1E293B]',
+  'bg-linear-to-br from-[#38BDF8] to-[#1D4ED8]',
+  'bg-linear-to-br from-[#F7B955] to-[#92400E]',
 ];
 
 function getAvatarClass(name: string): string {
@@ -133,19 +136,20 @@ function formatLastTouched(raw: string): string {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-const hubClass = 'flex h-full min-h-0 w-full bg-[linear-gradient(135deg,rgba(255,255,255,0.035),transparent_34%),var(--bg-base)]';
+const hubClass = 'flex h-full min-h-0 w-full bg-[radial-gradient(circle_at_22%_-14%,rgba(106,215,229,0.13),transparent_32rem),radial-gradient(circle_at_88%_10%,rgba(var(--brand-rgb),0.18),transparent_34rem),var(--bg-base)]';
 const hubMainClass = 'flex min-w-0 flex-1 flex-col overflow-hidden';
 const hubPageHeaderClass = 'flex flex-shrink-0 items-center justify-between px-8 pt-7';
-const hubPageTitleClass = 'text-[23px] font-semibold text-[var(--text-primary)]';
+const hubPageHeaderTitleGroupClass = 'flex min-w-0 items-center gap-3';
+const hubPageTitleClass = 'text-[24px] font-bold tracking-[-0.03em] text-[var(--text-primary)]';
 const hubPageActionsClass = 'flex items-center gap-2';
 const hubSearchBarClass = 'flex-shrink-0 px-8 pt-4 pb-3';
-const hubSearchClass = 'w-full max-w-[440px] rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg-elevated)] bg-[url(data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2714%27%20height=%2714%27%20viewBox=%270%200%2024%2024%27%20fill=%27none%27%20stroke=%27%2364748B%27%20stroke-width=%272%27%20stroke-linecap=%27round%27%20stroke-linejoin=%27round%27%3E%3Ccircle%20cx=%2711%27%20cy=%2711%27%20r=%278%27/%3E%3Cline%20x1=%2721%27%20y1=%2721%27%20x2=%2716.65%27%20y2=%2716.65%27/%3E%3C/svg%3E)] bg-[position:13px_center] bg-no-repeat py-2.5 pr-3 pl-[36px] font-[var(--font-sans)] text-[13px] text-[var(--text-primary)] shadow-[var(--shadow-sm)] outline-none transition-[border-color,box-shadow] duration-[120ms] ease-in placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-dim)]';
+const hubSearchClass = 'w-full max-w-[520px] rounded-[14px] border border-white/[0.10] bg-[rgba(10,16,29,0.76)] bg-[url(data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2714%27%20height=%2714%27%20viewBox=%270%200%2024%2024%27%20fill=%27none%27%20stroke=%27%2375849D%27%20stroke-width=%272%27%20stroke-linecap=%27round%27%20stroke-linejoin=%27round%27%3E%3Ccircle%20cx=%2711%27%20cy=%2711%27%20r=%278%27/%3E%3Cline%20x1=%2721%27%20y1=%2721%27%20x2=%2716.65%27%20y2=%2716.65%27/%3E%3C/svg%3E)] bg-[position:14px_center] bg-no-repeat py-3 pr-4 pl-[40px] font-[var(--font-sans)] text-[14px] text-[var(--text-primary)] shadow-[var(--shadow-sm)] outline-none backdrop-blur-xl transition-[border-color,box-shadow] duration-[120ms] ease-in placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-dim)]';
 const hubActionBarLabelClass = 'mr-1 text-[11px] text-[var(--text-muted)]';
 const hubScrollClass = 'flex-1 overflow-y-auto px-8 pb-6 [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-[3px] [&::-webkit-scrollbar-thumb]:bg-[var(--border)] [&::-webkit-scrollbar-track]:bg-transparent';
-const hubGridClass = 'grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2.5';
+const hubGridClass = 'grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3';
 const installListClass = 'flex flex-col gap-2';
 const hubEmptyActionsClass = 'mt-4 flex flex-wrap items-center justify-center gap-2';
-const hubNoticeClass = 'mx-8 mb-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-[12px] leading-[1.45] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]';
+const hubNoticeClass = 'mx-8 mb-3 rounded-[14px] border border-[rgba(var(--brand-rgb),0.22)] bg-[rgba(var(--brand-rgb),0.10)] px-4 py-3 text-[12px] leading-[1.55] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]';
 
 function hubActionBarClass(visible: boolean): string {
   return [
@@ -154,13 +158,13 @@ function hubActionBarClass(visible: boolean): string {
   ].join(' ');
 }
 
-const sidebarClass = 'flex w-[232px] min-w-[232px] select-none flex-col border-r border-[var(--border)] bg-[linear-gradient(180deg,rgba(255,255,255,0.035),transparent_42%),var(--bg-surface)] shadow-[var(--shadow-sm)]';
+const sidebarClass = 'flex w-[240px] min-w-[240px] select-none flex-col border-r border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent_42%),rgba(7,12,22,0.90)] shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)] backdrop-blur-2xl';
 const logoClass = 'flex items-center gap-2.5 px-5 pt-7 pb-5 [&_svg]:shrink-0 [&_svg]:drop-shadow-[0_6px_14px_rgba(0,0,0,0.24)]';
 const logoTitleClass = 'text-lg font-bold text-[var(--text-primary)]';
 const logoTaglineClass = 'text-[11px] font-normal text-[var(--text-muted)]';
 const navClass = 'flex flex-1 flex-col gap-0.5 px-2 py-2';
-const navItemBaseClass = 'flex w-full cursor-pointer items-center gap-2.5 rounded-[var(--radius-md)] border border-transparent bg-transparent px-3 py-[9px] text-left font-[var(--font-sans)] text-[13px] transition-[background,color,border-color] duration-[120ms] ease-in [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:shrink-0 [&_svg]:opacity-75 [&_svg]:transition-opacity [&_svg]:duration-[120ms] [&_svg]:ease-in hover:border-[var(--border)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] hover:[&_svg]:opacity-100';
-const sidebarFooterClass = 'flex items-center justify-between border-t border-[var(--border)] px-4 pt-3 pb-4';
+const navItemBaseClass = 'flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[12px] border border-transparent bg-transparent px-3 text-left font-[var(--font-sans)] text-[13px] font-semibold transition-[background,color,border-color] duration-[120ms] ease-in [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:shrink-0 [&_svg]:opacity-75 [&_svg]:transition-opacity [&_svg]:duration-[120ms] [&_svg]:ease-in hover:border-white/[0.10] hover:bg-white/[0.05] hover:text-[var(--text-primary)] hover:[&_svg]:opacity-100';
+const sidebarFooterClass = 'flex items-center justify-between border-t border-white/[0.08] px-4 pt-3 pb-4';
 const themeToggleLabelClass = 'text-xs text-[var(--text-secondary)]';
 const themeToggleGroupClass = 'flex overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-base)] p-0.5';
 
@@ -168,7 +172,7 @@ function navItemClass(active = false): string {
   return [
     navItemBaseClass,
     active
-      ? 'border-[var(--border-light)] bg-[var(--brand-dim)] text-[var(--brand)] shadow-[inset_3px_0_0_var(--brand)] [&_svg]:text-[var(--brand)] [&_svg]:opacity-100'
+      ? 'border-[rgba(var(--brand-rgb),0.34)] bg-[var(--brand-dim)] text-[var(--text-primary)] shadow-[inset_3px_0_0_var(--brand)] [&_svg]:text-[var(--accent-hover)] [&_svg]:opacity-100'
       : 'text-[var(--text-secondary)]',
   ].join(' ');
 }
@@ -188,10 +192,38 @@ const settingsControlBaseClass = 'min-w-0 justify-self-end max-[780px]:w-full ma
 const settingsControlClass = `${settingsControlBaseClass} w-full`;
 const settingsControlCompactClass = `${settingsControlBaseClass} w-[200px]`;
 const settingsActionsControlClass = `${settingsControlClass} flex justify-end`;
+const settingsStickyFooterClass = 'sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t border-[var(--border)] bg-[linear-gradient(180deg,rgba(7,12,22,0),var(--bg-base)_24%,var(--bg-base))] pt-6 pb-2 max-[780px]:flex-col max-[780px]:items-stretch';
+const settingsStickyHintClass = 'text-[12px] leading-[1.5] text-[var(--text-muted)]';
+const settingsStickyActionsClass = 'flex flex-shrink-0 flex-wrap items-center justify-end gap-2 max-[780px]:justify-stretch max-[780px]:[&_button]:flex-1';
 const themeSelectorClass = 'grid h-8 w-[200px] grid-cols-3 gap-0.5 overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-base)] p-0.5 max-[780px]:w-full';
 const connectedTextClass = 'text-[var(--success)]';
 const errorTextClass = 'text-[var(--error)]';
 const endpointOptionalClass = 'opacity-60';
+const settingsGatewayCardClass = 'mb-4 rounded-[18px] border border-[rgba(var(--brand-hover-rgb),0.24)] bg-[linear-gradient(135deg,rgba(var(--brand-hover-rgb),0.13),rgba(10,16,29,0.72)_46%,rgba(255,255,255,0.035))] p-4 shadow-[var(--shadow-sm)]';
+const settingsGatewayHeaderClass = 'mb-2 flex items-center gap-2.5';
+const settingsGatewayIconClass = 'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] border border-[rgba(var(--brand-hover-rgb),0.25)] bg-[rgba(var(--brand-hover-rgb),0.12)] text-[var(--accent)]';
+const settingsGatewayTitleClass = 'text-[14px] font-semibold tracking-[-0.01em] text-[var(--text-primary)]';
+const settingsGatewayBadgeClass = 'rounded-full border border-[rgba(var(--brand-hover-rgb),0.24)] bg-[rgba(var(--brand-hover-rgb),0.10)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)]';
+const settingsGatewayDescBlockClass = 'ml-[42px] text-[12px] leading-[1.55] text-[var(--text-secondary)] max-[780px]:ml-0';
+const settingsGatewayChecklistClass = 'mt-3 grid grid-cols-3 gap-2 max-[780px]:grid-cols-1';
+const settingsGatewayChecklistItemClass = 'rounded-[12px] border border-white/[0.08] bg-black/[0.13] px-3 py-2 text-[11px] leading-[1.45] text-[var(--text-muted)]';
+const settingsFieldHintClass = 'mt-1.5 text-[11px] leading-[1.45] text-[var(--text-muted)]';
+const settingsConnectionCardBaseClass = 'w-full rounded-[14px] border px-3 py-3 text-left shadow-[var(--shadow-sm)]';
+const settingsConnectionHeaderClass = 'mb-1.5 flex items-center gap-2 text-[12px] font-semibold text-[var(--text-primary)]';
+const settingsConnectionCodeClass = 'ml-auto rounded-full bg-black/[0.18] px-2 py-0.5 font-mono text-[10px] font-medium text-[var(--text-muted)]';
+const settingsConnectionMessageClass = 'text-[12px] leading-[1.55] text-[var(--text-secondary)]';
+const settingsConnectionMetaClass = 'mt-2 grid gap-1.5 text-[11px] text-[var(--text-muted)]';
+const settingsConnectionModelsClass = 'mt-2 flex flex-wrap gap-1.5';
+const settingsConnectionModelPillClass = 'max-w-full truncate rounded-full border border-white/[0.08] bg-black/[0.14] px-2 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]';
+
+function settingsConnectionCardClass(ok: boolean): string {
+  return [
+    settingsConnectionCardBaseClass,
+    ok
+      ? 'border-[rgba(73,217,139,0.28)] bg-[rgba(73,217,139,0.09)]'
+      : 'border-[rgba(255,107,122,0.30)] bg-[rgba(255,107,122,0.08)]',
+  ].join(' ');
+}
 
 function settingsRowClass(divided = false, extra = ''): string {
   return [
@@ -212,15 +244,19 @@ function themeOptionButtonClass(active: boolean): string {
 function Sidebar({
   page,
   theme,
+  hasOpenProject,
   onNavigate,
   onSetTheme,
   onOpenQuests,
+  onReturnToEditor,
 }: {
   page: string;
   theme: string;
+  hasOpenProject: boolean;
   onNavigate: (p: string) => void;
   onSetTheme: (t: string) => void;
   onOpenQuests: () => void;
+  onReturnToEditor: () => Promise<void> | void;
 }) {
   const { t } = useTranslation();
   const navItems = [
@@ -248,6 +284,25 @@ function Sidebar({
 
       {/* Navigation */}
       <nav className={navClass}>
+        {page === 'settings' ? (
+          <button
+            className={navItemClass(false)}
+            onClick={hasOpenProject ? onReturnToEditor : () => onNavigate('projects')}
+            title={hasOpenProject ? t('settings_return_editor') : t('settings_back_projects')}
+          >
+            <IconChevronLeft />
+            {hasOpenProject ? t('settings_return_editor') : t('settings_back_projects')}
+          </button>
+        ) : hasOpenProject && (
+          <button
+            className={navItemClass(false)}
+            onClick={onReturnToEditor}
+            title={t('settings_return_editor')}
+          >
+            <IconPlay />
+            {t('settings_return_editor')}
+          </button>
+        )}
         {navItems.map(item => (
           <button
             key={item.id}
@@ -757,6 +812,20 @@ interface CopilotSettingsData {
   glm_config?: GlmConfig;
 }
 
+interface ConnectionTestResult {
+  ok: boolean;
+  code: string;
+  message: string;
+  provider: string;
+  provider_display: string;
+  model: string;
+  endpoint: string | null;
+  has_api_key: boolean;
+  model_count: number | null;
+  model_found: boolean | null;
+  models?: ModelInfo[];
+}
+
 function CopilotSettingsSection() {
   const { t } = useTranslation();
   const providerOptions: Array<{ value: CopilotSettingsData['provider']; label: string }> = [
@@ -787,6 +856,9 @@ function CopilotSettingsSection() {
   const [codexAuthError, setCodexAuthError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [keyChanged, setKeyChanged] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -796,7 +868,7 @@ function CopilotSettingsSection() {
       if (s) {
         const providerMap: Record<string, CopilotSettingsData['provider']> = { open_a_i: 'openai' };
         const normalized = providerMap[s.provider] ?? s.provider;
-        setSettings({ ...s, provider: normalized as CopilotSettingsData['provider'] });
+        setSettings({ ...s, api_key: null, provider: normalized as CopilotSettingsData['provider'] });
       }
       setProviderMetas(reg.providers);
       setLoaded(true);
@@ -813,21 +885,56 @@ function CopilotSettingsSection() {
 
   const handleProviderChange = useCallback((provider: CopilotSettingsData['provider']) => {
     setSettings(s => ({ ...s, provider, api_endpoint: null }));
+    setTestResult(null);
+    setSaveError(null);
   }, []);
+
+  const buildSettingsPayload = useCallback(() => {
+    const payload = { ...settings };
+    if (!keyChanged) delete (payload as any).api_key;
+    return payload;
+  }, [settings, keyChanged]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     setSaved(false);
+    setSaveError(null);
     try {
-      const payload = { ...settings };
-      if (!keyChanged) delete (payload as any).api_key;
-      await rpc('app/update_copilot_settings', payload);
+      await rpc('app/update_copilot_settings', buildSettingsPayload());
       setSaved(true);
       setKeyChanged(false);
       setTimeout(() => setSaved(false), 2000);
-    } catch { /* ignore */ }
-    setSaving(false);
-  }, [settings, keyChanged]);
+    } catch (err: any) {
+      setSaveError(typeof err === 'string' ? err : err?.message ?? t('settings_save_failed'));
+    } finally {
+      setSaving(false);
+    }
+  }, [buildSettingsPayload, t]);
+
+  const handleTestConnection = useCallback(async () => {
+    setTestBusy(true);
+    setTestResult(null);
+    try {
+      const result = await rpc<ConnectionTestResult>('app/test_copilot_connection', buildSettingsPayload());
+      setTestResult(result);
+    } catch (err: any) {
+      setTestResult({
+        ok: false,
+        code: 'client_error',
+        message: typeof err === 'string' ? err : err?.message ?? t('settings_connection_failed'),
+        provider: settings.provider,
+        provider_display: currentMeta?.display_name ?? settings.provider,
+        model: settings.model,
+        endpoint: settings.api_endpoint,
+        has_api_key: Boolean(settings.api_key || settings.has_api_key),
+        model_count: null,
+        model_found: null,
+        models: [],
+      });
+    } finally {
+      setTestBusy(false);
+    }
+  }, [buildSettingsPayload, currentMeta, settings, t]);
 
   const handleCodexLogin = useCallback(async () => {
     setCodexAuthBusy(true);
@@ -866,12 +973,34 @@ function CopilotSettingsSection() {
   const showEndpoint = currentMeta?.endpoint_configurable
     ?? (settings.provider === 'ollama' || settings.provider === 'custom');
   const endpointRequired = settings.provider === 'custom';
+  const modelOptions = currentMeta?.models ?? [];
+  const testDisabled = testBusy
+    || settings.provider === 'codex_oauth'
+    || (settings.provider === 'custom' && !(settings.api_endpoint ?? '').trim());
 
   if (!loaded) return null;
 
   return (
     <div className={settingsSectionClass}>
       <div className={settingsSectionTitleClass}>{t('settings_ai_provider')}</div>
+
+      <div className={settingsGatewayCardClass}>
+        <div className={settingsGatewayHeaderClass}>
+          <div className={settingsGatewayIconClass}><IconSparkles /></div>
+          <div className="min-w-0 flex-1">
+            <div className={settingsGatewayTitleClass}>{t('settings_openai_compatible_title')}</div>
+          </div>
+          <span className={settingsGatewayBadgeClass}>OpenAI</span>
+        </div>
+        <div className={settingsGatewayDescBlockClass}>
+          {t('settings_openai_compatible_desc')}
+          <div className={settingsGatewayChecklistClass}>
+            <div className={settingsGatewayChecklistItemClass}>{t('settings_gateway_step_base_url')}</div>
+            <div className={settingsGatewayChecklistItemClass}>{t('settings_gateway_step_key')}</div>
+            <div className={settingsGatewayChecklistItemClass}>{t('settings_gateway_step_test')}</div>
+          </div>
+        </div>
+      </div>
 
       {/* Provider */}
       <div className={settingsRowClass()}>
@@ -892,6 +1021,34 @@ function CopilotSettingsSection() {
         </div>
       </div>
 
+      {/* Endpoint */}
+      {showEndpoint && (
+        <div className={settingsRowClass(true)}>
+          <div>
+            <div className={settingsLabelClass}>
+              {t(settings.provider === 'custom' ? 'settings_base_url' : 'settings_endpoint')} {endpointRequired ? '' : <small className={endpointOptionalClass}>{t('settings_endpoint_optional')}</small>}
+            </div>
+            <div className={settingsDescClass}>{t(settings.provider === 'custom' ? 'settings_base_url_desc' : 'settings_endpoint_desc')}</div>
+          </div>
+          <div className={settingsControlClass}>
+            <input
+              className={settingsInputClass}
+              type="url"
+              spellCheck={false}
+              value={settings.api_endpoint ?? ''}
+              placeholder={currentMeta?.default_endpoint ?? 'https://api.example.com/v1'}
+              onChange={(e) => {
+                setSettings(s => ({ ...s, api_endpoint: e.target.value || null }));
+                setTestResult(null);
+              }}
+            />
+            {settings.provider === 'custom' && (
+              <div className={settingsFieldHintClass}>{t('settings_base_url_hint')}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* API Key */}
       {showApiKey && (
         <div className={settingsRowClass(true)}>
@@ -903,13 +1060,16 @@ function CopilotSettingsSection() {
             <input
               className={settingsInputClass}
               type="password"
+              autoComplete="off"
               value={settings.api_key ?? ''}
-              placeholder={settings.has_api_key ? '••••••••••••' : 'sk-...'}
+              placeholder={settings.has_api_key ? t('settings_api_key_saved_placeholder') : 'sk-...'}
               onChange={(e) => {
                 setSettings(s => ({ ...s, api_key: e.target.value || null }));
                 setKeyChanged(true);
+                setTestResult(null);
               }}
             />
+            <div className={settingsFieldHintClass}>{t('settings_api_key_safe_hint')}</div>
           </div>
         </div>
       )}
@@ -936,23 +1096,30 @@ function CopilotSettingsSection() {
         </div>
       )}
 
-      {/* Endpoint */}
-      {showEndpoint && (
+      {/* Model */}
+      {settings.provider !== 'stub' && settings.provider !== 'codex_oauth' && (
         <div className={settingsRowClass(true)}>
           <div>
-            <div className={settingsLabelClass}>
-              {t('settings_endpoint')} {endpointRequired ? '' : <small className={endpointOptionalClass}>{t('settings_endpoint_optional')}</small>}
-            </div>
-            <div className={settingsDescClass}>{t('settings_endpoint_desc')}</div>
+            <div className={settingsLabelClass}>{t('settings_model_id')}</div>
+            <div className={settingsDescClass}>{t('settings_model_id_desc')}</div>
           </div>
           <div className={settingsControlClass}>
             <input
               className={settingsInputClass}
               type="text"
-              value={settings.api_endpoint ?? ''}
-              placeholder={currentMeta?.default_endpoint ?? 'https://api.example.com/v1'}
-              onChange={(e) => setSettings(s => ({ ...s, api_endpoint: e.target.value || null }))}
+              list="copilot-model-options"
+              spellCheck={false}
+              value={settings.model ?? ''}
+              placeholder={modelOptions[0]?.id ?? 'gpt-4.1-mini'}
+              onChange={(e) => {
+                setSettings(s => ({ ...s, model: e.target.value }));
+                setTestResult(null);
+              }}
             />
+            <datalist id="copilot-model-options">
+              {modelOptions.map(model => <option key={model.id} value={model.id}>{model.display_name}</option>)}
+            </datalist>
+            <div className={settingsFieldHintClass}>{t('settings_model_id_hint')}</div>
           </div>
         </div>
       )}
@@ -1078,8 +1245,58 @@ function CopilotSettingsSection() {
               value={settings.max_tokens}
               min={256}
               max={128000}
-              onChange={(e) => setSettings(s => ({ ...s, max_tokens: parseInt(e.target.value) || 4096 }))}
+              onChange={(e) => {
+                setSettings(s => ({ ...s, max_tokens: parseInt(e.target.value) || 4096 }));
+                setTestResult(null);
+              }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Connection test */}
+      {settings.provider !== 'codex_oauth' && (
+        <div className={settingsRowClass(true, 'min-h-0 py-4')}>
+          <div>
+            <div className={settingsLabelClass}>{t('settings_connection_test_title')}</div>
+            <div className={settingsDescClass}>{t('settings_connection_test_desc')}</div>
+          </div>
+          <div className={`${settingsControlClass} flex flex-col items-stretch gap-2`}>
+            <button
+              className={buttonClass('secondary', 'sm', 'justify-center')}
+              onClick={handleTestConnection}
+              disabled={testDisabled}
+              title={settings.provider === 'custom' && !(settings.api_endpoint ?? '').trim() ? t('settings_connection_custom_requires_url') : undefined}
+            >
+              {testBusy ? <IconLoader className="animate-spin" /> : <IconInfo />}
+              {testBusy ? t('settings_testing_connection') : t('settings_test_connection')}
+            </button>
+            {settings.provider === 'custom' && !(settings.api_endpoint ?? '').trim() && (
+              <div className={settingsFieldHintClass}>{t('settings_connection_custom_requires_url')}</div>
+            )}
+            {testResult && (
+              <div className={settingsConnectionCardClass(testResult.ok)} role="status" aria-live="polite">
+                <div className={settingsConnectionHeaderClass}>
+                  {testResult.ok ? <IconCheck /> : <IconAlertTriangle />}
+                  <span>{testResult.ok ? t('settings_connection_success') : t('settings_connection_failed')}</span>
+                  <span className={settingsConnectionCodeClass}>{testResult.code}</span>
+                </div>
+                <div className={settingsConnectionMessageClass}>{testResult.message}</div>
+                <div className={settingsConnectionMetaClass}>
+                  {testResult.endpoint && <div>{t('settings_connection_endpoint')}: {testResult.endpoint}</div>}
+                  {typeof testResult.model_count === 'number' && <div>{t('settings_connection_model_count').replace('{count}', String(testResult.model_count))}</div>}
+                  {testResult.model_found === true && <div>{t('settings_connection_model_found').replace('{model}', testResult.model || t('settings_model_empty'))}</div>}
+                  {testResult.model_found === false && <div>{t('settings_connection_model_missing').replace('{model}', testResult.model || t('settings_model_empty'))}</div>}
+                </div>
+                {testResult.models && testResult.models.length > 0 && (
+                  <div className={settingsConnectionModelsClass}>
+                    {testResult.models.slice(0, 6).map(model => (
+                      <span key={model.id} className={settingsConnectionModelPillClass}>{model.id}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1087,7 +1304,8 @@ function CopilotSettingsSection() {
       {/* Save button */}
       <div className={settingsRowClass(true, 'min-h-0 pt-3 max-[780px]:[&>*:first-child]:hidden')}>
         <div />
-        <div className={settingsActionsControlClass}>
+        <div className={`${settingsActionsControlClass} flex-col items-end gap-2`}>
+          {saveError && <small className={errorTextClass}>{saveError}</small>}
           <button className={buttonClass('primary', 'sm')} onClick={handleSave} disabled={saving}>
             {saving ? t('settings_saving') : saved ? t('settings_saved') : t('settings_save_ai')}
           </button>
@@ -1102,19 +1320,55 @@ function CopilotSettingsSection() {
 function SettingsPage({
   theme,
   locale,
+  openProject,
+  returnProjectPath,
   onSetTheme,
   onSetLocale,
+  onReturnToEditor,
+  onBackToProjects,
 }: {
   theme: string;
   locale: string;
+  openProject: string | null;
+  returnProjectPath?: string | null;
   onSetTheme: (t: string) => void;
   onSetLocale: (l: string) => void;
+  onReturnToEditor: () => Promise<void> | void;
+  onBackToProjects: () => void;
 }) {
   const { t, t_fmt } = useTranslation();
+  const directReturnProject = openProject ?? returnProjectPath ?? null;
+  const canReturnToEditor = Boolean(directReturnProject);
+  const primaryBackLabel = canReturnToEditor ? t('settings_return_editor') : t('settings_back_projects');
+  const handlePrimaryBack = () => {
+    if (canReturnToEditor) {
+      void onReturnToEditor();
+      return;
+    }
+    onBackToProjects();
+  };
+
   return (
     <>
       <div className={hubPageHeaderClass}>
-        <h2 className={hubPageTitleClass}>{t('hub_settings_title')}</h2>
+        <div className={hubPageHeaderTitleGroupClass}>
+          <button
+            className={buttonClass('secondary', 'sm', 'min-h-9 px-3')}
+            onClick={handlePrimaryBack}
+            title={primaryBackLabel}
+            aria-label={primaryBackLabel}
+          >
+            <IconChevronLeft /> {primaryBackLabel}
+          </button>
+          <h2 className={hubPageTitleClass}>{t('hub_settings_title')}</h2>
+        </div>
+        {canReturnToEditor && (
+          <div className={hubPageActionsClass}>
+            <button className={buttonClass('secondary', 'sm')} onClick={onBackToProjects}>
+              <IconChevronLeft /> {t('settings_back_projects')}
+            </button>
+          </div>
+        )}
       </div>
       <div className={settingsScrollClass}>
         <div className={settingsContentClass}>
@@ -1180,6 +1434,22 @@ function SettingsPage({
               </div>
             </div>
           </div>
+
+          <div className={settingsStickyFooterClass}>
+            <div className={settingsStickyHintClass}>
+              {canReturnToEditor ? t('settings_return_shortcut_hint') : t('settings_back_projects_hint')}
+            </div>
+            <div className={settingsStickyActionsClass}>
+              {canReturnToEditor && (
+                <button className={buttonClass('secondary', 'sm')} onClick={onBackToProjects}>
+                  <IconProjects /> {t('settings_back_projects')}
+                </button>
+              )}
+              <button className={buttonClass('primary', 'md', 'min-w-[150px] justify-center')} onClick={handlePrimaryBack}>
+                <IconChevronLeft /> {primaryBackLabel}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </>
@@ -1188,10 +1458,11 @@ function SettingsPage({
 
 // ─── HubPage (Root) ─────────────────────────────────────────────────────────
 
-export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, onSetLocale, onRefresh, onOpenQuests }: Props) {
+export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, onSetLocale, onRefresh, onOpenQuests, onReturnToEditor, returnProjectPath }: Props) {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const hasEditorReturnTarget = Boolean(state.open_project ?? returnProjectPath);
 
   // Reset selection when projects change
   useEffect(() => {
@@ -1241,8 +1512,12 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
           <SettingsPage
             theme={state.theme}
             locale={state.locale}
+            openProject={state.open_project}
+            returnProjectPath={returnProjectPath}
             onSetTheme={onSetTheme}
             onSetLocale={onSetLocale}
+            onReturnToEditor={onReturnToEditor}
+            onBackToProjects={() => onNavigate('projects')}
           />
         );
       default:
@@ -1264,9 +1539,11 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
       <Sidebar
         page={state.page}
         theme={state.theme}
+        hasOpenProject={hasEditorReturnTarget}
         onNavigate={onNavigate}
         onSetTheme={onSetTheme}
         onOpenQuests={onOpenQuests}
+        onReturnToEditor={onReturnToEditor}
       />
 
       <main className={hubMainClass}>
