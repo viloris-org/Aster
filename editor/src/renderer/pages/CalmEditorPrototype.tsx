@@ -32,15 +32,17 @@ import {
 import {
   closeNativeSceneView,
   openWaylandEmbeddedCompositorSceneView,
-  openZeroCopySceneView,
+  openNoCpuReadbackSceneView,
   openGameView,
   rpc,
   syncEditorCompositorViewport,
   syncWaylandEmbeddedCompositorViewport,
-  syncZeroCopySceneView,
+  syncNoCpuReadbackSceneView,
   viewportPresentationCapabilities,
+  viewportPresentationStatus,
   type ViewportPresentationAdapter,
   type ViewportPresentationMode,
+  type ViewportPresentationStatus,
   viewportReadback,
 } from '../api';
 import type { QuestEditorArtifact } from '../App';
@@ -127,16 +129,62 @@ interface EditorConsoleEntry {
   message: string;
 }
 
-function isNativeHostPresentation(mode: ViewportPresentationMode) {
-  return mode === 'native-host-window' || mode === 'editor-compositor';
-}
-
 function isWaylandEmbeddedCompositorPresentation(mode: ViewportPresentationMode) {
   return mode === 'wayland-embedded-compositor';
 }
 
-function isZeroCopyPresentation(mode: ViewportPresentationMode) {
-  return isNativeHostPresentation(mode) || isWaylandEmbeddedCompositorPresentation(mode);
+function isNoCpuReadbackAdapter(adapter?: ViewportPresentationAdapter) {
+  return Boolean(adapter?.available && !adapter.cpu_readback && adapter.gpu_native_surface);
+}
+
+function supportStateLabel(value: ViewportPresentationStatus['platform_support']) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'boolean') return value ? 'supported' : 'unsupported';
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.reason === 'string' && value.reason) return value.reason;
+  if (typeof value.detail === 'string' && value.detail) return value.detail;
+  if (typeof value.available === 'boolean') return value.available ? 'available' : 'unavailable';
+  if (typeof value.supported === 'boolean') return value.supported ? 'supported' : 'unsupported';
+  if (typeof value.enabled === 'boolean') return value.enabled ? 'enabled' : 'disabled';
+  return null;
+}
+
+function directScanoutLabel(status?: ViewportPresentationStatus | null, adapter?: ViewportPresentationAdapter) {
+  const state = status?.direct_scanout_state
+    ?? status?.direct_scanout
+    ?? status?.direct_scanout_possible
+    ?? adapter?.direct_scanout_possible;
+  if (typeof state === 'boolean') return state ? 'scanout yes' : 'scanout no';
+  if (typeof state !== 'string' || !state) return null;
+  if (state === 'yes-when-unobscured') return 'scanout when unobscured';
+  return `scanout ${state}`;
+}
+
+function presentationDiagnosticsLabel(
+  status: ViewportPresentationStatus | null,
+  adapter?: ViewportPresentationAdapter,
+  active: boolean = false,
+) {
+  const backend = status?.active_backend
+    ?? status?.selected_backend
+    ?? adapter?.backend
+    ?? status?.default_mode
+    ?? adapter?.mode
+    ?? 'viewport';
+  const cpuReadback = adapter?.cpu_readback ?? (status?.default_mode ? status.default_mode === 'canvas-readback' : true);
+  const transport = cpuReadback ? 'canvas readback' : 'no CPU readback';
+  const fallbackReason = status?.fallback_reason || (!active && cpuReadback ? adapter?.reason : null);
+  const platform = supportStateLabel(status?.platform_support);
+  const wayland = supportStateLabel(status?.wayland_embedded_compositor ?? status?.wayland_support);
+  const scanout = directScanoutLabel(status, adapter);
+  return [
+    backend,
+    transport,
+    fallbackReason ? `fallback ${fallbackReason}` : null,
+    scanout,
+    platform && platform !== backend ? `platform ${platform}` : null,
+    wayland ? `wayland ${wayland}` : null,
+  ].filter(Boolean).join(' · ');
 }
 
 interface BuildTargetOption {
@@ -921,6 +969,7 @@ export default function CalmEditorPrototype({
   const [cameraRevision, setCameraRevision] = useState(0);
   const [viewportPresentation, setViewportPresentation] = useState<ViewportPresentationMode>('canvas-readback');
   const [viewportPresentationAdapters, setViewportPresentationAdapters] = useState<ViewportPresentationAdapter[]>([]);
+  const [viewportPresentationDiagnostics, setViewportPresentationDiagnostics] = useState<ViewportPresentationStatus | null>(null);
   const [nativeSceneError, setNativeSceneError] = useState<string | null>(null);
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
   const [scriptContent, setScriptContent] = useState('');
@@ -957,9 +1006,9 @@ export default function CalmEditorPrototype({
   });
 
   const selectedEntity = entities.find((entity) => entity.id === selectedEntityId) ?? entities[0];
-  const nativeHostAdapter = viewportPresentationAdapters.find((adapter) => adapter.mode === 'native-host-window')
-    ?? viewportPresentationAdapters.find((adapter) => adapter.mode === 'editor-compositor');
-  const waylandEmbeddedAdapter = viewportPresentationAdapters.find((adapter) => adapter.mode === 'wayland-embedded-compositor');
+  const effectivePresentationAdapters = viewportPresentationDiagnostics?.adapters ?? viewportPresentationAdapters;
+  const viewportPresentationAdapter = effectivePresentationAdapters.find((adapter) => adapter.mode === viewportPresentation);
+  const noCpuReadbackPresentation = isNoCpuReadbackAdapter(viewportPresentationAdapter);
   const inspectorEntity = selectedEntityDetails
     ? {
       ...selectedEntity,
@@ -1091,7 +1140,7 @@ export default function CalmEditorPrototype({
     const camera = cameraRef.current;
     const openSceneView = isWaylandEmbeddedCompositorPresentation(viewportPresentation)
       ? openWaylandEmbeddedCompositorSceneView
-      : openZeroCopySceneView;
+      : openNoCpuReadbackSceneView;
     await openSceneView({
       viewport,
       yaw: camera.yaw,
@@ -1104,12 +1153,15 @@ export default function CalmEditorPrototype({
   }, [embeddedSceneViewport, viewportPresentation]);
 
   const zeroCopySceneActive = backendReady
-    && isZeroCopyPresentation(viewportPresentation)
+    && noCpuReadbackPresentation
     && viewMode === '3d'
     && !isPlaying
     && !nativeSceneError;
 
-  const nativeHostSceneActive = zeroCopySceneActive && isZeroCopyPresentation(viewportPresentation);
+  const nativeHostSceneActive = zeroCopySceneActive && noCpuReadbackPresentation;
+  const presentationDiagnostics = useMemo(() => (
+    presentationDiagnosticsLabel(viewportPresentationDiagnostics, viewportPresentationAdapter, zeroCopySceneActive)
+  ), [viewportPresentationDiagnostics, viewportPresentationAdapter, zeroCopySceneActive]);
 
   const setSelectedTransform = async (axis: 'position' | 'rotation' | 'scale', index: number, value: number) => {
     setEntities((current) =>
@@ -1268,6 +1320,15 @@ export default function CalmEditorPrototype({
         setViewportPresentation(capabilities.default_mode);
       })
       .catch(() => {});
+    viewportPresentationStatus()
+      .then((status) => {
+        setViewportPresentationDiagnostics(status);
+        if (status.adapters) setViewportPresentationAdapters(status.adapters);
+        if (status.default_mode) setViewportPresentation(status.default_mode);
+      })
+      .catch(() => {
+        setViewportPresentationDiagnostics(null);
+      });
     const interval = window.setInterval(() => {
       refreshShellState();
       refreshConsole();
@@ -1278,7 +1339,7 @@ export default function CalmEditorPrototype({
   useEffect(() => {
     if (
       !backendReady
-      || !isZeroCopyPresentation(viewportPresentation)
+      || !noCpuReadbackPresentation
       || viewMode !== '3d'
       || isPlaying
     ) return;
@@ -1294,7 +1355,7 @@ export default function CalmEditorPrototype({
     return () => {
       cancelled = true;
     };
-  }, [backendReady, isPlaying, openNativeSceneViewport, sceneVersion, viewportPresentation, viewMode]);
+  }, [backendReady, isPlaying, noCpuReadbackPresentation, openNativeSceneViewport, sceneVersion, viewportPresentation, viewMode]);
 
   useEffect(() => {
     if (!zeroCopySceneActive) return;
@@ -1310,7 +1371,7 @@ export default function CalmEditorPrototype({
         const camera = cameraRef.current;
         const syncPromise = isWaylandEmbeddedCompositorPresentation(viewportPresentation)
           ? syncWaylandEmbeddedCompositorViewport({ viewport })
-          : syncZeroCopySceneView({
+          : syncNoCpuReadbackSceneView({
             viewport,
             yaw: camera.yaw,
             pitch: camera.pitch,
@@ -1369,13 +1430,13 @@ export default function CalmEditorPrototype({
 
   useEffect(() => {
     if (
-      isZeroCopyPresentation(viewportPresentation)
+      noCpuReadbackPresentation
       && viewMode === '3d'
       && !isPlaying
       && !nativeSceneError
     ) return;
     closeNativeSceneView().catch(() => {});
-  }, [isPlaying, nativeSceneError, viewportPresentation, viewMode]);
+  }, [isPlaying, nativeSceneError, noCpuReadbackPresentation, viewportPresentation, viewMode]);
 
   useEffect(() => {
     setSelectedScript((current) => {
@@ -1871,13 +1932,7 @@ export default function CalmEditorPrototype({
             <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--text-muted)]">
               <span className={cx('size-1.5 rounded-full', isPlaying ? 'bg-[var(--brand)]' : 'bg-[var(--text-muted)]')} />
               <span>{isPlaying ? 'Play mode' : 'Editor mode'}</span>
-              <span>
-                {zeroCopySceneActive
-                  ? isWaylandEmbeddedCompositorPresentation(viewportPresentation)
-                    ? 'wayland compositor · zero-copy'
-                    : 'native host · zero-copy'
-                  : 'canvas 1080p fallback'}
-              </span>
+              <span className="max-w-[440px] truncate">{presentationDiagnostics}</span>
               <span>{viewportSize.width}x{viewportSize.height}</span>
             </div>
           </div>
@@ -1894,10 +1949,8 @@ export default function CalmEditorPrototype({
             {zeroCopySceneActive ? (
               <div className="pointer-events-none absolute inset-0 z-[1] bg-[linear-gradient(180deg,rgba(7,10,15,0.10),transparent_18%,transparent_78%,rgba(7,10,15,0.18))]" aria-hidden="true">
                 <ViewportGrid />
-                <div className="absolute right-3 top-3 rounded-[var(--radius-sm)] border border-[rgba(245,158,11,0.30)] bg-[rgba(7,10,15,0.72)] px-2 py-1 font-mono text-[10px] text-[#fbbf24] backdrop-blur-xl">
-                  {isNativeHostPresentation(viewportPresentation)
-                    ? 'zero-copy · native host'
-                    : 'zero-copy · wayland compositor'}
+                <div className="absolute right-3 top-3 max-w-[min(520px,62%)] truncate rounded-[var(--radius-sm)] border border-[rgba(245,158,11,0.30)] bg-[rgba(7,10,15,0.72)] px-2 py-1 font-mono text-[10px] text-[#fbbf24] backdrop-blur-xl">
+                  {presentationDiagnostics}
                 </div>
               </div>
             ) : !zeroCopySceneActive ? (

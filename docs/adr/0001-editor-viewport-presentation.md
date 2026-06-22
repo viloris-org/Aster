@@ -42,6 +42,8 @@ The target architecture is **Native host window owns the editor root**:
 
 This keeps zero-copy presentation while removing both known races: child-surface positioning and WebView root-window ownership. Linux is the forcing function here because GTK/WebKit/Wayland/X11 make child-surface ownership especially visible, but the same host-window model is the cross-platform target.
 
+Detailed capability semantics, platform adapters, and phased delivery are tracked in [`docs/editor-viewport-zero-copy-plan.md`](../editor-viewport-zero-copy-plan.md).
+
 ## Consequences
 
 Positive:

@@ -1,7 +1,7 @@
 //! Native game window with direct GPU surface presentation.
 //!
 //! Runs a winit event loop on a dedicated thread with a wgpu surface,
-//! bypassing the readback → IPC → canvas pipeline for zero-copy rendering.
+//! bypassing the readback → IPC → canvas pipeline for no-CPU-readback rendering.
 
 use std::path::PathBuf;
 use std::sync::mpsc;

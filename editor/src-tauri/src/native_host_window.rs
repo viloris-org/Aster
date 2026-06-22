@@ -10,6 +10,7 @@ use std::time::Duration;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::Manager;
 
+use crate::editor_compositor;
 use crate::scene_window;
 
 pub struct NativeHostSceneTarget {
@@ -28,11 +29,87 @@ pub enum NativeHostLayoutMode {
     HostOwnedRoot,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NativeHostBackend {
     X11,
     Wayland,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeHostWindowBackend {
+    LinuxX11,
+    LinuxWayland,
+    Win32,
+    AppKit,
+    MobileRootView,
+    UnsupportedDesktop,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeHostRoute {
+    LinuxBridge(NativeHostBackend),
+    WindowsDirectComposition,
+    MacosCoreAnimation,
+    RootWindowSurface,
+    UnsupportedDesktop,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WindowsDirectCompositionHostPlan {
+    platform: editor_compositor::NativeHostPlatformPlan,
+    native_host_root: &'static str,
+    scene_surface_route: &'static str,
+    web_ui_route: &'static str,
+}
+
+impl WindowsDirectCompositionHostPlan {
+    fn unavailable_error(self) -> String {
+        platform_plan_error(
+            self.platform,
+            &[
+                self.native_host_root,
+                self.scene_surface_route,
+                self.web_ui_route,
+            ],
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MacosCoreAnimationHostPlan {
+    platform: editor_compositor::NativeHostPlatformPlan,
+    native_host_root: &'static str,
+    scene_surface_route: &'static str,
+    web_ui_route: &'static str,
+}
+
+impl MacosCoreAnimationHostPlan {
+    fn unavailable_error(self) -> String {
+        platform_plan_error(
+            self.platform,
+            &[
+                self.native_host_root,
+                self.scene_surface_route,
+                self.web_ui_route,
+            ],
+        )
+    }
+}
+
+const WINDOWS_DIRECTCOMPOSITION_HOST_PLAN: WindowsDirectCompositionHostPlan =
+    WindowsDirectCompositionHostPlan {
+        platform: editor_compositor::WINDOWS_NATIVE_HOST_PLAN,
+        native_host_root: "native host root: HWND-owned DirectComposition visual tree",
+        scene_surface_route: "scene route: WGPU output presented through a DXGI/DirectComposition surface",
+        web_ui_route: "web UI route: WebView2 CompositionController attached as hosted visuals",
+    };
+
+const MACOS_CORE_ANIMATION_HOST_PLAN: MacosCoreAnimationHostPlan = MacosCoreAnimationHostPlan {
+    platform: editor_compositor::MACOS_NATIVE_HOST_PLAN,
+    native_host_root: "native host root: NSWindow/NSView-owned Core Animation layer tree",
+    scene_surface_route: "scene route: WGPU output presented through CAMetalLayer",
+    web_ui_route: "web UI route: WKWebView/AppKit panels embedded in the native view tree",
+};
 
 pub fn install_bridge_host_on_main_thread(
     app: &tauri::AppHandle,
@@ -44,20 +121,49 @@ pub fn install_bridge_host_on_main_thread(
         .window_handle()
         .map_err(|error| format!("main window handle: {error}"))?
         .as_raw();
-    match handle {
-        RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_) => {
+    match native_host_route(native_host_window_backend(handle)) {
+        NativeHostRoute::LinuxBridge(NativeHostBackend::X11) => {
             ensure_linux_host_surface_on_main_thread(app, NativeHostBackend::X11)
         }
-        RawWindowHandle::Wayland(_) => {
+        NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland) => {
             ensure_linux_host_surface_on_main_thread(app, NativeHostBackend::Wayland)
         }
-        RawWindowHandle::Win32(_)
-        | RawWindowHandle::AppKit(_)
-        | RawWindowHandle::UiKit(_)
-        | RawWindowHandle::AndroidNdk(_) => Ok(NativeHostLayoutMode::HostOwnedRoot),
-        other => Err(format!(
-            "native host window Scene View does not support this desktop backend yet: {other:?}"
+        NativeHostRoute::WindowsDirectComposition => {
+            Err(WINDOWS_DIRECTCOMPOSITION_HOST_PLAN.unavailable_error())
+        }
+        NativeHostRoute::MacosCoreAnimation => {
+            Err(MACOS_CORE_ANIMATION_HOST_PLAN.unavailable_error())
+        }
+        NativeHostRoute::RootWindowSurface => Ok(NativeHostLayoutMode::HostOwnedRoot),
+        NativeHostRoute::UnsupportedDesktop => Err(format!(
+            "native host window Scene View does not support this desktop backend yet: {handle:?}"
         )),
+    }
+}
+
+fn native_host_window_backend(handle: RawWindowHandle) -> NativeHostWindowBackend {
+    match handle {
+        RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_) => NativeHostWindowBackend::LinuxX11,
+        RawWindowHandle::Wayland(_) => NativeHostWindowBackend::LinuxWayland,
+        RawWindowHandle::Win32(_) => NativeHostWindowBackend::Win32,
+        RawWindowHandle::AppKit(_) => NativeHostWindowBackend::AppKit,
+        RawWindowHandle::UiKit(_) | RawWindowHandle::AndroidNdk(_) => {
+            NativeHostWindowBackend::MobileRootView
+        }
+        _ => NativeHostWindowBackend::UnsupportedDesktop,
+    }
+}
+
+fn native_host_route(backend: NativeHostWindowBackend) -> NativeHostRoute {
+    match backend {
+        NativeHostWindowBackend::LinuxX11 => NativeHostRoute::LinuxBridge(NativeHostBackend::X11),
+        NativeHostWindowBackend::LinuxWayland => {
+            NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland)
+        }
+        NativeHostWindowBackend::Win32 => NativeHostRoute::WindowsDirectComposition,
+        NativeHostWindowBackend::AppKit => NativeHostRoute::MacosCoreAnimation,
+        NativeHostWindowBackend::MobileRootView => NativeHostRoute::RootWindowSurface,
+        NativeHostWindowBackend::UnsupportedDesktop => NativeHostRoute::UnsupportedDesktop,
     }
 }
 
@@ -69,21 +175,54 @@ pub fn main_window_scene_target(app: &tauri::AppHandle) -> Result<NativeHostScen
         .window_handle()
         .map_err(|error| format!("main window handle: {error}"))?
         .as_raw();
-    match handle {
-        RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_) => {
+    match native_host_route(native_host_window_backend(handle)) {
+        NativeHostRoute::LinuxBridge(NativeHostBackend::X11) => {
             create_linux_host_surface(app.clone(), NativeHostBackend::X11)
         }
-        RawWindowHandle::Wayland(_) => {
+        NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland) => {
             create_linux_host_surface(app.clone(), NativeHostBackend::Wayland)
         }
-        RawWindowHandle::Win32(_)
-        | RawWindowHandle::AppKit(_)
-        | RawWindowHandle::UiKit(_)
-        | RawWindowHandle::AndroidNdk(_) => create_root_window_scene_surface(app),
-        other => Err(format!(
-            "native host window Scene View does not support this desktop backend yet: {other:?}"
+        NativeHostRoute::WindowsDirectComposition => create_windows_host_scene_target(),
+        NativeHostRoute::MacosCoreAnimation => create_macos_host_scene_target(),
+        NativeHostRoute::RootWindowSurface => create_root_window_scene_surface(app),
+        NativeHostRoute::UnsupportedDesktop => Err(format!(
+            "native host window Scene View does not support this desktop backend yet: {handle:?}"
         )),
     }
+}
+
+fn platform_plan_error(
+    plan: editor_compositor::NativeHostPlatformPlan,
+    host_boundaries: &[&str],
+) -> String {
+    let mut blocking_work = Vec::with_capacity(host_boundaries.len() + plan.blocking_work.len());
+    blocking_work.extend_from_slice(host_boundaries);
+    blocking_work.extend_from_slice(plan.blocking_work);
+    format!(
+        "{} Blocking work: {}",
+        plan.status,
+        blocking_work.join("; ")
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn create_windows_host_scene_target() -> Result<NativeHostSceneTarget, String> {
+    Err(WINDOWS_DIRECTCOMPOSITION_HOST_PLAN.unavailable_error())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn create_windows_host_scene_target() -> Result<NativeHostSceneTarget, String> {
+    Err("Windows native host adapter can only run on Windows.".to_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn create_macos_host_scene_target() -> Result<NativeHostSceneTarget, String> {
+    Err(MACOS_CORE_ANIMATION_HOST_PLAN.unavailable_error())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn create_macos_host_scene_target() -> Result<NativeHostSceneTarget, String> {
+    Err("macOS native host adapter can only run on macOS.".to_owned())
 }
 
 fn create_root_window_scene_surface(
@@ -338,5 +477,73 @@ fn gtk_drawing_area_raw_surface(
                 window: xid as u64,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_host_route_classifies_desktop_backends() {
+        assert_eq!(
+            native_host_route(NativeHostWindowBackend::LinuxX11),
+            NativeHostRoute::LinuxBridge(NativeHostBackend::X11)
+        );
+        assert_eq!(
+            native_host_route(NativeHostWindowBackend::LinuxWayland),
+            NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland)
+        );
+        assert_eq!(
+            native_host_route(NativeHostWindowBackend::Win32),
+            NativeHostRoute::WindowsDirectComposition
+        );
+        assert_eq!(
+            native_host_route(NativeHostWindowBackend::AppKit),
+            NativeHostRoute::MacosCoreAnimation
+        );
+    }
+
+    #[test]
+    fn native_host_route_keeps_mobile_root_surface_separate() {
+        assert_eq!(
+            native_host_route(NativeHostWindowBackend::MobileRootView),
+            NativeHostRoute::RootWindowSurface
+        );
+        assert_eq!(
+            native_host_route(NativeHostWindowBackend::UnsupportedDesktop),
+            NativeHostRoute::UnsupportedDesktop
+        );
+    }
+
+    #[test]
+    fn windows_directcomposition_plan_formats_unavailable_boundaries() {
+        let error = WINDOWS_DIRECTCOMPOSITION_HOST_PLAN.unavailable_error();
+
+        assert!(error.contains("planned but not implemented"));
+        assert!(error.contains("native host root: HWND-owned DirectComposition visual tree"));
+        assert!(error.contains("DXGI/DirectComposition surface"));
+        assert!(error.contains("WebView2 CompositionController"));
+        assert!(error.contains("Blocking work:"));
+        assert!(
+            !WINDOWS_DIRECTCOMPOSITION_HOST_PLAN
+                .platform
+                .support()
+                .available
+        );
+    }
+
+    #[test]
+    fn macos_core_animation_plan_formats_unavailable_boundaries() {
+        let error = MACOS_CORE_ANIMATION_HOST_PLAN.unavailable_error();
+
+        assert!(error.contains("planned but not implemented"));
+        assert!(
+            error.contains("native host root: NSWindow/NSView-owned Core Animation layer tree")
+        );
+        assert!(error.contains("CAMetalLayer"));
+        assert!(error.contains("WKWebView/AppKit panels"));
+        assert!(error.contains("Blocking work:"));
+        assert!(!MACOS_CORE_ANIMATION_HOST_PLAN.platform.support().available);
     }
 }

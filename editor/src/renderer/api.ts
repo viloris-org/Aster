@@ -119,19 +119,54 @@ export type ViewportPresentationMode =
   | 'wayland-embedded-compositor'
   | 'editor-compositor';
 
+export type DirectScanoutSupport =
+  | 'no'
+  | 'maybe'
+  | 'yes-when-unobscured';
+
 export interface ViewportPresentationAdapter {
   mode: ViewportPresentationMode;
   available: boolean;
   default: boolean;
+  /** Legacy alias for !cpu_readback; not a direct-scanout guarantee. */
   zero_copy: boolean;
   experimental: boolean;
   backend: string;
+  cpu_readback: boolean;
+  gpu_native_surface: boolean;
+  gpu_composited: boolean;
+  direct_scanout_possible: DirectScanoutSupport;
   reason: string;
 }
 
 export interface ViewportPresentationCapabilities {
   default_mode: ViewportPresentationMode;
   adapters: ViewportPresentationAdapter[];
+}
+
+export interface ViewportPresentationSupportStatus {
+  available?: boolean;
+  supported?: boolean;
+  enabled?: boolean;
+  reason?: string | null;
+  detail?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ViewportPresentationStatus {
+  compositor_requested?: boolean;
+  default_mode?: ViewportPresentationMode;
+  active_backend?: string | null;
+  selected_backend?: string | null;
+  platform_support?: string | boolean | ViewportPresentationSupportStatus | null;
+  wayland_embedded_compositor?: string | boolean | ViewportPresentationSupportStatus | null;
+  wayland_support?: string | boolean | ViewportPresentationSupportStatus | null;
+  fallback_reason?: string | null;
+  adapters?: ViewportPresentationAdapter[];
+  direct_scanout?: string | boolean | null;
+  direct_scanout_state?: string | null;
+  direct_scanout_possible?: DirectScanoutSupport | string | boolean | null;
+  [key: string]: unknown;
 }
 
 export interface WaylandEmbeddedCompositorRuntimeStatus {
@@ -143,6 +178,10 @@ export interface WaylandEmbeddedCompositorRuntimeStatus {
 
 export function viewportPresentationCapabilities(): Promise<ViewportPresentationCapabilities> {
   return invoke<ViewportPresentationCapabilities>('viewport_presentation_capabilities');
+}
+
+export function viewportPresentationStatus(): Promise<ViewportPresentationStatus> {
+  return invoke<ViewportPresentationStatus>('viewport_presentation_status');
 }
 
 export async function syncEditorCompositorViewport(params: {
@@ -201,6 +240,26 @@ export async function openWaylandEmbeddedCompositorSceneView(params: {
   });
 }
 
+export async function openNoCpuReadbackSceneView(params: {
+  viewport: { x: number; y: number; width: number; height: number };
+  yaw: number;
+  pitch: number;
+  distance: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+}): Promise<void> {
+  await invoke('open_no_cpu_readback_scene_view', {
+    viewport: params.viewport,
+    yaw: params.yaw,
+    pitch: params.pitch,
+    distance: params.distance,
+    targetX: params.targetX,
+    targetY: params.targetY,
+    targetZ: params.targetZ,
+  });
+}
+
 export async function openZeroCopySceneView(params: {
   viewport: { x: number; y: number; width: number; height: number };
   yaw: number;
@@ -210,14 +269,26 @@ export async function openZeroCopySceneView(params: {
   targetY: number;
   targetZ: number;
 }): Promise<void> {
-  await invoke('open_zero_copy_scene_view', {
+  await openNoCpuReadbackSceneView(params);
+}
+
+export async function syncNoCpuReadbackSceneView(params: {
+  viewport: { x: number; y: number; width: number; height: number };
+  yaw?: number;
+  pitch?: number;
+  distance?: number;
+  targetX?: number;
+  targetY?: number;
+  targetZ?: number;
+}): Promise<void> {
+  await invoke('sync_no_cpu_readback_scene_view', {
     viewport: params.viewport,
-    yaw: params.yaw,
-    pitch: params.pitch,
-    distance: params.distance,
-    targetX: params.targetX,
-    targetY: params.targetY,
-    targetZ: params.targetZ,
+    yaw: params.yaw ?? null,
+    pitch: params.pitch ?? null,
+    distance: params.distance ?? null,
+    targetX: params.targetX ?? null,
+    targetY: params.targetY ?? null,
+    targetZ: params.targetZ ?? null,
   });
 }
 
@@ -230,15 +301,7 @@ export async function syncZeroCopySceneView(params: {
   targetY?: number;
   targetZ?: number;
 }): Promise<void> {
-  await invoke('sync_zero_copy_scene_view', {
-    viewport: params.viewport,
-    yaw: params.yaw ?? null,
-    pitch: params.pitch ?? null,
-    distance: params.distance ?? null,
-    targetX: params.targetX ?? null,
-    targetY: params.targetY ?? null,
-    targetZ: params.targetZ ?? null,
-  });
+  await syncNoCpuReadbackSceneView(params);
 }
 
 /**

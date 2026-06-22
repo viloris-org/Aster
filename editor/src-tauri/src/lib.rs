@@ -1029,9 +1029,9 @@ pub struct EditorHost {
     game_window: Option<game_window::GameWindowHandle>,
     /// Native editor scene view handle (direct GPU surface rendering).
     scene_window: Option<scene_window::SceneWindowHandle>,
-    /// Full-window editor compositor seam for the future zero-copy viewport.
+    /// Full-window editor compositor seam for the future no-CPU-readback viewport.
     editor_compositor: editor_compositor::EditorCompositor,
-    /// Wayland production zero-copy presentation seam backed by an embedded compositor.
+    /// Wayland production no-CPU-readback presentation seam backed by an embedded compositor.
     wayland_embedded_compositor: wayland_embedded_compositor::WaylandEmbeddedCompositor,
     /// Cross-project Quest registry and append-only history store.
     quest_store: QuestStore,
@@ -7617,6 +7617,11 @@ fn viewport_presentation_capabilities() -> editor_compositor::ViewportPresentati
 }
 
 #[tauri::command]
+fn viewport_presentation_status() -> editor_compositor::ViewportPresentationStatus {
+    editor_compositor::presentation_status(editor_compositor_requested())
+}
+
+#[tauri::command]
 fn sync_editor_compositor_viewport(
     state: State<'_, EditorHostState>,
     viewport: EmbeddedSceneViewport,
@@ -7647,7 +7652,7 @@ fn sync_wayland_embedded_compositor_viewport(
 }
 
 #[tauri::command]
-fn sync_zero_copy_scene_view(
+fn sync_no_cpu_readback_scene_view(
     _app: tauri::AppHandle,
     state: State<'_, EditorHostState>,
     viewport: EmbeddedSceneViewport,
@@ -7667,7 +7672,7 @@ fn sync_zero_copy_scene_view(
         let scene_window = host
             .scene_window
             .as_ref()
-            .ok_or_else(|| "zero-copy scene view is not running".to_owned())?;
+            .ok_or_else(|| "no-CPU-readback scene view is not running".to_owned())?;
         scene_window.set_viewport(viewport)?;
         if let (
             Some(yaw),
@@ -7690,7 +7695,24 @@ fn sync_zero_copy_scene_view(
 }
 
 #[tauri::command]
-fn open_zero_copy_scene_view(
+fn sync_zero_copy_scene_view(
+    app: tauri::AppHandle,
+    state: State<'_, EditorHostState>,
+    viewport: EmbeddedSceneViewport,
+    yaw: Option<f32>,
+    pitch: Option<f32>,
+    distance: Option<f32>,
+    target_x: Option<f32>,
+    target_y: Option<f32>,
+    target_z: Option<f32>,
+) -> Result<(), String> {
+    sync_no_cpu_readback_scene_view(
+        app, state, viewport, yaw, pitch, distance, target_x, target_y, target_z,
+    )
+}
+
+#[tauri::command]
+fn open_no_cpu_readback_scene_view(
     app: tauri::AppHandle,
     state: State<'_, EditorHostState>,
     viewport: EmbeddedSceneViewport,
@@ -7712,7 +7734,7 @@ fn open_zero_copy_scene_view(
     let support = editor_compositor::platform_support();
     if !editor_compositor_requested() || !support.available {
         return Err(format!(
-            "zero-copy scene view is unavailable on backend {}: {}",
+            "no-CPU-readback scene view is unavailable on backend {}: {}",
             support.backend.id(),
             support.reason
         ));
@@ -7722,7 +7744,7 @@ fn open_zero_copy_scene_view(
     tracing::info!(
         target: "editor",
         layout_mode = ?target.layout_mode,
-        "opening zero-copy Scene View through native host window adapter"
+        "opening no-CPU-readback Scene View through native host window adapter"
     );
     state.with_host(|host| {
         host.poll_scene_window();
@@ -7768,6 +7790,23 @@ fn open_zero_copy_scene_view(
 }
 
 #[tauri::command]
+fn open_zero_copy_scene_view(
+    app: tauri::AppHandle,
+    state: State<'_, EditorHostState>,
+    viewport: EmbeddedSceneViewport,
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+) -> Result<(), String> {
+    open_no_cpu_readback_scene_view(
+        app, state, viewport, yaw, pitch, distance, target_x, target_y, target_z,
+    )
+}
+
+#[tauri::command]
 fn open_editor_compositor_scene_view(
     app: tauri::AppHandle,
     state: State<'_, EditorHostState>,
@@ -7779,7 +7818,7 @@ fn open_editor_compositor_scene_view(
     target_y: f32,
     target_z: f32,
 ) -> Result<(), String> {
-    open_zero_copy_scene_view(
+    open_no_cpu_readback_scene_view(
         app, state, viewport, yaw, pitch, distance, target_x, target_y, target_z,
     )
 }
@@ -8241,8 +8280,11 @@ pub fn run() {
             open_native_scene_view,
             close_native_scene_view,
             viewport_presentation_capabilities,
+            viewport_presentation_status,
             sync_editor_compositor_viewport,
             sync_wayland_embedded_compositor_viewport,
+            open_no_cpu_readback_scene_view,
+            sync_no_cpu_readback_scene_view,
             open_zero_copy_scene_view,
             sync_zero_copy_scene_view,
             open_wayland_embedded_compositor_scene_view,
@@ -8261,7 +8303,7 @@ pub fn run() {
                     tracing::info!(
                         target: "editor",
                         backend = wayland_embedded_compositor::BACKEND_ID,
-                        "skipping GTK native host bridge on Wayland; embedded compositor adapter owns zero-copy presentation"
+                        "skipping GTK native host bridge on Wayland; embedded compositor adapter owns no-CPU-readback presentation"
                     );
                 } else {
                     let layout_mode =
