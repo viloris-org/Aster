@@ -6,6 +6,7 @@ use engine_core::{
     AssetId, EngineError, EngineResult, EntityId,
     math::{Transform, Vec3},
 };
+use serde::Deserialize;
 
 use crate::{
     transform::TransformHierarchy,
@@ -86,17 +87,60 @@ impl ObjectIdAllocator {
     }
 }
 
-/// Script component placeholder stored without requiring a script backend.
+/// User-facing Varg script component stored without exposing backend choice.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct ScriptComponentProxy {
-    /// Stable backend name, for example `python`.
-    pub backend: String,
-    /// Script module or asset path.
-    pub script: String,
-    /// Serialized script state as opaque JSON.
-    pub state_json: Option<String>,
-    /// Whether the component awaits backend recovery.
+pub struct ScriptComponent {
+    /// Varg script asset path.
+    #[serde(alias = "script")]
+    pub source: String,
+    /// Editor-exposed property overrides keyed by exported Varg property name.
+    #[serde(default)]
+    pub exported_values: HashMap<String, serde_json::Value>,
+    /// Serialized runtime state keyed by Varg state property name.
+    #[serde(
+        default,
+        alias = "state_json",
+        deserialize_with = "deserialize_script_state"
+    )]
+    pub state: HashMap<String, serde_json::Value>,
+    /// Legacy backend marker retained only when reading old scene files.
+    #[serde(default, alias = "backend", skip_serializing)]
+    pub legacy_backend: Option<String>,
+    /// Whether the component awaits script runtime recovery.
+    #[serde(default)]
     pub pending_recovery: bool,
+}
+
+/// Compatibility alias for older call sites during the Varg migration.
+pub type ScriptComponentProxy = ScriptComponent;
+
+impl ScriptComponent {
+    /// Creates a Varg script component with no exported overrides or state.
+    pub fn new(source: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            exported_values: HashMap::new(),
+            state: HashMap::new(),
+            legacy_backend: None,
+            pending_recovery: false,
+        }
+    }
+}
+
+fn deserialize_script_state<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        Some(serde_json::Value::Object(map)) => Ok(map.into_iter().collect()),
+        Some(serde_json::Value::String(raw)) => {
+            serde_json::from_str(&raw).map_err(serde::de::Error::custom)
+        }
+        Some(_) | None => Ok(HashMap::new()),
+    }
 }
 
 /// Serializable camera component.
@@ -323,6 +367,57 @@ pub struct FluidVolumeComponentData {
     /// Offset from the volume top used as the fluid surface.
     #[serde(default)]
     pub surface_offset: f32,
+    /// Surface model: `still`, `river`, `ocean`, or `tidal`.
+    #[serde(default = "default_water_surface_profile")]
+    pub surface_profile: String,
+    /// Direction used by waves and river slope in local XZ space.
+    #[serde(default = "default_water_wave_direction")]
+    pub wave_direction: Vec3,
+    /// Primary wave amplitude in world units.
+    #[serde(default)]
+    pub wave_amplitude: f32,
+    /// Primary wave length in world units.
+    #[serde(default = "default_water_wave_length")]
+    pub wave_length: f32,
+    /// Primary wave travel speed in world units per second.
+    #[serde(default = "default_water_wave_speed")]
+    pub wave_speed: f32,
+    /// Secondary cross-wave amplitude in world units.
+    #[serde(default)]
+    pub chop_amplitude: f32,
+    /// Secondary cross-wave length in world units.
+    #[serde(default = "default_water_chop_length")]
+    pub chop_length: f32,
+    /// River surface slope in height units per horizontal unit.
+    #[serde(default)]
+    pub river_slope: f32,
+    /// Tidal height amplitude in world units.
+    #[serde(default)]
+    pub tide_amplitude: f32,
+    /// Tidal cycle duration in seconds.
+    #[serde(default = "default_water_tide_period_seconds")]
+    pub tide_period_seconds: f32,
+    /// Tidal phase offset in seconds.
+    #[serde(default)]
+    pub tide_phase_seconds: f32,
+    /// Base water tint used by render extraction.
+    #[serde(default = "default_water_tint")]
+    pub water_tint: Vec3,
+    /// Surface alpha used by render extraction.
+    #[serde(default = "default_water_alpha")]
+    pub water_alpha: f32,
+    /// Strength of environment and screen-space reflections.
+    #[serde(default = "default_water_reflection_strength")]
+    pub reflection_strength: f32,
+    /// Grazing-angle reflection boost.
+    #[serde(default = "default_water_fresnel_power")]
+    pub fresnel_power: f32,
+    /// Microfacet roughness used for water reflections.
+    #[serde(default = "default_water_reflection_roughness")]
+    pub reflection_roughness: f32,
+    /// Shallow-water absorption tint multiplier.
+    #[serde(default = "default_water_absorption_tint")]
+    pub absorption_tint: Vec3,
 }
 
 fn default_fluid_density() -> f32 {
@@ -341,6 +436,54 @@ fn default_fluid_angular_drag() -> f32 {
     0.5
 }
 
+fn default_water_surface_profile() -> String {
+    "still".to_string()
+}
+
+fn default_water_wave_direction() -> Vec3 {
+    Vec3::new(1.0, 0.0, 0.0)
+}
+
+fn default_water_wave_length() -> f32 {
+    12.0
+}
+
+fn default_water_wave_speed() -> f32 {
+    2.0
+}
+
+fn default_water_chop_length() -> f32 {
+    5.0
+}
+
+fn default_water_tide_period_seconds() -> f32 {
+    44_712.0
+}
+
+fn default_water_tint() -> Vec3 {
+    Vec3::new(0.05, 0.32, 0.42)
+}
+
+fn default_water_alpha() -> f32 {
+    0.72
+}
+
+fn default_water_reflection_strength() -> f32 {
+    0.85
+}
+
+fn default_water_fresnel_power() -> f32 {
+    5.0
+}
+
+fn default_water_reflection_roughness() -> f32 {
+    0.06
+}
+
+fn default_water_absorption_tint() -> Vec3 {
+    Vec3::new(0.04, 0.18, 0.22)
+}
+
 impl Default for FluidVolumeComponentData {
     fn default() -> Self {
         Self {
@@ -351,8 +494,151 @@ impl Default for FluidVolumeComponentData {
             angular_drag: default_fluid_angular_drag(),
             flow_velocity: Vec3::ZERO,
             surface_offset: 0.0,
+            surface_profile: default_water_surface_profile(),
+            wave_direction: default_water_wave_direction(),
+            wave_amplitude: 0.0,
+            wave_length: default_water_wave_length(),
+            wave_speed: default_water_wave_speed(),
+            chop_amplitude: 0.0,
+            chop_length: default_water_chop_length(),
+            river_slope: 0.0,
+            tide_amplitude: 0.0,
+            tide_period_seconds: default_water_tide_period_seconds(),
+            tide_phase_seconds: 0.0,
+            water_tint: default_water_tint(),
+            water_alpha: default_water_alpha(),
+            reflection_strength: default_water_reflection_strength(),
+            fresnel_power: default_water_fresnel_power(),
+            reflection_roughness: default_water_reflection_roughness(),
+            absorption_tint: default_water_absorption_tint(),
         }
     }
+}
+
+impl FluidVolumeComponentData {
+    /// Samples the local-space water surface height at the given point and time.
+    ///
+    /// The returned height is local Y relative to the fluid volume origin. The
+    /// model is intentionally deterministic and cheap enough for gameplay,
+    /// editor previews, and buoyancy probes.
+    pub fn surface_height_at(&self, local_position: Vec3, time_seconds: f32) -> f32 {
+        let base_height = self.size.y * 0.5 - self.surface_offset;
+        let profile = self.surface_profile.as_str();
+
+        let river_height = if profile == "river" {
+            self.river_slope * horizontal_phase(local_position, self.wave_direction)
+        } else {
+            0.0
+        };
+
+        let tide_height = if profile == "tidal" {
+            cycle_height(
+                self.tide_amplitude,
+                self.tide_period_seconds,
+                time_seconds + self.tide_phase_seconds,
+            )
+        } else {
+            0.0
+        };
+
+        let wave_height = if matches!(profile, "river" | "ocean" | "tidal") {
+            traveling_wave_height(
+                self.wave_amplitude,
+                self.wave_length,
+                self.wave_speed,
+                self.wave_direction,
+                local_position,
+                time_seconds,
+            ) + traveling_wave_height(
+                self.chop_amplitude,
+                self.chop_length,
+                self.wave_speed * 1.7,
+                Vec3::new(-self.wave_direction.z, 0.0, self.wave_direction.x),
+                local_position,
+                time_seconds,
+            )
+        } else {
+            0.0
+        };
+
+        base_height + river_height + tide_height + wave_height
+    }
+
+    /// Returns the signed depth below the sampled water surface.
+    pub fn depth_at(&self, local_position: Vec3, time_seconds: f32) -> f32 {
+        self.surface_height_at(local_position, time_seconds) - local_position.y
+    }
+
+    /// Returns whether a local-space point is inside the volume and below water.
+    pub fn contains_submerged_point(&self, local_position: Vec3, time_seconds: f32) -> bool {
+        let half = self.size * 0.5;
+        local_position.x >= -half.x
+            && local_position.x <= half.x
+            && local_position.z >= -half.z
+            && local_position.z <= half.z
+            && local_position.y >= -half.y
+            && self.depth_at(local_position, time_seconds) >= 0.0
+    }
+
+    /// Converts water reflection settings to PBR parameters consumed by renderers.
+    pub fn render_material_params(&self) -> ([f32; 4], f32, f32, [f32; 3]) {
+        let reflection = self.reflection_strength.clamp(0.0, 1.0);
+        let tint_weight = 1.0 - reflection * 0.35;
+        let base_color = [
+            (self.water_tint.x * tint_weight + self.absorption_tint.x * 0.25).clamp(0.0, 1.0),
+            (self.water_tint.y * tint_weight + self.absorption_tint.y * 0.25).clamp(0.0, 1.0),
+            (self.water_tint.z * tint_weight + self.absorption_tint.z * 0.25).clamp(0.0, 1.0),
+            self.water_alpha.clamp(0.0, 1.0),
+        ];
+        let metallic_reflection_hint = reflection;
+        let roughness = self.reflection_roughness.clamp(0.04, 1.0);
+        let fresnel_emissive_hint = (self.fresnel_power / 5.0).clamp(0.0, 2.0) * reflection * 0.02;
+        (
+            base_color,
+            metallic_reflection_hint,
+            roughness,
+            [fresnel_emissive_hint; 3],
+        )
+    }
+}
+
+fn horizontal_phase(local_position: Vec3, direction: Vec3) -> f32 {
+    let dir = horizontal_direction(direction);
+    local_position.x * dir.x + local_position.z * dir.z
+}
+
+fn horizontal_direction(direction: Vec3) -> Vec3 {
+    let horizontal = Vec3::new(direction.x, 0.0, direction.z);
+    if horizontal.length_squared() <= 1e-8 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        horizontal.normalized()
+    }
+}
+
+fn cycle_height(amplitude: f32, period_seconds: f32, time_seconds: f32) -> f32 {
+    if amplitude == 0.0 || period_seconds <= 1e-5 {
+        return 0.0;
+    }
+    let phase = time_seconds / period_seconds * std::f32::consts::TAU;
+    amplitude * phase.sin()
+}
+
+fn traveling_wave_height(
+    amplitude: f32,
+    wave_length: f32,
+    wave_speed: f32,
+    direction: Vec3,
+    local_position: Vec3,
+    time_seconds: f32,
+) -> f32 {
+    if amplitude == 0.0 || wave_length <= 1e-5 {
+        return 0.0;
+    }
+    let phase = (horizontal_phase(local_position, direction) - wave_speed * time_seconds)
+        / wave_length
+        * std::f32::consts::TAU;
+    amplitude * phase.sin()
 }
 
 /// Serializable wind zone component.
@@ -1125,8 +1411,8 @@ pub enum ComponentData {
     AudioZone(AudioZoneComponentData),
     /// Particle emitter component.
     ParticleEmitter(ParticleEmitterComponentData),
-    /// Script proxy component.
-    Script(ScriptComponentProxy),
+    /// Varg script component.
+    Script(ScriptComponent),
     /// 2D sprite component.
     Sprite2D(Sprite2DComponentData),
     /// 2D tile map component.
@@ -1198,9 +1484,9 @@ pub struct GameObject {
     pub camera_role: Option<CameraRole>,
     /// Whether this object is active.
     pub active: bool,
-    /// Optional script proxy records.
+    /// Legacy object-level script records.
     #[serde(default)]
-    pub scripts: Vec<ScriptComponentProxy>,
+    pub scripts: Vec<ScriptComponent>,
     /// Serializable non-transform components attached to this object.
     #[serde(default)]
     pub components: Vec<ComponentData>,

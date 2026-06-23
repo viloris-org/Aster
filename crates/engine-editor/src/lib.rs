@@ -1319,9 +1319,10 @@ pub fn register_ai_commands(registry: &mut CommandRegistry) {
             ctx.project.scene.upsert_component(
                 entity,
                 engine_ecs::ComponentData::Script(engine_ecs::ScriptComponentProxy {
-                    backend: "rhai".to_string(),
-                    script: String::new(),
-                    state_json: None,
+                    source: String::new(),
+                    exported_values: Default::default(),
+                    state: Default::default(),
+                    legacy_backend: None,
                     pending_recovery: false,
                 }),
             )?;

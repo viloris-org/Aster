@@ -20,6 +20,7 @@ import {
   listQuestProjectFiles,
   listKnowledge,
   listQuests,
+  readQuestArtifact,
   renameQuest,
   revalidateKnowledge,
   removeKnowledge,
@@ -206,6 +207,24 @@ interface QuestArtifactSelection {
   kind: QuestEditorArtifact['kind'];
   label: string;
   path?: string;
+}
+
+function extraQuestArtifacts(selected: QuestDetail): QuestArtifactSelection[] {
+  const hidden = new Set([
+    selected.intent_path,
+    selected.spec_path ?? 'spec.md',
+    selected.trace_path,
+    ...(selected.checkpoints.map(checkpoint => checkpoint.artifact_path).filter(Boolean) as string[]),
+    ...(selected.review?.exploration_attempts.map(attempt => attempt.artifact_path) ?? []),
+    ...(selected.review?.findings.map(finding => finding.artifact_path).filter(Boolean) as string[]),
+  ]);
+  return selected.artifact_links
+    .filter(artifact => artifact.path && !hidden.has(artifact.path))
+    .map(artifact => ({
+      kind: artifact.kind as QuestEditorArtifact['kind'],
+      label: artifact.label,
+      path: artifact.path,
+    }));
 }
 
 function cn(...classes: Array<string | false | null | undefined>): string {
@@ -1076,6 +1095,8 @@ export default function QuestPage({
   });
   const [isResizingArtifactPane, setIsResizingArtifactPane] = useState(false);
   const [isNarrowQuestLayout, setIsNarrowQuestLayout] = useState(false);
+  const [artifactContent, setArtifactContent] = useState<string | null>(null);
+  const [artifactContentKey, setArtifactContentKey] = useState<string | null>(null);
 
   const clearSelectedQuest = useCallback(() => {
     setSelected(null);
@@ -1094,6 +1115,8 @@ export default function QuestPage({
     setQuestionCardCollapsed(false);
     setTitleDraft('');
     setArtifact(null);
+    setArtifactContent(null);
+    setArtifactContentKey(null);
     setRenaming(false);
   }, []);
 
@@ -1120,6 +1143,33 @@ export default function QuestPage({
   }, []);
 
   useEffect(() => () => stopVoiceInput(), [stopVoiceInput]);
+
+  useEffect(() => {
+    const path = artifact?.path;
+    if (!selected || !path || artifact.kind === 'changed_file' || artifact.kind === 'trace') {
+      setArtifactContent(null);
+      setArtifactContentKey(null);
+      return;
+    }
+    const key = `${selected.id}:${path}`;
+    let cancelled = false;
+    setArtifactContentKey(key);
+    setArtifactContent(null);
+    readQuestArtifact(selected.id, path)
+      .then(result => {
+        if (!cancelled) {
+          setArtifactContent(result.content);
+        }
+      })
+      .catch(reason => {
+        if (!cancelled) {
+          setArtifactContent(String(reason));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact?.kind, artifact?.path, selected?.id]);
 
   const syncQuestDrafts = useCallback((detail: QuestDetail) => {
     const nextQuestionCardId = latestQuestionCard(detail.events)?.eventId ?? null;
@@ -3046,6 +3096,16 @@ export default function QuestPage({
                       <button className={artifactRowClass} onClick={() => openArtifact({ kind: 'trace', label: t('quest_timeline_trace'), path: selected.trace_path })}>
                         <IconFile /><span><strong>{t('quest_timeline_trace')}</strong><small>{selected.trace_path}</small></span>
                       </button>
+                      {extraQuestArtifacts(selected).map(artifact => (
+                        <button
+                          className={artifactRowClass}
+                          key={`${artifact.kind}-${artifact.path ?? artifact.label}`}
+                          onClick={() => openArtifact(artifact)}
+                        >
+                          {artifact.kind === 'thinking' ? <IconSparkles /> : <IconFile />}
+                          <span><strong>{artifact.label}</strong><small>{artifact.path}</small></span>
+                        </button>
+                      ))}
                       {selected.checkpoints.map(checkpoint => (
                         <button
                           className={artifactRowClass}
@@ -3248,24 +3308,29 @@ export default function QuestPage({
                       <h2>{artifact.label}</h2>
                       {artifact.path && <p>{artifact.path}</p>}
                     </div>
-                    <pre>{artifact.kind === 'changed_file'
-                      ? selected.review?.changed_files.find(file => file.path === artifact.path)?.diff ?? t('quest_no_diff')
-                      : JSON.stringify(
-                        artifact.kind === 'trace'
-                          ? selected.events
-                          : artifact.kind === 'exploration'
-                            ? selected.review?.exploration_attempts.find(attempt => attempt.artifact_path === artifact.path || attempt.label === artifact.label)
-                            : artifact.kind === 'checkpoint'
-                              ? selected.checkpoints.find(checkpoint => checkpoint.artifact_path === artifact.path || checkpoint.label === artifact.label || checkpoint.id === artifact.path)
-                              : artifact.kind === 'validation'
-                                ? selected.review?.validations.find(validation => validation.name === artifact.label)
-                                : artifact.kind === 'review_finding'
-                                  ? selected.review?.findings.find(finding => finding.artifact_path === artifact.path || finding.title === artifact.label || finding.summary === artifact.label)
-                                    ?? selected.review?.unresolved_issues.find(issue => issue === artifact.label)
-                                  : selected.review?.unresolved_issues.find(issue => issue === artifact.label),
-                        null,
-                        2,
-                      )}</pre>
+                    <pre>{artifactContentKey === `${selected.id}:${artifact.path ?? ''}` && artifactContent !== null
+                      ? artifactContent
+                      : artifact.kind === 'changed_file'
+                        ? selected.review?.changed_files.find(file => file.path === artifact.path)?.diff ?? t('quest_no_diff')
+                        : JSON.stringify(
+                          artifact.kind === 'trace'
+                            ? selected.events
+                            : artifact.kind === 'thinking'
+                              ? selected.events.filter(event => event.kind === 'thinking' && (!artifact.path || event.details && typeof event.details === 'object' && (event.details as { path?: unknown }).path === artifact.path))
+                              : artifact.kind === 'exploration'
+                                ? selected.review?.exploration_attempts.find(attempt => attempt.artifact_path === artifact.path || attempt.label === artifact.label)
+                                : artifact.kind === 'checkpoint'
+                                  ? selected.checkpoints.find(checkpoint => checkpoint.artifact_path === artifact.path || checkpoint.label === artifact.label || checkpoint.id === artifact.path)
+                                  : artifact.kind === 'validation'
+                                    ? selected.review?.validations.find(validation => validation.name === artifact.label)
+                                    : artifact.kind === 'review_finding'
+                                      ? selected.review?.findings.find(finding => finding.artifact_path === artifact.path || finding.title === artifact.label || finding.summary === artifact.label)
+                                        ?? selected.review?.unresolved_issues.find(issue => issue === artifact.label)
+                                      : selected.artifact_links.find(link => link.path === artifact.path || link.label === artifact.label)
+                                        ?? selected.review?.unresolved_issues.find(issue => issue === artifact.label),
+                          null,
+                          2,
+                        )}</pre>
                   </div>
                 )}
 

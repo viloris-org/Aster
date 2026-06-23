@@ -3107,9 +3107,9 @@ impl RhaiScriptBackend {
                 for component in components {
                     if let engine_ecs::ComponentData::Script(script_proxy) = component {
                         // Only load scripts for this backend
-                        if script_proxy.backend == "rhai" {
+                        if script_proxy.legacy_backend.as_deref().unwrap_or("varg") == "rhai" {
                             let resolved_path =
-                                resolve_script_path(&script_proxy.script, asset_root)?;
+                                resolve_script_path(&script_proxy.source, asset_root)?;
                             self.load_script(&resolved_path)?;
                         }
                     }
@@ -3377,9 +3377,10 @@ fn on_start() {
             .upsert_component(
                 player,
                 ComponentData::Script(ScriptComponentProxy {
-                    backend: "rhai".to_string(),
-                    script: "player.rhai".to_string(),
-                    state_json: None,
+                    source: "player.rhai".to_string(),
+                    exported_values: Default::default(),
+                    state: Default::default(),
+                    legacy_backend: Some("rhai".to_string()),
                     pending_recovery: false,
                 }),
             )
@@ -3389,9 +3390,10 @@ fn on_start() {
             .upsert_component(
                 enemy,
                 ComponentData::Script(ScriptComponentProxy {
-                    backend: "rhai".to_string(),
-                    script: "enemy.rhai".to_string(),
-                    state_json: None,
+                    source: "enemy.rhai".to_string(),
+                    exported_values: Default::default(),
+                    state: Default::default(),
+                    legacy_backend: Some("rhai".to_string()),
                     pending_recovery: false,
                 }),
             )
@@ -3425,9 +3427,10 @@ fn on_start() {
             .upsert_component(
                 obj1,
                 ComponentData::Script(ScriptComponentProxy {
-                    backend: "rhai".to_string(),
-                    script: "test.rhai".to_string(),
-                    state_json: None,
+                    source: "test.rhai".to_string(),
+                    exported_values: Default::default(),
+                    state: Default::default(),
+                    legacy_backend: Some("rhai".to_string()),
                     pending_recovery: false,
                 }),
             )
@@ -3437,9 +3440,10 @@ fn on_start() {
             .upsert_component(
                 obj2,
                 ComponentData::Script(ScriptComponentProxy {
-                    backend: "python".to_string(),
-                    script: "test.py".to_string(),
-                    state_json: None,
+                    source: "test.py".to_string(),
+                    exported_values: Default::default(),
+                    state: Default::default(),
+                    legacy_backend: Some("python".to_string()),
                     pending_recovery: false,
                 }),
             )
@@ -3495,9 +3499,10 @@ fn on_start() {
             .upsert_component(
                 obj,
                 ComponentData::Script(ScriptComponentProxy {
-                    backend: "rhai".to_string(),
-                    script: "project:/game_logic.rhai".to_string(),
-                    state_json: None,
+                    source: "project:/game_logic.rhai".to_string(),
+                    exported_values: Default::default(),
+                    state: Default::default(),
+                    legacy_backend: Some("rhai".to_string()),
                     pending_recovery: false,
                 }),
             )
@@ -3532,9 +3537,10 @@ fn on_start() {
                 .upsert_component(
                     entity,
                     ComponentData::Script(ScriptComponentProxy {
-                        backend: "rhai".to_string(),
-                        script: "shared.rhai".to_string(),
-                        state_json: None,
+                        source: "shared.rhai".to_string(),
+                        exported_values: Default::default(),
+                        state: Default::default(),
+                        legacy_backend: Some("rhai".to_string()),
                         pending_recovery: false,
                     }),
                 )

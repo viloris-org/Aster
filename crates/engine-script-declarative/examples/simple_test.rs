@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n✅ All tests passed!");
     println!("\nThe declarative behavior system is working.");
-    println!("Note: Complex JSON examples need schema alignment - see IMPLEMENTATION_SUMMARY.md");
+    println!("Note: Complex JSON examples need schema alignment with the current behavior schema.");
 
     Ok(())
 }

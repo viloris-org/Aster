@@ -3,6 +3,8 @@
 
 //! Render abstraction only. Concrete backends live outside `runtime-min`.
 
+use std::collections::HashMap;
+
 use engine_core::{EngineError, EngineResult, EntityId, Handle, math::Transform};
 
 pub mod graph;
@@ -131,6 +133,19 @@ pub struct RenderMaterialTextures {
     pub emissive: Option<ImageHandle>,
     /// Ambient occlusion texture handle (single channel).
     pub occlusion: Option<ImageHandle>,
+}
+
+/// PBR material parameters extracted directly from scene data.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderMaterialParams {
+    /// Base color and alpha.
+    pub base_color: [f32; 4],
+    /// Metallic/specular reflection hint.
+    pub metallic: f32,
+    /// Microfacet roughness.
+    pub roughness: f32,
+    /// Emissive color.
+    pub emissive: [f32; 3],
 }
 
 /// 2D sprite draw data extracted from a scene.
@@ -348,6 +363,8 @@ pub struct RenderWorld {
     pub camera: Option<RenderCamera>,
     /// Queued mesh renderers.
     pub objects: Vec<RenderObject>,
+    /// Dynamic material parameters keyed by extracted material name.
+    pub material_params: HashMap<String, RenderMaterialParams>,
     /// Queued 2D sprites.
     pub sprites: Vec<RenderSprite>,
     /// Queued lights.
@@ -399,6 +416,10 @@ impl RenderWorld {
             }
 
             let transform = scene.transforms().world(entity).unwrap_or_default();
+            let fluid_volume = obj.components.iter().find_map(|component| match component {
+                engine_ecs::ComponentData::FluidVolume(fluid) => Some(fluid),
+                _ => None,
+            });
 
             for component in &obj.components {
                 match component {
@@ -432,6 +453,23 @@ impl RenderWorld {
                                     .map(|id| format!("asset:{:032x}", id.as_u128()))
                             })
                             .unwrap_or_default();
+                        let material_name = if let Some(fluid) = fluid_volume {
+                            let material_name = format!("@water:{}", obj.id.as_u128());
+                            let (base_color, metallic, roughness, emissive) =
+                                fluid.render_material_params();
+                            world.material_params.insert(
+                                material_name.clone(),
+                                RenderMaterialParams {
+                                    base_color,
+                                    metallic,
+                                    roughness,
+                                    emissive,
+                                },
+                            );
+                            material_name
+                        } else {
+                            material_name
+                        };
                         world.objects.push(RenderObject {
                             object: obj.id,
                             transform,
@@ -983,6 +1021,43 @@ mod tests {
         assert_eq!(cube.material, "debug/default");
         assert_eq!(sphere.material, "debug/default");
         assert_ne!(sphere.object.as_u128(), 0);
+    }
+
+    #[test]
+    fn extracts_fluid_volume_as_dynamic_reflective_water_material() {
+        let mut scene = Scene::new();
+        let water = scene.create_object("Water").unwrap();
+        scene
+            .upsert_component(
+                water,
+                ComponentData::FluidVolume(engine_ecs::FluidVolumeComponentData {
+                    water_tint: engine_core::math::Vec3::new(0.02, 0.22, 0.36),
+                    water_alpha: 0.62,
+                    reflection_strength: 0.9,
+                    reflection_roughness: 0.04,
+                    ..engine_ecs::FluidVolumeComponentData::default()
+                }),
+            )
+            .unwrap();
+        scene
+            .upsert_component(
+                water,
+                ComponentData::MeshRenderer(engine_ecs::MeshRendererComponentData {
+                    builtin_mesh: Some("debug/plane".to_string()),
+                    ..engine_ecs::MeshRendererComponentData::default()
+                }),
+            )
+            .unwrap();
+
+        let world = RenderWorld::extract(&scene);
+
+        assert_eq!(world.objects.len(), 1);
+        let object = &world.objects[0];
+        assert!(object.material.starts_with("@water:"));
+        let params = world.material_params.get(&object.material).unwrap();
+        assert_eq!(params.base_color[3], 0.62);
+        assert_eq!(params.metallic, 0.9);
+        assert_eq!(params.roughness, 0.04);
     }
 
     #[test]

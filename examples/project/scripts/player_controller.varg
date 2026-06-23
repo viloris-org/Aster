@@ -1,0 +1,20 @@
+script PlayerController {
+    @export var speed: Float = 6.0
+    @export var jumpForce: Float = 8.0
+
+    var jumpsLeft: Int = 1
+
+    func start() {
+        log("player ready")
+    }
+
+    func update(_ dt: Float) {
+        let move = Input.axis("move")
+        entity.translate(Vec3(move.x, 0, move.y) * speed * dt)
+
+        if Input.pressed("jump") && entity.isGrounded {
+            entity.velocity.y = jumpForce
+            jumpsLeft -= 1
+        }
+    }
+}

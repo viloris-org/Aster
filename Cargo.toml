@@ -10,6 +10,7 @@ members = [
     "crates/engine-audio",
     "crates/engine-editor",
     "crates/engine-i18n",
+    "crates/engine-script-varg",
     "crates/engine-script-rhai",
     "crates/engine-script-declarative",
     "crates/engine-shader",
@@ -21,6 +22,7 @@ members = [
     "crates/engine-ai",
     "crates/engine-policy",
     "crates/engine-packager",
+    "editor-slint",
     "editor/src-tauri",
     "crates/runtime-min",
     "xtask",
@@ -66,6 +68,7 @@ engine-physics = { path = "crates/engine-physics", version = "0.1.0" }
 engine-audio = { path = "crates/engine-audio", version = "0.1.0" }
 engine-editor = { path = "crates/engine-editor", version = "0.1.0" }
 engine-i18n = { path = "crates/engine-i18n", version = "0.1.0" }
+engine-script-varg = { path = "crates/engine-script-varg", version = "0.1.0" }
 engine-script-rhai = { path = "crates/engine-script-rhai", version = "0.1.0" }
 engine-script-declarative = { path = "crates/engine-script-declarative", version = "0.1.0" }
 engine-shader = { path = "crates/engine-shader", version = "0.1.0" }

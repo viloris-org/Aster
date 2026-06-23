@@ -1227,14 +1227,15 @@ impl AgentSession {
                 engine_ecs::Sprite2DComponentData::default(),
             )),
             "Script" => Ok(ComponentData::Script(engine_ecs::ScriptComponentProxy {
-                backend: "rhai".into(),
-                script: spec
+                source: spec
                     .properties
                     .get("script")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
-                state_json: None,
+                exported_values: Default::default(),
+                state: Default::default(),
+                legacy_backend: None,
                 pending_recovery: false,
             })),
             _ => Err(EngineError::config(format!(
@@ -1781,9 +1782,10 @@ impl AgentSession {
         use engine_ecs::ComponentData;
 
         let script_component = ComponentData::Script(engine_ecs::ScriptComponentProxy {
-            backend: "declarative".into(),
-            script: behavior_path.to_string(),
-            state_json: None,
+            source: behavior_path.to_string(),
+            exported_values: Default::default(),
+            state: Default::default(),
+            legacy_backend: None,
             pending_recovery: false,
         });
 

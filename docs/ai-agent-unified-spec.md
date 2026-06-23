@@ -14,7 +14,7 @@ Use the AI documentation set this way:
 - `docs/ai-agent-unified-spec.md` is the **authority** for product direction, naming, safety commitments, execution layers, prompt strategy, and rollout order.
 - `docs/ai-editor-copilot-prd.md` is the detailed **Editor AI** specification: local chat, scoped edits, operation preview, approval, tool execution, diagnostics, and undo.
 - `docs/ai-editor-quest-prd.md` is the detailed **Quest** specification: persistent task state, intent/spec artifacts, timeline, draft workspace direction, review, apply, and recovery.
-- `docs/aster-script-family-spec.md` is the detailed **Aster language family** authority.
+- `docs/varg-language-family-spec.md` is the detailed **Varg language family** authority.
 
 When these documents disagree, resolve in this order:
 
@@ -317,18 +317,17 @@ Canonical language family:
 
 | Extension | Name | Audience class | Purpose | Turing complete |
 | --- | --- | --- | --- | --- |
-| `.amdl` | Aster Model | AI-first human-readable | reusable model, mesh, material, collider, mass, LOD, and asset composition declarations | No |
-| `.ascn` | Aster Scene | AI-first human-readable | scene graph, entities, transforms, lights, audio, physics environment, and references | No |
-| `.abv` | Aster Behavior | AI-first human-readable | behavior trees, state machines, selectors, conditions, and high-level actions | No by default |
-| `.as` | Aster Script | human-first AI-assisted | event handlers, gameplay rules, procedural logic, UI logic, and runtime computation | Yes |
+| `.varg` | Varg Logic | human-first AI-assisted | scripts, reusable modules, runtime logic, and declarative behaviors | Yes for `script` and `module`; no for `behavior` blocks |
+| `.vscene` | Varg World | AI-first human-readable | scenes, prefabs, entity composition, layout intent, and network replication declarations | No |
+| `.vasset` | Varg Asset | AI-first human-readable | models, materials, audio events, shader parameters, and primitive resource recipes | No |
 
 Rules:
 
-- Prefer `.amdl`, `.ascn`, and `.abv` for generated content.
-- Use `.as` only when runtime computation is actually needed.
+- Prefer `.vscene` and `.vasset` for generated content.
+- Use executable `.varg` scripts only when runtime computation is actually needed.
 - Keep declarative languages statically checkable.
 - Treat JSON as interchange or generated artifact format, not the primary authoring format unless a specific tool path requires it.
-- Keep `docs/aster-script-family-spec.md` as the detailed language-family authority.
+- Keep `docs/varg-language-family-spec.md` as the detailed language-family authority.
 - Each language spec must declare its audience class and use the corresponding documentation profile.
 
 ## Prompt And Example Strategy

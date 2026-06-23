@@ -61,7 +61,6 @@ const projectTreeDimmedClass = 'opacity-40';
 const projectTreeKindClass = 'flex-shrink-0 px-1 text-[9px] text-[var(--text-muted)]';
 const projectTreeEmptyClass = 'px-2 py-1.5 text-[11px] italic text-[var(--text-muted)]';
 const projectScriptInputClass = 'min-w-[100px] flex-1 rounded-[2px] border border-[var(--accent)] bg-[var(--bg-base)] px-1.5 py-[3px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none';
-const projectScriptSelectClass = 'cursor-pointer rounded-[2px] border border-[var(--border)] bg-[var(--bg-base)] px-1 py-0.5 font-[var(--font-mono)] text-[10px] text-[var(--text-primary)] outline-none';
 const projectPanelEmptyClass = 'p-4 text-center text-xs italic text-[var(--text-secondary)]';
 
 // ─── Build tree from flat asset list ────────────────────────────────────────
@@ -132,7 +131,7 @@ function TreeNodeItem({
   setRenameText?: (v: string) => void;
   onRenameSubmit?: () => void;
   onRenameCancel?: () => void;
-  onOpenScript?: (path: string, language: 'rhai' | 'python') => void;
+  onOpenScript?: (path: string, language: 'varg' | 'rhai' | 'python') => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const hasChildren = node.children.length > 0;
@@ -157,8 +156,8 @@ function TreeNodeItem({
         onDoubleClick={() => {
           if (!node.isDir && onOpenScript) {
             const ext = node.name.split('.').pop()?.toLowerCase();
-            if (ext === 'aster' || ext === 'rhai' || ext === 'py') {
-              onOpenScript(node.path, ext === 'py' ? 'python' : 'rhai');
+            if (ext === 'varg' || ext === 'vscene' || ext === 'vasset' || ext === 'aster' || ext === 'rhai' || ext === 'py') {
+              onOpenScript(node.path, ext === 'py' ? 'python' : ext === 'varg' || ext === 'vscene' || ext === 'vasset' ? 'varg' : 'rhai');
             }
           }
         }}
@@ -228,7 +227,7 @@ function TreeNodeItem({
 // ─── Project Panel ──────────────────────────────────────────────────────────
 
 interface ProjectPanelProps {
-  onOpenScript?: (path: string, language: 'rhai' | 'python') => void;
+  onOpenScript?: (path: string, language: 'varg' | 'rhai' | 'python') => void;
 }
 
 export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
@@ -239,7 +238,6 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
   const [loading, setLoading] = useState(true);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [scriptName, setScriptName] = useState('');
-  const [scriptBackend, setScriptBackend] = useState<'rhai' | 'python'>('rhai');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
@@ -273,7 +271,6 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
     try {
       await rpc('project/create_script', {
         name: scriptName.trim(),
-        backend: scriptBackend,
       });
       setScriptName('');
       setCreateMenuOpen(false);
@@ -281,7 +278,7 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
     } catch (err) {
       console.error('Failed to create script:', err);
     }
-  }, [scriptName, scriptBackend, loadAssets]);
+  }, [scriptName, loadAssets]);
 
   // ── Context menu handlers ──
 
@@ -394,15 +391,6 @@ export default function ProjectPanel({ onOpenScript }: ProjectPanelProps = {}) {
                     autoFocus
                     onClick={(e) => e.stopPropagation()}
                   />
-                  <select
-                    className={projectScriptSelectClass}
-                    value={scriptBackend}
-                    onChange={(e) => setScriptBackend(e.target.value as 'rhai' | 'python')}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <option value="rhai">.aster</option>
-                    <option value="python">.py</option>
-                  </select>
                 </div>
               </div>
             )}

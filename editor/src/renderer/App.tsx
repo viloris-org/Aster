@@ -39,7 +39,7 @@ type Screen = 'loading' | 'hub' | 'editor' | 'quest';
 export interface QuestEditorArtifact {
   questId: string;
   questTitle: string;
-  kind: 'intent' | 'spec' | 'trace' | 'changed_file' | 'validation' | 'review_finding' | 'exploration' | 'checkpoint';
+  kind: 'intent' | 'spec' | 'trace' | 'changed_file' | 'validation' | 'review_finding' | 'exploration' | 'checkpoint' | 'thinking';
   label: string;
   path?: string;
 }

@@ -1421,6 +1421,60 @@ impl QuestStore {
         })
     }
 
+    pub fn write_thinking_trace(
+        &self,
+        id: &str,
+        trace_id: &str,
+        label: &str,
+        thinking: &str,
+    ) -> EngineResult<()> {
+        validate_id(id)?;
+        validate_artifact_id(trace_id)?;
+        let label = label.trim();
+        if label.is_empty() {
+            return Err(EngineError::config(
+                "Quest thinking trace label must not be empty",
+            ));
+        }
+        let thinking = thinking.trim();
+        if thinking.is_empty() {
+            return Ok(());
+        }
+        let artifact_path = format!("thinking/{trace_id}.md");
+        let content = format!("# {label}\n\n## Provider thinking\n\n{thinking}\n");
+        write_text(&self.quest_dir(id).join(&artifact_path), &content)?;
+
+        let mut detail = self.get(id)?;
+        if !detail
+            .record
+            .artifact_links
+            .iter()
+            .any(|artifact| artifact.kind == "thinking" && artifact.path == artifact_path)
+        {
+            detail.record.artifact_links.push(QuestArtifactLink {
+                kind: "thinking".to_owned(),
+                label: label.to_owned(),
+                path: artifact_path.clone(),
+            });
+            detail.record.updated_at_ms = unix_time_ms();
+            normalize_record_metadata(&mut detail.record);
+            refresh_next_action(&mut detail.record);
+            self.save_snapshot(&detail.record)?;
+        }
+        self.append_event(
+            id,
+            "thinking",
+            label,
+            serde_json::json!({
+                "trace_id": trace_id,
+                "path": artifact_path,
+                "bytes": thinking.len(),
+                "preview": thinking.chars().take(600).collect::<String>(),
+            }),
+        )?;
+        Ok(())
+    }
+
     pub fn set_review(
         &self,
         id: &str,
@@ -2663,6 +2717,53 @@ mod tests {
                 .iter()
                 .any(|event| event.kind == "review_finding"
                     && event.summary == "Validation failed: cargo check")
+        );
+    }
+
+    #[test]
+    fn thinking_traces_are_durable_artifacts_and_timeline_events() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = QuestStore::new(temp.path().join("quests"));
+        let created = store
+            .create(
+                "Reasoning Quest".to_owned(),
+                "Capture model thinking.".to_owned(),
+                "# Reasoning Quest\n\n## Goal\n\nCapture model thinking.".to_owned(),
+                project(temp.path()),
+            )
+            .unwrap();
+
+        store
+            .write_thinking_trace(
+                &created.record.id,
+                "initial-plan",
+                "Initial planning thinking",
+                "Consider the spec, choose a narrow edit, then validate.",
+            )
+            .unwrap();
+        let detail = store.get(&created.record.id).unwrap();
+
+        assert!(
+            detail
+                .record
+                .artifact_links
+                .iter()
+                .any(|artifact| artifact.kind == "thinking"
+                    && artifact.path == "thinking/initial-plan.md")
+        );
+        assert!(
+            detail.events.iter().any(|event| event.kind == "thinking"
+                && event.details["path"] == "thinking/initial-plan.md")
+        );
+        assert!(
+            fs::read_to_string(
+                store
+                    .quest_path(&created.record.id)
+                    .unwrap()
+                    .join("thinking/initial-plan.md")
+            )
+            .unwrap()
+            .contains("Consider the spec")
         );
     }
 

@@ -24,7 +24,7 @@ pub use scene::{
     ColliderComponentData, ComponentData, FluidVolumeComponentData, GameObject, LifecycleStage,
     Light2DComponentData, LightComponentData, MaterialRef, MeshRendererComponentData,
     ObjectIdAllocator, Occluder2DComponentData, ParticleEmitterComponentData,
-    RigidbodyComponentData, Scene, SceneFile, SceneMode, ScriptComponentProxy,
+    RigidbodyComponentData, Scene, SceneFile, SceneMode, ScriptComponent, ScriptComponentProxy,
     SkinnedMeshRendererComponentData, SkyboxComponentData, Sprite2DComponentData,
     TileMap2DComponentData, WindZoneComponentData,
 };

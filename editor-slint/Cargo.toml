@@ -1,0 +1,21 @@
+[package]
+name = "aster-editor-slint"
+description = "Aster editor shell migrated to Slint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+engine-core.workspace = true
+engine-ecs.workspace = true
+engine-editor.workspace = true
+engine-render.workspace = true
+engine-render-wgpu.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slint = { version = "1.16.1", default-features = true }
+
+[build-dependencies]
+slint-build = "1.16.1"

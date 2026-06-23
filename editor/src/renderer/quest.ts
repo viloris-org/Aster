@@ -217,6 +217,10 @@ export function getQuest(id: string): Promise<QuestDetail> {
   return rpc('quest/get', { id });
 }
 
+export function readQuestArtifact(id: string, path: string): Promise<{ content: string }> {
+  return rpc('quest/read_artifact', { id, path });
+}
+
 export type QuestAiStreamKind = 'text' | 'thinking' | 'tool_call';
 
 interface QuestAiStreamEvent {

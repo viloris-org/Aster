@@ -442,13 +442,13 @@ impl DependencyGraph {
 
                 // Script component references
                 if let engine_ecs::ComponentData::Script(proxy) = component {
-                    if !proxy.script.is_empty() {
-                        let script_id = format!("script:{}", proxy.script);
+                    if !proxy.source.is_empty() {
+                        let script_id = format!("script:{}", proxy.source);
                         if !graph.nodes.iter().any(|n| n.id == script_id) {
                             graph.nodes.push(GraphNode {
                                 id: script_id.clone(),
                                 kind: NodeKind::Script,
-                                label: proxy.script.clone(),
+                                label: proxy.source.clone(),
                             });
                         }
                         graph.edges.push(GraphEdge {
@@ -462,13 +462,13 @@ impl DependencyGraph {
 
             // Script edges from the scripts vec (legacy format)
             for script in &obj.scripts {
-                if !script.script.is_empty() {
-                    let script_id = format!("script:{}", script.script);
+                if !script.source.is_empty() {
+                    let script_id = format!("script:{}", script.source);
                     if !graph.nodes.iter().any(|n| n.id == script_id) {
                         graph.nodes.push(GraphNode {
                             id: script_id.clone(),
                             kind: NodeKind::Script,
-                            label: script.script.clone(),
+                            label: script.source.clone(),
                         });
                     }
                     let edge_exists = graph.edges.iter().any(|e| {

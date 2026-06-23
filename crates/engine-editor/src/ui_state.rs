@@ -22,7 +22,7 @@ use engine_core::{
 };
 use engine_ecs::{
     CameraComponentData, CameraRole, ComponentData, LightComponentData, MeshRendererComponentData,
-    ProjectManifest, Scene,
+    ProjectManifest, Scene, world::Entity,
 };
 use engine_i18n::Translations;
 use engine_render::{RenderTargetDesc, RenderWorld};
@@ -693,8 +693,8 @@ impl ProjectContext {
             }),
             ComponentData::Script(s) => serde_json::json!({
                 "type": "Script",
-                "backend": s.backend,
-                "script": s.script,
+                "source": s.source,
+                "exported_values": s.exported_values,
             }),
             ComponentData::AudioSource(a) => serde_json::json!({
                 "type": "AudioSource",
@@ -1144,6 +1144,192 @@ impl EditorShell {
         Ok(())
     }
 
+    fn scene_snapshot(&self) -> EngineResult<String> {
+        let Some(project) = self.project.as_ref() else {
+            return Err(EngineError::config("no project is open"));
+        };
+        let scene_name = project
+            .scene_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Scene");
+        project.scene.to_json(scene_name)
+    }
+
+    fn selected_entity(&self) -> EngineResult<Entity> {
+        let Some(entity_id) = self.selected_entity_id() else {
+            return Err(EngineError::config("select an entity first"));
+        };
+        let Some(project) = self.project.as_ref() else {
+            return Err(EngineError::config("no project is open"));
+        };
+        project
+            .scene
+            .find_by_id(entity_id)
+            .ok_or_else(|| EngineError::config("selected entity no longer exists"))
+    }
+
+    /// Creates a scene object, selects it, marks the scene dirty, and records undo.
+    pub fn create_scene_object(&mut self, name: impl Into<String>) -> EngineResult<EntityId> {
+        let before = self.scene_snapshot()?;
+        let (object_id, object_name) = {
+            let Some(project) = self.project.as_mut() else {
+                return Err(EngineError::config("no project is open"));
+            };
+            let entity = project.scene.create_object(name)?;
+            let object = project
+                .scene
+                .object(entity)
+                .ok_or_else(|| EngineError::invalid_handle("created object metadata is missing"))?;
+            project.scene_dirty = true;
+            (object.id, object.name.clone())
+        };
+        let after = self.scene_snapshot()?;
+        self.push_undo(UndoCommand::new(
+            "Create Object",
+            &object_name,
+            before,
+            after,
+        ));
+        self.select_entity_id(object_id);
+        Ok(object_id)
+    }
+
+    /// Deletes the selected scene object, clears selection, marks the scene dirty, and records undo.
+    pub fn delete_selected_scene_object(&mut self) -> EngineResult<String> {
+        let entity = self.selected_entity()?;
+        let before = self.scene_snapshot()?;
+        let name = {
+            let Some(project) = self.project.as_mut() else {
+                return Err(EngineError::config("no project is open"));
+            };
+            let name = project
+                .scene
+                .object(entity)
+                .map(|object| object.name.clone())
+                .ok_or_else(|| EngineError::config("selected entity no longer exists"))?;
+            project.scene.destroy_deferred(entity)?;
+            project.scene.process_deferred_destroy()?;
+            project.scene_dirty = true;
+            name
+        };
+        let after = self.scene_snapshot()?;
+        self.push_undo(UndoCommand::new("Delete Object", &name, before, after));
+        self.selection.clear();
+        Ok(name)
+    }
+
+    /// Renames the selected scene object, marks the scene dirty, and records undo.
+    pub fn rename_selected_scene_object(
+        &mut self,
+        name: impl Into<String>,
+    ) -> EngineResult<EntityId> {
+        let entity = self.selected_entity()?;
+        let before = self.scene_snapshot()?;
+        let (object_id, object_name) = {
+            let Some(project) = self.project.as_mut() else {
+                return Err(EngineError::config("no project is open"));
+            };
+            let object = project
+                .scene
+                .object_mut(entity)
+                .ok_or_else(|| EngineError::config("selected entity no longer exists"))?;
+            object.name = name.into();
+            project.scene_dirty = true;
+            (object.id, object.name.clone())
+        };
+        let after = self.scene_snapshot()?;
+        if before != after {
+            self.push_undo(UndoCommand::new(
+                "Rename Object",
+                &object_name,
+                before,
+                after,
+            ));
+        }
+        Ok(object_id)
+    }
+
+    /// Moves the selected scene object by a local-space delta and records undo.
+    pub fn nudge_selected_scene_object(
+        &mut self,
+        delta: Vec3,
+        undo_label: impl Into<String>,
+    ) -> EngineResult<EntityId> {
+        let entity = self.selected_entity()?;
+        let before = self.scene_snapshot()?;
+        let object_id = {
+            let Some(project) = self.project.as_mut() else {
+                return Err(EngineError::config("no project is open"));
+            };
+            let object_id = project
+                .scene
+                .object(entity)
+                .map(|object| object.id)
+                .ok_or_else(|| EngineError::config("selected entity no longer exists"))?;
+            let mut transform = project.scene.transforms().local(entity).unwrap_or_default();
+            transform.translation += delta;
+            project.scene.transforms_mut().set_local(entity, transform);
+            project.scene_dirty = true;
+            object_id
+        };
+        let after = self.scene_snapshot()?;
+        if before != after {
+            let undo_label = undo_label.into();
+            self.push_undo(UndoCommand::new("Move Object", &undo_label, before, after));
+        }
+        Ok(object_id)
+    }
+
+    /// Adds or replaces a component on the selected scene object and records undo.
+    pub fn add_component_to_selected_scene_object(
+        &mut self,
+        component: ComponentData,
+    ) -> EngineResult<&'static str> {
+        let entity = self.selected_entity()?;
+        let before = self.scene_snapshot()?;
+        let label = component.type_id();
+        {
+            let Some(project) = self.project.as_mut() else {
+                return Err(EngineError::config("no project is open"));
+            };
+            project.scene.upsert_component(entity, component)?;
+            project.scene_dirty = true;
+        }
+        let after = self.scene_snapshot()?;
+        self.push_undo(UndoCommand::new("Add Component", label, before, after));
+        Ok(label)
+    }
+
+    /// Removes a component from the selected scene object and records undo when anything changed.
+    pub fn remove_component_from_selected_scene_object(
+        &mut self,
+        component_type: &str,
+    ) -> EngineResult<bool> {
+        let entity = self.selected_entity()?;
+        let before = self.scene_snapshot()?;
+        let removed = {
+            let Some(project) = self.project.as_mut() else {
+                return Err(EngineError::config("no project is open"));
+            };
+            let removed = project.scene.remove_component(entity, component_type)?;
+            if removed {
+                project.scene_dirty = true;
+            }
+            removed
+        };
+        if removed {
+            let after = self.scene_snapshot()?;
+            self.push_undo(UndoCommand::new(
+                "Remove Component",
+                component_type,
+                before,
+                after,
+            ));
+        }
+        Ok(removed)
+    }
+
     /// Returns the open project context.
     pub const fn project(&self) -> Option<&ProjectContext> {
         self.project.as_ref()
@@ -1287,4 +1473,125 @@ fn scene_for_template(template_id: &str) -> EngineResult<Scene> {
     }
 
     Ok(scene)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use engine_ecs::ComponentData;
+
+    use super::*;
+    use crate::NewProjectRequest;
+
+    fn unique_temp_project(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("aster-{name}-{nonce}"))
+    }
+
+    fn test_shell(name: &str) -> (EditorShell, PathBuf) {
+        let root = unique_temp_project(name);
+        let hub = HubState::new(EditorPreferences::default());
+        let plan = crate::validate_new_project(&NewProjectRequest {
+            name: name.to_owned(),
+            location: Some(root.clone()),
+            template_id: Some("three_d".to_owned()),
+            toolchain_version: Some("dev".to_owned()),
+        })
+        .expect("test project request should validate");
+        hub.create_project_files(&plan)
+            .expect("test project files should be created");
+
+        let mut shell = EditorShell::with_core_services(EditorPreferences::default());
+        shell
+            .open_project(&plan.path)
+            .expect("test project should open");
+        (shell, plan.path)
+    }
+
+    #[test]
+    fn editor_shell_scene_commands_mutate_project_and_undo() {
+        let (mut shell, root) = test_shell("scene-commands");
+        let initial_count = shell.project().unwrap().scene.object_count();
+
+        let created_id = shell
+            .create_scene_object("Probe")
+            .expect("object should be created");
+        assert_eq!(shell.selected_entity_id(), Some(created_id));
+        assert!(shell.is_scene_dirty());
+        assert_eq!(
+            shell.project().unwrap().scene.object_count(),
+            initial_count + 1
+        );
+
+        shell
+            .nudge_selected_scene_object(Vec3::new(1.0, 2.0, 3.0), "test move")
+            .expect("selected object should move");
+        let created_entity = shell
+            .project()
+            .unwrap()
+            .scene
+            .find_by_id(created_id)
+            .expect("created object should still exist");
+        let transform = shell
+            .project()
+            .unwrap()
+            .scene
+            .transforms()
+            .local(created_entity)
+            .expect("created object should have a transform");
+        assert_eq!(transform.translation, Vec3::new(1.0, 2.0, 3.0));
+
+        shell
+            .add_component_to_selected_scene_object(ComponentData::Light(Default::default()))
+            .expect("component should be added");
+        assert!(
+            shell
+                .project()
+                .unwrap()
+                .scene
+                .components(created_entity)
+                .unwrap()
+                .iter()
+                .any(|component| component.type_id() == "Light")
+        );
+
+        assert!(
+            shell
+                .remove_component_from_selected_scene_object("Light")
+                .expect("component removal should succeed")
+        );
+        assert!(
+            !shell
+                .project()
+                .unwrap()
+                .scene
+                .components(created_entity)
+                .unwrap()
+                .iter()
+                .any(|component| component.type_id() == "Light")
+        );
+
+        let deleted_name = shell
+            .delete_selected_scene_object()
+            .expect("selected object should be deleted");
+        assert_eq!(deleted_name, "Probe");
+        assert_eq!(shell.selected_entity_id(), None);
+        assert_eq!(shell.project().unwrap().scene.object_count(), initial_count);
+
+        assert!(shell.undo_scene_command().expect("undo should apply"));
+        assert_eq!(
+            shell.project().unwrap().scene.object_count(),
+            initial_count + 1
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

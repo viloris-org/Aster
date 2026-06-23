@@ -181,6 +181,25 @@ interface AsterScriptDiagnostic {
 
 type TextAssetDiagnostic = AsterScriptDiagnostic;
 
+interface VargExport {
+  name: string;
+  type_name: string;
+  default_value?: string | null;
+  line: number;
+}
+
+interface VargDeclaration {
+  kind: string;
+  name?: string | null;
+  line: number;
+  exports: VargExport[];
+}
+
+interface VargAstSummary {
+  imports: Array<{ path: string; line: number }>;
+  declarations: VargDeclaration[];
+}
+
 interface Props {
   onCloseProject: () => void;
   onOpenSettings?: () => void;
@@ -560,6 +579,14 @@ const scriptSurfaceClass = {
   editorPane: 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_220px]',
   textarea: 'h-full min-h-0 w-full min-w-0 resize-none overflow-auto whitespace-pre border-0 border-r border-[var(--border)] bg-[#070A0F] px-5 py-[18px] font-mono text-[11px] leading-[1.65] text-[var(--text-primary)] outline-none [tab-size:2] focus:shadow-[inset_0_0_0_1px_var(--accent)]',
   gutter: 'm-0 flex-1 overflow-auto border-l border-white/[0.03] bg-[var(--bg-base)] px-5 py-[18px] font-mono text-[11px] leading-[1.65] text-[var(--text-secondary)] [tab-size:2] [&_code]:block [&_code]:min-w-max',
+  rightRail: 'flex min-w-0 flex-col overflow-hidden border-l border-white/[0.03] bg-[var(--bg-base)]',
+  outline: 'max-h-44 overflow-auto border-b border-[var(--border)] px-3 py-2 text-[10px] text-[var(--text-secondary)]',
+  outlineTitle: 'mb-1.5 block font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]',
+  outlineItem: 'grid gap-1 border-t border-[var(--border)] py-1.5 first:border-t-0 first:pt-0',
+  outlineName: 'font-mono text-[var(--text-primary)]',
+  outlineMeta: 'font-mono text-[var(--text-muted)]',
+  exportList: 'grid gap-1',
+  exportItem: 'grid grid-cols-[minmax(0,1fr)_auto] gap-2 font-mono',
   gutterButton: 'grid w-full cursor-text grid-cols-[42px_minmax(max-content,1fr)] border-0 bg-transparent p-0 text-left font-inherit text-inherit whitespace-pre hover:bg-[var(--accent-dim)]',
   gutterButtonSelected: 'bg-[var(--accent-dim)]',
   gutterLineNumber: 'select-none text-[#4b5563]',
@@ -942,7 +969,7 @@ function ComponentFieldEditor({ componentType, fieldName, value, onCommit }: {
 }
 
 function isScriptPath(path?: string): boolean {
-  return Boolean(path && /\.(aster|rhai|js|ts|tsx|lua|rs)$/i.test(path));
+  return Boolean(path && /\.(varg|vscene|vasset|aster|rhai|js|ts|tsx|lua|rs)$/i.test(path));
 }
 
 // Infer a scene-tree icon from a node's name/tag, the way Godot shows a
@@ -1016,6 +1043,14 @@ function questArtifactContext(artifact: QuestEditorArtifact): QuestArtifactConte
       surface: 'tasks',
       title: 'Quest timeline trace',
       description: 'Inspect execution history, decisions, validations, and review events in task context.',
+      focusPath: path,
+    };
+  }
+  if (artifact.kind === 'thinking') {
+    return {
+      surface: 'tasks',
+      title: 'Quest model trace',
+      description: 'Inspect provider-exposed thinking, model response, and tool-call stream captured during Quest execution.',
       focusPath: path,
     };
   }
@@ -1545,6 +1580,7 @@ export default function EditorPage({
   const [scriptSaving, setScriptSaving] = useState(false);
   const [scriptLineRange, setScriptLineRange] = useState<[number, number] | null>(null);
   const [scriptDiagnostics, setScriptDiagnostics] = useState<AsterScriptDiagnostic[]>([]);
+  const [vargAst, setVargAst] = useState<VargAstSummary | null>(null);
   const [consoleEntries, setConsoleEntries] = useState<EditorConsoleEntry[]>([]);
   const [consoleBusy, setConsoleBusy] = useState(false);
   const [buildTarget, setBuildTarget] = useState<BuildTarget>('linux-x64');
@@ -1868,7 +1904,7 @@ export default function EditorPage({
       const result = await rpc<{ entries: Array<{ path: string; kind: string }>; assets: ProjectAssetMeta[] }>('project/list_assets');
       setAssets(result.assets);
       const paths = result.entries
-        .filter(entry => /script|model/i.test(entry.kind) || /\.(aster|rhai|amdl|js|ts|lua)$/i.test(entry.path))
+        .filter(entry => /script|model/i.test(entry.kind) || /\.(varg|vscene|vasset|aster|rhai|amdl|js|ts|lua)$/i.test(entry.path))
         .map(entry => entry.path);
       setScripts(paths);
       setSelectedScript(current => current && paths.includes(current) ? current : paths[0] ?? null);
@@ -1905,13 +1941,14 @@ export default function EditorPage({
   useEffect(() => {
     setScriptLineRange(null);
     setScriptDiagnostics([]);
+    setVargAst(null);
     setArtifactSelection(null);
     setArtifactQuestionOpen(false);
   }, [selectedScript, workspaceView]);
 
   useEffect(() => {
     const lowerPath = selectedScript?.toLowerCase() ?? '';
-    const checkMethod = lowerPath.endsWith('.aster')
+    const checkMethod = lowerPath.endsWith('.varg') || lowerPath.endsWith('.vscene') || lowerPath.endsWith('.vasset') || lowerPath.endsWith('.aster') || lowerPath.endsWith('.rhai')
       ? 'project/check_script'
       : lowerPath.endsWith('.amdl')
         ? 'project/check_amdl'
@@ -1921,12 +1958,18 @@ export default function EditorPage({
       return;
     }
     const timer = window.setTimeout(() => {
-      rpc<{ valid: boolean; diagnostics: TextAssetDiagnostic[] }>(checkMethod, {
+      rpc<{ valid: boolean; diagnostics: TextAssetDiagnostic[]; ast?: VargAstSummary | null }>(checkMethod, {
         path: selectedScript,
         source: scriptContent,
       })
-        .then(result => setScriptDiagnostics(result.diagnostics))
-        .catch(() => setScriptDiagnostics([]));
+        .then(result => {
+          setScriptDiagnostics(result.diagnostics);
+          setVargAst(result.ast ?? null);
+        })
+        .catch(() => {
+          setScriptDiagnostics([]);
+          setVargAst(null);
+        });
     }, 350);
     return () => window.clearTimeout(timer);
   }, [scriptContent, selectedScript]);
@@ -2117,7 +2160,7 @@ export default function EditorPage({
     setAssetsBusy(true);
     try {
       const method = kind === 'script' ? 'project/create_script' : `project/create_${kind}`;
-      const params = kind === 'script' ? { name, backend: 'rhai' } : { name };
+      const params = { name };
       const result = await rpc<{ path: string }>(method, params);
       await refreshProjectAssets();
       await refreshConsoleEntries().catch(() => {});
@@ -2421,17 +2464,18 @@ export default function EditorPage({
     setScriptSaving(true);
     try {
       const lowerPath = selectedScript.toLowerCase();
-      const checkMethod = lowerPath.endsWith('.aster')
+      const checkMethod = lowerPath.endsWith('.varg') || lowerPath.endsWith('.vscene') || lowerPath.endsWith('.vasset') || lowerPath.endsWith('.aster') || lowerPath.endsWith('.rhai')
         ? 'project/check_script'
         : lowerPath.endsWith('.amdl')
           ? 'project/check_amdl'
           : null;
       if (checkMethod) {
-        const validation = await rpc<{ valid: boolean; diagnostics: TextAssetDiagnostic[] }>(
+        const validation = await rpc<{ valid: boolean; diagnostics: TextAssetDiagnostic[]; ast?: VargAstSummary | null }>(
           checkMethod,
           { path: selectedScript, source: scriptContent },
         );
         setScriptDiagnostics(validation.diagnostics);
+        setVargAst(validation.ast ?? null);
         if (!validation.valid) return;
       }
       await rpc('project/write_file', { path: selectedScript, content: scriptContent });
@@ -2461,7 +2505,6 @@ export default function EditorPage({
     const name = `behavior_${Date.now()}`;
     const result = await rpc<{ path: string }>('project/create_script', {
       name,
-      backend: 'rhai',
     });
     const created = await rpc<SceneObject>('shell/create_object', {
       name: 'Behavior Object',
@@ -2962,7 +3005,26 @@ export default function EditorPage({
                       }
                     }}
                   />
-                  <pre className={scriptSurfaceClass.gutter}><code>{(scriptContent || '// Aster-generated scripts will appear here.').split('\n').map((line, index) => { const lineNumber = index + 1; const selected = scriptLineRange && lineNumber >= scriptLineRange[0] && lineNumber <= scriptLineRange[1]; return <button key={lineNumber} className={cx(scriptSurfaceClass.gutterButton, selected && scriptSurfaceClass.gutterButtonSelected)} onClick={event => selectScriptLine(lineNumber, event.shiftKey, event)}><span className={scriptSurfaceClass.gutterLineNumber}>{lineNumber}</span><i className={scriptSurfaceClass.gutterLineText}>{line || ' '}</i></button>; })}</code></pre>
+                  <aside className={scriptSurfaceClass.rightRail}>
+                    {vargAst && <div className={scriptSurfaceClass.outline}>
+                      <strong className={scriptSurfaceClass.outlineTitle}>Varg outline</strong>
+                      {vargAst.declarations.length === 0 ? <span className={scriptSurfaceClass.outlineMeta}>No declarations</span> : vargAst.declarations.map((declaration, index) => (
+                        <div className={scriptSurfaceClass.outlineItem} key={`${declaration.kind}-${declaration.name ?? index}-${declaration.line}`}>
+                          <span className={scriptSurfaceClass.outlineName}>{declaration.kind} {declaration.name ?? 'Unnamed'}</span>
+                          <span className={scriptSurfaceClass.outlineMeta}>line {declaration.line}</span>
+                          {declaration.exports.length > 0 && <div className={scriptSurfaceClass.exportList}>
+                            {declaration.exports.map(item => (
+                              <span className={scriptSurfaceClass.exportItem} key={`${item.name}-${item.line}`}>
+                                <b>{item.name}: {item.type_name}</b>
+                                <i>{item.default_value ?? ''}</i>
+                              </span>
+                            ))}
+                          </div>}
+                        </div>
+                      ))}
+                    </div>}
+                    <pre className={scriptSurfaceClass.gutter}><code>{(scriptContent || '// Aster-generated scripts will appear here.').split('\n').map((line, index) => { const lineNumber = index + 1; const selected = scriptLineRange && lineNumber >= scriptLineRange[0] && lineNumber <= scriptLineRange[1]; return <button key={lineNumber} className={cx(scriptSurfaceClass.gutterButton, selected && scriptSurfaceClass.gutterButtonSelected)} onClick={event => selectScriptLine(lineNumber, event.shiftKey, event)}><span className={scriptSurfaceClass.gutterLineNumber}>{lineNumber}</span><i className={scriptSurfaceClass.gutterLineText}>{line || ' '}</i></button>; })}</code></pre>
+                  </aside>
                 </div>
                 {scriptDiagnostics.length > 0 && <div className={scriptSurfaceClass.diagnostics}>
                   {scriptDiagnostics.map((diagnostic, index) => <div className={scriptSurfaceClass.diagnostic} key={`${diagnostic.code}-${diagnostic.line ?? 0}-${index}`}>

@@ -91,7 +91,8 @@ impl WgpuRenderDevice {
             .zip(&visibility.selected_meshes)
         {
             let object = &world.objects[object_index];
-            let (color, metallic, roughness, emissive) = self.pbr_for_material(&object.material);
+            let (color, metallic, roughness, emissive) =
+                self.pbr_for_world_material(world, &object.material);
             let t = object.transform;
             let mesh = if selected_mesh.is_empty() {
                 "debug/cube".to_string()
@@ -235,5 +236,21 @@ impl WgpuRenderDevice {
         } else {
             ([0.82, 0.86, 0.72, 1.0], 0.0, 0.5, [0.0, 0.0, 0.0])
         }
+    }
+
+    pub(crate) fn pbr_for_world_material(
+        &self,
+        world: &RenderWorld,
+        material: &str,
+    ) -> ([f32; 4], f32, f32, [f32; 3]) {
+        if let Some(params) = world.material_params.get(material) {
+            return (
+                params.base_color,
+                params.metallic,
+                params.roughness,
+                params.emissive,
+            );
+        }
+        self.pbr_for_material(material)
     }
 }

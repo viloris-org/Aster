@@ -324,3 +324,107 @@ fn nested_hierarchy_round_trip() {
     let json2 = serde_json::to_string_pretty(&scene_file2).unwrap();
     assert_eq!(json, json2, "Second serialization should be identical");
 }
+
+#[test]
+fn fluid_volume_samples_still_water_surface() {
+    let fluid = FluidVolumeComponentData {
+        size: Vec3::new(8.0, 4.0, 8.0),
+        surface_offset: 0.25,
+        ..FluidVolumeComponentData::default()
+    };
+
+    assert_approx_eq(fluid.surface_height_at(Vec3::ZERO, 0.0), 1.75);
+    assert_approx_eq(fluid.depth_at(Vec3::new(0.0, 1.25, 0.0), 0.0), 0.5);
+    assert!(fluid.contains_submerged_point(Vec3::new(0.0, 1.25, 0.0), 0.0));
+    assert!(!fluid.contains_submerged_point(Vec3::new(0.0, 2.25, 0.0), 0.0));
+}
+
+#[test]
+fn fluid_volume_samples_river_slope_along_flow() {
+    let fluid = FluidVolumeComponentData {
+        size: Vec3::new(20.0, 4.0, 8.0),
+        surface_profile: "river".to_string(),
+        wave_direction: Vec3::new(1.0, 0.0, 0.0),
+        river_slope: -0.05,
+        ..FluidVolumeComponentData::default()
+    };
+
+    assert_approx_eq(fluid.surface_height_at(Vec3::new(4.0, 0.0, 0.0), 0.0), 1.8);
+    assert_approx_eq(fluid.surface_height_at(Vec3::new(-4.0, 0.0, 0.0), 0.0), 2.2);
+}
+
+#[test]
+fn fluid_volume_samples_ocean_waves_and_tides() {
+    let ocean = FluidVolumeComponentData {
+        size: Vec3::new(20.0, 4.0, 20.0),
+        surface_profile: "ocean".to_string(),
+        wave_direction: Vec3::new(1.0, 0.0, 0.0),
+        wave_amplitude: 0.5,
+        wave_length: 8.0,
+        wave_speed: 2.0,
+        ..FluidVolumeComponentData::default()
+    };
+
+    assert_approx_eq(ocean.surface_height_at(Vec3::new(2.0, 0.0, 0.0), 0.0), 2.5);
+    assert_approx_eq(ocean.surface_height_at(Vec3::new(4.0, 0.0, 0.0), 0.0), 2.0);
+
+    let tidal = FluidVolumeComponentData {
+        surface_profile: "tidal".to_string(),
+        tide_amplitude: 1.25,
+        tide_period_seconds: 12.0,
+        ..FluidVolumeComponentData::default()
+    };
+
+    assert_approx_eq(tidal.surface_height_at(Vec3::ZERO, 3.0), 2.25);
+    assert_approx_eq(tidal.surface_height_at(Vec3::ZERO, 9.0), -0.25);
+}
+
+#[test]
+fn fluid_volume_deserializes_legacy_static_water_defaults() {
+    let json = r#"{
+        "size": { "x": 8.0, "y": 2.0, "z": 8.0 },
+        "density": 1000.0,
+        "buoyancy_scale": 1.0,
+        "linear_drag": 2.0,
+        "angular_drag": 0.5,
+        "flow_velocity": { "x": 1.0, "y": 0.0, "z": 0.0 },
+        "surface_offset": 0.0
+    }"#;
+
+    let fluid: FluidVolumeComponentData = serde_json::from_str(json).unwrap();
+
+    assert_eq!(fluid.surface_profile, "still");
+    assert_eq!(fluid.wave_direction, Vec3::new(1.0, 0.0, 0.0));
+    assert_eq!(fluid.water_tint, Vec3::new(0.05, 0.32, 0.42));
+    assert_approx_eq(fluid.reflection_strength, 0.85);
+    assert_approx_eq(fluid.reflection_roughness, 0.06);
+    assert_approx_eq(fluid.surface_height_at(Vec3::new(3.0, 0.0, 0.0), 99.0), 1.0);
+}
+
+#[test]
+fn fluid_volume_exports_reflective_render_material_params() {
+    let fluid = FluidVolumeComponentData {
+        water_tint: Vec3::new(0.02, 0.24, 0.4),
+        water_alpha: 0.6,
+        reflection_strength: 0.9,
+        reflection_roughness: 0.03,
+        fresnel_power: 6.0,
+        absorption_tint: Vec3::new(0.0, 0.1, 0.2),
+        ..FluidVolumeComponentData::default()
+    };
+
+    let (base_color, metallic, roughness, emissive) = fluid.render_material_params();
+
+    assert_approx_eq(base_color[3], 0.6);
+    assert_approx_eq(metallic, 0.9);
+    assert_approx_eq(roughness, 0.04);
+    assert!(base_color[2] > base_color[0]);
+    assert!(emissive[0] > 0.0);
+}
+
+fn assert_approx_eq(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() <= 1e-4,
+        "expected {expected}, got {actual}"
+    );
+}

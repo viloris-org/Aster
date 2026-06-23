@@ -582,8 +582,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
                         engine_ecs::ComponentData::Script(s) => Some(s),
                         _ => None,
                     }))
-                    .filter(|s| s.backend == "rhai")
-                    .map(move |s| (entity_id.clone(), PathBuf::from(&s.script)))
+                    .filter(|s| s.legacy_backend.as_deref().unwrap_or("varg") == "rhai")
+                    .map(move |s| (entity_id.clone(), PathBuf::from(&s.source)))
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -653,8 +653,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
                         engine_ecs::ComponentData::Script(s) => Some(s),
                         _ => None,
                     }))
-                    .filter(|s| s.backend == "rhai")
-                    .map(move |s| (entity_id.clone(), PathBuf::from(&s.script)))
+                    .filter(|s| s.legacy_backend.as_deref().unwrap_or("varg") == "rhai")
+                    .map(move |s| (entity_id.clone(), PathBuf::from(&s.source)))
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -1060,19 +1060,20 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 )
             {
                 #[cfg(feature = "script-python")]
-                if script.backend == "python" {
+                if script.legacy_backend.as_deref() == Some("python") {
                     continue;
                 }
-                let key = format!("{}:{}", script.backend, script.script);
+                let backend = script.legacy_backend.as_deref().unwrap_or("varg");
+                let key = format!("{}:{}", backend, script.source);
                 if script.pending_recovery && self.reported_script_errors.insert(key) {
                     self.diagnostics.push(RuntimeDiagnostic {
                         source: "script".to_string(),
                         level: "error".to_string(),
                         message: format!(
                             "{} script `{}` is pending backend recovery",
-                            script.backend, script.script
+                            backend, script.source
                         ),
-                        file: Some(PathBuf::from(&script.script)),
+                        file: Some(PathBuf::from(&script.source)),
                         line: None,
                     });
                 }
@@ -1725,7 +1726,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                                 _ => None,
                             }),
                     )
-                    .filter(|script| script.backend == "python")
+                    .filter(|script| script.legacy_backend.as_deref() == Some("python"))
                     .cloned()
                     .map(move |script| ScriptInvocation {
                         entity,
@@ -1739,8 +1740,12 @@ impl<R: RenderDevice> RuntimeServices<R> {
         for invocation in invocations {
             let key = ScriptInstanceKey {
                 object: invocation.object,
-                backend: invocation.script.backend.clone(),
-                script: invocation.script.script.clone(),
+                backend: invocation
+                    .script
+                    .legacy_backend
+                    .clone()
+                    .unwrap_or_else(|| "varg".to_string()),
+                script: invocation.script.source.clone(),
             };
             if stage == "start" {
                 if !self.script_instances.insert(key) {
@@ -1775,7 +1780,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         stage: &str,
         dt: f32,
     ) -> EngineResult<()> {
-        let script_path = self.resolve_project_path(&invocation.script.script);
+        let script_path = self.resolve_project_path(&invocation.script.source);
         let transform = self
             .scene
             .transforms()
@@ -1797,12 +1802,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                     "MoveRight": self.input.action_value("MoveRight")
                 }
             },
-            "state": invocation
-                .script
-                .state_json
-                .as_deref()
-                .and_then(|state| serde_json::from_str::<serde_json::Value>(state).ok())
-                .unwrap_or_else(|| serde_json::json!({}))
+            "state": invocation.script.state
         });
         let mut child = std::process::Command::new(&self.python_script_runtime.interpreter)
             .arg("-c")
@@ -1842,7 +1842,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 let _ = child.wait();
                 return Err(EngineError::other(format!(
                     "python script `{}` timed out after {:?}",
-                    invocation.script.script, self.python_script_runtime.invocation_timeout
+                    invocation.script.source, self.python_script_runtime.invocation_timeout
                 )));
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -1870,7 +1870,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             let stderr = String::from_utf8_lossy(&stderr);
             return Err(EngineError::other(format!(
                 "python script `{}` failed: {}",
-                invocation.script.script,
+                invocation.script.source,
                 stderr.trim()
             )));
         }
@@ -1878,7 +1878,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         let result = serde_json::from_str::<serde_json::Value>(stdout.trim()).map_err(|error| {
             EngineError::other(format!(
                 "python script `{}` returned invalid json: {error}",
-                invocation.script.script
+                invocation.script.source
             ))
         })?;
         self.apply_script_result(invocation.entity, &invocation.script, &result)
@@ -1891,19 +1891,25 @@ impl<R: RenderDevice> RuntimeServices<R> {
         result: &serde_json::Value,
     ) -> EngineResult<()> {
         if let Some(state) = result.get("state") {
-            let state_json = state.to_string();
+            let state_map = match state {
+                serde_json::Value::Object(map) => map.clone().into_iter().collect(),
+                _ => std::collections::HashMap::new(),
+            };
             if let Some(object) = self.scene.object_mut(entity) {
                 for candidate in &mut object.scripts {
-                    if candidate.backend == script.backend && candidate.script == script.script {
-                        candidate.state_json = Some(state_json.clone());
+                    if candidate.legacy_backend == script.legacy_backend
+                        && candidate.source == script.source
+                    {
+                        candidate.state = state_map.clone();
                         candidate.pending_recovery = false;
                     }
                 }
                 for component in &mut object.components {
                     if let ComponentData::Script(candidate) = component {
-                        if candidate.backend == script.backend && candidate.script == script.script
+                        if candidate.legacy_backend == script.legacy_backend
+                            && candidate.source == script.source
                         {
-                            candidate.state_json = Some(state_json.clone());
+                            candidate.state = state_map.clone();
                             candidate.pending_recovery = false;
                         }
                     }
@@ -3014,9 +3020,10 @@ mod tests {
             .unwrap()
             .scripts
             .push(ScriptComponentProxy {
-                backend: "python".to_string(),
-                script: "scripts/move.py".to_string(),
-                state_json: None,
+                source: "scripts/move.py".to_string(),
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+                legacy_backend: Some("python".to_string()),
                 pending_recovery: true,
             });
         services
@@ -3040,10 +3047,8 @@ mod tests {
                 .scripts
                 .first()
                 .unwrap()
-                .state_json
-                .as_ref()
-                .unwrap()
-                .contains("started")
+                .state
+                .contains_key("started")
         );
     }
 
@@ -3081,9 +3086,10 @@ mod tests {
             .unwrap()
             .scripts
             .push(ScriptComponentProxy {
-                backend: "python".to_string(),
-                script: "scripts/hang.py".to_string(),
-                state_json: None,
+                source: "scripts/hang.py".to_string(),
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+                legacy_backend: Some("python".to_string()),
                 pending_recovery: true,
             });
 

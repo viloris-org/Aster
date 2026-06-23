@@ -37,7 +37,7 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
   const [findText, setFindText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLPreElement>(null);
-  const language = detectLanguage(filePath) ?? 'rhai';
+  const language = detectLanguage(filePath) ?? 'varg';
 
   // Sync scroll between textarea and highlighted overlay
   const syncScroll = useCallback(() => {

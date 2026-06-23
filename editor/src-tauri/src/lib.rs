@@ -286,6 +286,35 @@ fn format_script_diagnostics(
     )
 }
 
+fn format_varg_diagnostics(
+    path: &str,
+    diagnostics: &[engine_script_varg::VargDiagnostic],
+) -> String {
+    let details = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let location = match (diagnostic.line, diagnostic.column) {
+                (Some(line), Some(column)) => format!("{path}:{line}:{column}"),
+                (Some(line), None) => format!("{path}:{line}"),
+                _ => path.to_owned(),
+            };
+            format!(
+                "{} {}: {} Expected: {} Suggestion: {}",
+                diagnostic.code,
+                location,
+                diagnostic.message,
+                diagnostic.expected,
+                diagnostic.suggestion
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Varg validation failed with {} diagnostic(s):\n{details}",
+        diagnostics.len()
+    )
+}
+
 fn asset_meta_path_for_source(path: &Path) -> PathBuf {
     let mut meta_path = path.to_path_buf();
     if let Some(name) = path.file_name() {
@@ -1143,6 +1172,7 @@ impl EditorHost {
             // ── Quests ──
             "quest/list" => self.quest_list(params),
             "quest/get" => self.quest_get(params),
+            "quest/read_artifact" => self.quest_read_artifact(params),
             "quest/create" => Err(EngineError::config(
                 "Quest creation must use the background Quest AI command",
             )),
@@ -1251,6 +1281,20 @@ impl EditorHost {
         let id = required_string(params, "id")?;
         serde_json::to_value(self.quest_store.get(id)?)
             .map_err(|error| EngineError::other(error.to_string()))
+    }
+
+    fn quest_read_artifact(&mut self, params: &Value) -> EngineResult<Value> {
+        let id = required_string(params, "id")?;
+        let path = required_string(params, "path")?;
+        let relative = normalize_relative_path(path)?;
+        let root = self.quest_store.quest_path(id)?;
+        let full_path = root.join(relative);
+        let content =
+            std::fs::read_to_string(&full_path).map_err(|source| EngineError::Filesystem {
+                path: full_path.clone(),
+                source,
+            })?;
+        Ok(serde_json::json!({ "content": content }))
     }
 
     fn prepare_quest_create_request(
@@ -1824,6 +1868,56 @@ fn record_quest_execution_failure(
     serde_json::to_value(detail).map_err(|error| EngineError::other(error.to_string()))
 }
 
+#[derive(Default)]
+struct QuestModelTraceCapture {
+    thinking: String,
+    text: String,
+    tool_calls: Vec<String>,
+}
+
+impl QuestModelTraceCapture {
+    fn push(&mut self, delta: engine_ai::AiStreamDelta) {
+        match delta {
+            engine_ai::AiStreamDelta::Thinking(value) => self.thinking.push_str(&value),
+            engine_ai::AiStreamDelta::Text(value) => self.text.push_str(&value),
+            engine_ai::AiStreamDelta::ToolCallDelta(tool_call) => {
+                self.tool_calls
+                    .push(serde_json::to_string(&tool_call).unwrap_or_default());
+            }
+        }
+    }
+
+    fn to_markdown(&self) -> String {
+        if self.thinking.trim().is_empty()
+            && self.text.trim().is_empty()
+            && self.tool_calls.is_empty()
+        {
+            return String::new();
+        }
+
+        let mut markdown = String::new();
+        if !self.thinking.trim().is_empty() {
+            markdown.push_str("## Thinking\n\n");
+            markdown.push_str(self.thinking.trim());
+            markdown.push_str("\n\n");
+        }
+        if !self.text.trim().is_empty() {
+            markdown.push_str("## Model response\n\n");
+            markdown.push_str(self.text.trim());
+            markdown.push_str("\n\n");
+        }
+        if !self.tool_calls.is_empty() {
+            markdown.push_str("## Tool call stream\n\n");
+            for tool_call in &self.tool_calls {
+                markdown.push_str("- `");
+                markdown.push_str(tool_call);
+                markdown.push_str("`\n");
+            }
+        }
+        markdown
+    }
+}
+
 fn prepare_quest_workspace(
     quest_store: &QuestStore,
     detail: &quest::QuestDetail,
@@ -1943,13 +2037,20 @@ fn run_quest_execution(prepared: PreparedQuestExecution) -> EngineResult<Value> 
     let mut session = AgentSession::new(context)?;
     let model = create_quest_model_from_prepared(prepared.model_provider)?;
     let first_action_started_at = Instant::now();
+    let mut planning_trace = QuestModelTraceCapture::default();
     let plan = session.plan_with_history_streaming(
         model.as_ref(),
         &prompt,
         &[],
         PermissionPolicy::worktree_write(),
         parse_thinking_effort(&detail.record.model_config.thinking_effort),
-        &mut |_| {},
+        &mut |delta| planning_trace.push(delta),
+    )?;
+    quest_store.write_thinking_trace(
+        id,
+        "initial-plan",
+        "Initial planning model trace",
+        &planning_trace.to_markdown(),
     )?;
     let plan_latency_ms = elapsed_millis(first_action_started_at);
     let planned: Vec<String> = plan
@@ -2007,13 +2108,21 @@ fn run_quest_execution(prepared: PreparedQuestExecution) -> EngineResult<Value> 
             }),
         )?;
         let repair_started_at = Instant::now();
+        let repair_trace_id = format!("repair-plan-{repair_attempts}");
+        let mut repair_trace = QuestModelTraceCapture::default();
         let repair_plan = session.plan_with_history_streaming(
             model.as_ref(),
             &repair_prompt,
             &[],
             PermissionPolicy::worktree_write(),
             parse_thinking_effort(&detail.record.model_config.thinking_effort),
-            &mut |_| {},
+            &mut |delta| repair_trace.push(delta),
+        )?;
+        quest_store.write_thinking_trace(
+            id,
+            &repair_trace_id,
+            &format!("Repair attempt {repair_attempts} model trace"),
+            &repair_trace.to_markdown(),
         )?;
         let repair_plan_latency_ms = elapsed_millis(repair_started_at);
         let planned_repair: Vec<String> = repair_plan
@@ -3066,11 +3175,6 @@ impl EditorHost {
             .and_then(|v| v.as_str())
             .ok_or_else(|| EngineError::config("missing 'name'"))?;
         validate_file_name(name)?;
-        let backend = params
-            .get("backend")
-            .and_then(|v| v.as_str())
-            .unwrap_or("rhai");
-
         let Some(project) = self.shell.project() else {
             return Err(EngineError::config("no project open"));
         };
@@ -3082,36 +3186,22 @@ impl EditorHost {
             source,
         })?;
 
-        let ext = if backend == "python" { "py" } else { "aster" };
-        let script_path = format!("scripts/{name}.{ext}");
+        let script_path = format!("scripts/{name}.varg");
         let full_path = asset_root.join(&script_path);
 
-        let template = match backend {
-            "python" => {
-                r#"# Auto-generated script
-# Use this file to implement custom game logic
+        let template = format!(
+            r#"script {name} {{
+    @export var speed: Float = 6.0
 
-def on_start(entity):
-    pass
+    func start() {{
+        log("{name} ready")
+    }}
 
-def on_update(entity, dt):
-    pass
+    func update(_ dt: Float) {{
+    }}
+}}
 "#
-            }
-            _ => {
-                r#"// Auto-generated script
-// Use this file to implement custom game logic
-
-fn on_start(entity) {
-    // Called when the entity is first activated
-}
-
-fn on_update(entity, dt) {
-    // Called every frame with delta time
-}
-"#
-            }
-        };
+        );
 
         // Check if parent directory exists
         if let Some(parent) = full_path.parent() {
@@ -3154,20 +3244,9 @@ fn on_update(entity, dt) {
             return Err(EngineError::config("no project open"));
         };
 
-        let material = engine_assets::MaterialFormat {
-            version: engine_assets::CURRENT_SCHEMA_VERSION,
-            shader: engine_assets::AssetGuid::from_u128(0),
-            textures: HashMap::new(),
-            parameters: HashMap::new(),
-        };
-        let content = serde_json::to_string_pretty(&material).map_err(|error| {
-            EngineError::other(format!("material serialization failed: {error}"))
-        })?;
-        let (asset_path, full_path) = write_project_asset(
-            project,
-            &format!("materials/{name}.material.json"),
-            &content,
-        )?;
+        let content = varg_material_template(name);
+        let (asset_path, full_path) =
+            write_project_asset(project, &format!("materials/{name}.vasset"), &content)?;
         project.rescan_assets()?;
         push_created_asset_console(&mut self.console, "material", &full_path);
 
@@ -3188,12 +3267,9 @@ fn on_update(entity, dt) {
             return Err(EngineError::config("no project open"));
         };
 
-        let scene_file = engine_ecs::Scene::new().to_scene_file(name)?;
-        let prefab = engine_ecs::PrefabFile::new(name, scene_file);
-        let content = serde_json::to_string_pretty(&prefab)
-            .map_err(|error| EngineError::other(format!("prefab serialization failed: {error}")))?;
+        let content = varg_prefab_template(name);
         let (asset_path, full_path) =
-            write_project_asset(project, &format!("prefabs/{name}.prefab.json"), &content)?;
+            write_project_asset(project, &format!("prefabs/{name}.vscene"), &content)?;
         project.rescan_assets()?;
         push_created_asset_console(&mut self.console, "prefab", &full_path);
 
@@ -3214,9 +3290,9 @@ fn on_update(entity, dt) {
             return Err(EngineError::config("no project open"));
         };
 
-        let content = engine_ecs::Scene::new().to_json(name)?;
+        let content = varg_scene_template(name);
         let (asset_path, full_path) =
-            write_project_asset(project, &format!("scenes/{name}.scene.json"), &content)?;
+            write_project_asset(project, &format!("scenes/{name}.vscene"), &content)?;
         project.rescan_assets()?;
         push_created_asset_console(&mut self.console, "scene", &full_path);
 
@@ -3263,21 +3339,21 @@ fn on_update(entity, dt) {
             for component in &object.components {
                 collect_component_asset_references(&mut rows, &object.name, component, guid);
                 if let engine_ecs::ComponentData::Script(script) = component {
-                    if script.script == path_str {
+                    if script.source == path_str {
                         rows.push(asset_reference_row(
                             "scene",
                             "Script component",
-                            format!("{} -> {}", object.name, script.script),
+                            format!("{} -> {}", object.name, script.source),
                         ));
                     }
                 }
             }
             for script in &object.scripts {
-                if script.script == path_str {
+                if script.source == path_str {
                     rows.push(asset_reference_row(
                         "scene",
                         "Legacy script",
-                        format!("{} -> {}", object.name, script.script),
+                        format!("{} -> {}", object.name, script.source),
                     ));
                 }
             }
@@ -3529,11 +3605,18 @@ fn on_update(entity, dt) {
         let asset_root = project.root.join(&project.manifest.asset_root);
         let full_path = resolve_writable_relative_path(&asset_root, path_str)?;
 
-        if full_path
+        let extension = full_path
             .extension()
-            .and_then(|extension| extension.to_str())
-            == Some("aster")
-        {
+            .and_then(|extension| extension.to_str());
+        if matches!(extension, Some("varg" | "vscene" | "vasset")) {
+            let diagnostics = engine_script_varg::diagnose_source(&full_path, content);
+            if !diagnostics.is_empty() {
+                return Err(EngineError::config(format_varg_diagnostics(
+                    path_str,
+                    &diagnostics,
+                )));
+            }
+        } else if matches!(extension, Some("aster" | "rhai")) {
             let backend = engine_script_rhai::RhaiScriptBackend::new();
             let diagnostics = backend.diagnose_source(&full_path, content);
             if !diagnostics.is_empty() {
@@ -3575,28 +3658,58 @@ fn on_update(entity, dt) {
         };
         let asset_root = project.root.join(&project.manifest.asset_root);
         let full_path = resolve_writable_relative_path(&asset_root, path_str)?;
-        let backend = engine_script_rhai::RhaiScriptBackend::new();
-        let diagnostics = backend.diagnose_source(&full_path, source);
-        let diagnostics = diagnostics
-            .into_iter()
-            .map(|diagnostic| {
-                serde_json::json!({
-                    "code": diagnostic.code,
-                    "severity": match diagnostic.severity {
-                        engine_script_rhai::AsterDiagnosticSeverity::Error => "error",
-                        engine_script_rhai::AsterDiagnosticSeverity::Warning => "warning",
-                    },
-                    "line": diagnostic.line,
-                    "column": diagnostic.column,
-                    "message": diagnostic.message,
-                    "suggestion": diagnostic.suggestion,
-                    "source_line": diagnostic.source_line,
+        let extension = full_path
+            .extension()
+            .and_then(|extension| extension.to_str());
+        let (diagnostics, ast) = if matches!(extension, Some("varg" | "vscene" | "vasset")) {
+            let (ast, diagnostics) = engine_script_varg::parse_source(&full_path, source);
+            let diagnostics = diagnostics
+                .into_iter()
+                .map(|diagnostic| {
+                    serde_json::json!({
+                        "code": diagnostic.code,
+                        "severity": match diagnostic.severity {
+                            engine_script_varg::VargDiagnosticSeverity::Error => "error",
+                            engine_script_varg::VargDiagnosticSeverity::Warning => "warning",
+                        },
+                        "line": diagnostic.line,
+                        "column": diagnostic.column,
+                        "message": diagnostic.message,
+                        "suggestion": diagnostic.suggestion,
+                        "source_line": diagnostic.source_line,
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
+                .collect::<Vec<_>>();
+            let ast = ast
+                .map(|ast| serde_json::to_value(ast).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            (diagnostics, ast)
+        } else {
+            let backend = engine_script_rhai::RhaiScriptBackend::new();
+            let diagnostics = backend
+                .diagnose_source(&full_path, source)
+                .into_iter()
+                .map(|diagnostic| {
+                    serde_json::json!({
+                        "code": diagnostic.code,
+                        "severity": match diagnostic.severity {
+                            engine_script_rhai::AsterDiagnosticSeverity::Error => "error",
+                            engine_script_rhai::AsterDiagnosticSeverity::Warning => "warning",
+                        },
+                        "line": diagnostic.line,
+                        "column": diagnostic.column,
+                        "message": diagnostic.message,
+                        "suggestion": diagnostic.suggestion,
+                        "source_line": diagnostic.source_line,
+                    })
+                })
+                .collect::<Vec<_>>();
+            (diagnostics, serde_json::Value::Null)
+        };
         Ok(serde_json::json!({
             "valid": diagnostics.is_empty(),
             "diagnostics": diagnostics,
+            "ast": ast,
         }))
     }
 
@@ -5138,46 +5251,51 @@ fn on_update(entity, dt) {
     // ── Scene CRUD ──
 
     fn shell_create_object(&mut self, params: &Value) -> EngineResult<Value> {
-        let before = self.scene_snapshot()?;
-        let Some(project) = self.shell.project_mut() else {
-            return Err(EngineError::config("no project open"));
-        };
-
-        // Optional parent lookup
-        let parent_entity = params
-            .get("parent_id")
-            .and_then(|v| v.as_str())
-            .map(|id_str| {
-                let pid = engine_core::EntityId::from_u128(
-                    u128::from_str_radix(id_str, 16)
-                        .map_err(|_| EngineError::config("invalid parent id"))?,
-                );
-                project
-                    .scene
-                    .find_by_id(pid)
-                    .ok_or_else(|| EngineError::config("parent entity not found"))
-            })
-            .transpose()?;
-
         let name = params
             .get("name")
             .and_then(|v| v.as_str())
             .unwrap_or("New Object");
 
-        let entity = project.scene.create_object(name)?;
+        let object_id = self.shell.create_scene_object(name)?;
 
-        if let Some(parent) = parent_entity {
-            project.scene.set_parent(entity, Some(parent))?;
+        if let Some(parent_id_str) = params.get("parent_id").and_then(|v| v.as_str()) {
+            let parent_id = engine_core::EntityId::from_u128(
+                u128::from_str_radix(parent_id_str, 16)
+                    .map_err(|_| EngineError::config("invalid parent id"))?,
+            );
+            let before = self.scene_snapshot()?;
+            let Some(project) = self.shell.project_mut() else {
+                return Err(EngineError::config("no project open"));
+            };
+            let entity = project
+                .scene
+                .find_by_id(object_id)
+                .ok_or_else(|| EngineError::config("created entity not found"))?;
+            let parent_entity = project
+                .scene
+                .find_by_id(parent_id)
+                .ok_or_else(|| EngineError::config("parent entity not found"))?;
+            project.scene.set_parent(entity, Some(parent_entity))?;
+            project.scene_dirty = true;
+            let after = self.scene_snapshot()?;
+            self.shell
+                .push_undo(UndoCommand::new("Reparent Object", name, before, after));
         }
 
-        project.scene_dirty = true;
-        let after = self.scene_snapshot()?;
-        self.shell
-            .push_undo(UndoCommand::new("Create Object", "", before, after));
         self.bump_scene_version();
 
-        let project = self.shell.project().unwrap();
-        let obj = project.scene.object(entity).unwrap();
+        let project = self
+            .shell
+            .project()
+            .ok_or_else(|| EngineError::config("no project open"))?;
+        let entity = project
+            .scene
+            .find_by_id(object_id)
+            .ok_or_else(|| EngineError::config("created entity not found"))?;
+        let obj = project
+            .scene
+            .object(entity)
+            .ok_or_else(|| EngineError::config("created entity metadata not found"))?;
         let transform = project.scene.transforms().world(entity).unwrap_or_default();
 
         Ok(serde_json::json!({
@@ -5206,17 +5324,14 @@ fn on_update(entity, dt) {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
-        let Some(project) = self.shell.project_mut() else {
+        self.shell.select_entity_id(entity_id);
+        self.shell.rename_selected_scene_object(new_name)?;
+
+        let Some(project) = self.shell.project() else {
             return Err(EngineError::config("no project open"));
         };
-        let entity = project
-            .scene
-            .find_by_id(entity_id)
-            .ok_or_else(|| EngineError::config("entity not found"))?;
-
-        if let Some(obj) = project.scene.object_mut(entity) {
-            obj.name = new_name.to_owned();
-            project.scene_dirty = true;
+        if project.scene.find_by_id(entity_id).is_none() {
+            return Err(EngineError::config("entity not found"));
         }
 
         self.bump_scene_version();
@@ -5233,22 +5348,8 @@ fn on_update(entity, dt) {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
-        let before = self.scene_snapshot()?;
-        let Some(project) = self.shell.project_mut() else {
-            return Err(EngineError::config("no project open"));
-        };
-
-        let entity = project
-            .scene
-            .find_by_id(entity_id)
-            .ok_or_else(|| EngineError::config("entity not found"))?;
-
-        project.scene.destroy_deferred(entity)?;
-        project.scene.process_deferred_destroy()?;
-        project.scene_dirty = true;
-        let after = self.scene_snapshot()?;
-        self.shell
-            .push_undo(UndoCommand::new("Delete Object", id_str, before, after));
+        self.shell.select_entity_id(entity_id);
+        self.shell.delete_selected_scene_object()?;
         self.bump_scene_version();
         Ok(serde_json::json!({ "deleted": true }))
     }
@@ -5358,7 +5459,6 @@ fn on_update(entity, dt) {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
-        let before = self.scene_snapshot()?;
         let Some(project) = self.shell.project_mut() else {
             return Err(EngineError::config("no project open"));
         };
@@ -5426,12 +5526,29 @@ fn on_update(entity, dt) {
             t.scale = Vec3::new(x, y, z);
         }
 
-        project.scene.transforms_mut().set_local(entity, t);
-        project.scene_dirty = true;
-        let after = self.scene_snapshot()?;
-        if before != after {
-            self.shell
-                .push_undo(UndoCommand::new("Update Transform", id_str, before, after));
+        let delta = t.translation - current.translation;
+        self.shell
+            .nudge_selected_scene_object(delta, "Update Transform")?;
+
+        if t.rotation != current.rotation || t.scale != current.scale {
+            let before = self.scene_snapshot()?;
+            let Some(project) = self.shell.project_mut() else {
+                return Err(EngineError::config("no project open"));
+            };
+            let entity = project
+                .scene
+                .find_by_id(entity_id)
+                .ok_or_else(|| EngineError::config("entity not found"))?;
+            let mut transform = project.scene.transforms().local(entity).unwrap_or_default();
+            transform.rotation = t.rotation;
+            transform.scale = t.scale;
+            project.scene.transforms_mut().set_local(entity, transform);
+            project.scene_dirty = true;
+            let after = self.scene_snapshot()?;
+            if before != after {
+                self.shell
+                    .push_undo(UndoCommand::new("Update Transform", id_str, before, after));
+            }
         }
         self.bump_scene_version();
         Ok(serde_json::json!({ "updated": true }))
@@ -5453,15 +5570,6 @@ fn on_update(entity, dt) {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
-        let before = self.scene_snapshot()?;
-        let Some(project) = self.shell.project_mut() else {
-            return Err(EngineError::config("no project open"));
-        };
-        let entity = project
-            .scene
-            .find_by_id(entity_id)
-            .ok_or_else(|| EngineError::config("entity not found"))?;
-
         let component = match comp_type {
             "Camera" => ComponentData::Camera(Default::default()),
             "Light" => ComponentData::Light(Default::default()),
@@ -5477,12 +5585,7 @@ fn on_update(entity, dt) {
             "AcousticRoom" => ComponentData::AcousticRoom(Default::default()),
             "AcousticPortal" => ComponentData::AcousticPortal(Default::default()),
             "AudioZone" => ComponentData::AudioZone(Default::default()),
-            "Script" => ComponentData::Script(engine_ecs::ScriptComponentProxy {
-                backend: "rhai".to_owned(),
-                script: String::new(),
-                state_json: None,
-                pending_recovery: false,
-            }),
+            "Script" => ComponentData::Script(engine_ecs::ScriptComponent::new(String::new())),
             _ => {
                 return Err(EngineError::config(format!(
                     "unknown component type: {comp_type}"
@@ -5490,11 +5593,9 @@ fn on_update(entity, dt) {
             }
         };
 
-        project.scene.upsert_component(entity, component)?;
-        project.scene_dirty = true;
-        let after = self.scene_snapshot()?;
+        self.shell.select_entity_id(entity_id);
         self.shell
-            .push_undo(UndoCommand::new("Add Component", id_str, before, after));
+            .add_component_to_selected_scene_object(component)?;
         self.bump_scene_version();
         Ok(serde_json::json!({ "added": comp_type }))
     }
@@ -5580,20 +5681,9 @@ fn on_update(entity, dt) {
                 .map_err(|_| EngineError::config("invalid entity id"))?,
         );
 
-        let before = self.scene_snapshot()?;
-        let Some(project) = self.shell.project_mut() else {
-            return Err(EngineError::config("no project open"));
-        };
-        let entity = project
-            .scene
-            .find_by_id(entity_id)
-            .ok_or_else(|| EngineError::config("entity not found"))?;
-
-        project.scene.remove_component(entity, comp_type)?;
-        project.scene_dirty = true;
-        let after = self.scene_snapshot()?;
+        self.shell.select_entity_id(entity_id);
         self.shell
-            .push_undo(UndoCommand::new("Remove Component", id_str, before, after));
+            .remove_component_from_selected_scene_object(comp_type)?;
         self.bump_scene_version();
         Ok(serde_json::json!({ "removed": comp_type }))
     }
@@ -5963,6 +6053,81 @@ fn write_project_asset(
     })?;
 
     Ok((asset_path.to_owned(), full_path))
+}
+
+fn varg_scene_template(name: &str) -> String {
+    format!(
+        r##"scene {name} {{
+    camera "MainCamera" {{
+        transform {{
+            position: Vec3(0, 3, 8)
+            rotation: Euler(-20, 0, 0)
+        }}
+
+        perspective {{
+            fov: 60
+            near: 0.1
+            far: 1000
+        }}
+
+        primary: true
+    }}
+
+    light "Sun" {{
+        kind: directional
+        intensity: 2.0
+        rotation: Euler(-45, 35, 0)
+    }}
+
+    entity "Ground" {{
+        mesh: Box(size: Vec3(12, 1, 12))
+
+        material {{
+            baseColor: Color("#4f7f4a")
+            roughness: 0.8
+        }}
+
+        collider {{
+            shape: box
+        }}
+    }}
+}}
+"##
+    )
+}
+
+fn varg_prefab_template(name: &str) -> String {
+    format!(
+        r##"prefab {name} {{
+    entity "{name}" {{
+        mesh: Box(size: Vec3(1, 1, 1))
+
+        material {{
+            baseColor: Color("#7aa2ff")
+            roughness: 0.65
+        }}
+
+        collider {{
+            shape: box
+            size: Vec3(1, 1, 1)
+        }}
+    }}
+}}
+"##
+    )
+}
+
+fn varg_material_template(name: &str) -> String {
+    format!(
+        r##"material {name} {{
+    shader: "pbr"
+
+    baseColor: Color("#7aa2ff")
+    roughness: 0.7
+    metallic: 0.0
+}}
+"##
+    )
 }
 
 fn push_created_asset_console(console: &mut ConsoleService, kind: &str, full_path: &Path) {
@@ -6433,14 +6598,14 @@ fn validate_quest_script_references(project: &engine_editor::ProjectContext) -> 
     let mut script_refs = Vec::new();
     for (_, object) in project.scene.objects() {
         for script in &object.scripts {
-            if !script.script.trim().is_empty() {
-                script_refs.push(script.script.clone());
+            if !script.source.trim().is_empty() {
+                script_refs.push(script.source.clone());
             }
         }
         for component in &object.components {
             if let engine_ecs::ComponentData::Script(script) = component {
-                if !script.script.trim().is_empty() {
-                    script_refs.push(script.script.clone());
+                if !script.source.trim().is_empty() {
+                    script_refs.push(script.source.clone());
                 }
             }
         }
@@ -9350,5 +9515,57 @@ mod tests {
                 .iter()
                 .any(|decision| decision["kind"] == "export")
         );
+    }
+
+    #[test]
+    fn quest_read_artifact_serves_quest_files_and_rejects_traversal() {
+        let temp = tempfile::tempdir().unwrap();
+        let project_root = temp.path().join("project");
+        fs::create_dir_all(&project_root).unwrap();
+        let mut host = host_with_quest_root(temp.path());
+        let created = host
+            .quest_store
+            .create(
+                "Read Artifact Quest".to_owned(),
+                "Read a durable artifact.".to_owned(),
+                "# Read Artifact Quest\n\n## Goal\n\nRead a durable artifact.".to_owned(),
+                quest_project(&project_root),
+            )
+            .unwrap();
+        host.quest_store
+            .write_thinking_trace(
+                &created.record.id,
+                "initial-plan",
+                "Initial planning model trace",
+                "Visible provider thinking.",
+            )
+            .unwrap();
+
+        let artifact = host
+            .handle(
+                "quest/read_artifact",
+                &serde_json::json!({
+                    "id": created.record.id,
+                    "path": "thinking/initial-plan.md",
+                }),
+            )
+            .unwrap();
+        assert!(
+            artifact["content"]
+                .as_str()
+                .unwrap()
+                .contains("Visible provider thinking")
+        );
+
+        let error = host
+            .handle(
+                "quest/read_artifact",
+                &serde_json::json!({
+                    "id": created.record.id,
+                    "path": "../knowledge.json",
+                }),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("inside the project"));
     }
 }
