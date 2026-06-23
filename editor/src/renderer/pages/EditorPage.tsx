@@ -524,6 +524,7 @@ const workspaceSelectionClass = {
 
 const viewportClass = {
   container: 'relative flex h-full w-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_50%_18%,rgba(96,165,250,0.10),transparent_32%),linear-gradient(180deg,#101721_0%,#081018_55%,#070A0F_100%)]',
+  nativeInput: '!bg-transparent',
   canvas: 'block h-full w-full object-fill',
   selectionOverlay: 'pointer-events-none absolute inset-0 z-20 h-full w-full',
 };
@@ -1390,12 +1391,12 @@ function ViewportCanvas({ sceneVersion = 0, cameraRef, onCameraChange, onResize,
   return (
     <div
       ref={containerRef}
-      className={viewportClass.container}
+      className={cx(viewportClass.container, suspendReadback && viewportClass.nativeInput)}
       onMouseDown={onMouseDown}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <canvas ref={canvasRef} className={viewportClass.canvas} />
-      <ViewportGrid show={true} />
+      {!suspendReadback && <canvas ref={canvasRef} className={viewportClass.canvas} />}
+      <ViewportGrid show={!suspendReadback} />
       {viewMode === '3d' && <OrientationGizmo camera={camRef.current} onSnapToAxis={(axis) => {
         switch (axis) {
           case 'top':    camRef.current.pitch = 1.5;  camRef.current.yaw = 0;     break;

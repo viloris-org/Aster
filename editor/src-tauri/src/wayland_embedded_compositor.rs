@@ -5,11 +5,10 @@
 //! embedded compositor that imports render buffers through DMA-BUF and composites
 //! them with Web UI views inside the host window.
 //!
-//! This module owns that boundary. The default build exposes the capability and
-//! refusal semantics without pretending the old GTK child-surface bridge is a
-//! real Wayland solution. The `wayland-embedded-compositor` feature is reserved
-//! for the platform backend that wires a compositor implementation, DMA-BUF
-//! import, explicit synchronization, input routing, and WebView panel surfaces.
+//! This module owns that boundary. The default Linux build enables this backend
+//! so Wayland sessions prefer the embedded compositor instead of falling back to
+//! WebView canvas readback. Builds that explicitly disable the feature still
+//! expose clear refusal semantics.
 
 use std::thread;
 #[cfg(feature = "wayland-embedded-compositor")]
@@ -60,14 +59,6 @@ pub fn support_for_runtime(is_wayland: bool) -> WaylandEmbeddedCompositorSupport
 
     #[cfg(feature = "wayland-embedded-compositor")]
     {
-        if !experimental_backend_enabled() {
-            return WaylandEmbeddedCompositorSupport {
-                status: WaylandEmbeddedCompositorStatus::Incomplete,
-                available: false,
-                reason: "Wayland embedded compositor backend can import DMA-BUFs but does not yet composite frames into the editor host; set ASTER_WAYLAND_EMBEDDED_EXPERIMENTAL=1 to test it.",
-            };
-        }
-
         backend_support()
     }
 
@@ -79,16 +70,6 @@ pub fn support_for_runtime(is_wayland: bool) -> WaylandEmbeddedCompositorSupport
             reason: "built without the wayland-embedded-compositor backend feature",
         }
     }
-}
-
-#[cfg(feature = "wayland-embedded-compositor")]
-fn experimental_backend_enabled() -> bool {
-    std::env::var("ASTER_WAYLAND_EMBEDDED_EXPERIMENTAL").is_ok_and(|value| {
-        matches!(
-            value.to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
 }
 
 pub fn is_wayland_session() -> bool {
@@ -1638,35 +1619,6 @@ mod backend {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "wayland-embedded-compositor")]
-    struct EnvVarGuard {
-        key: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    #[cfg(feature = "wayland-embedded-compositor")]
-    impl EnvVarGuard {
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var_os(key);
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, previous }
-        }
-    }
-
-    #[cfg(feature = "wayland-embedded-compositor")]
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match self.previous.as_ref() {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
     #[test]
     fn support_reports_not_wayland_before_backend_state() {
         let support = support_for_runtime(false);
@@ -1675,28 +1627,24 @@ mod tests {
         assert!(!support.available);
     }
 
+    #[cfg(not(feature = "wayland-embedded-compositor"))]
     #[test]
-    fn default_build_exposes_feature_disabled_on_wayland() {
-        #[cfg(not(feature = "wayland-embedded-compositor"))]
-        {
-            let support = support_for_runtime(true);
-            assert_eq!(
-                support.status,
-                WaylandEmbeddedCompositorStatus::FeatureDisabled
-            );
-            assert!(!support.available);
-        }
+    fn feature_disabled_build_reports_unavailable_on_wayland() {
+        let support = support_for_runtime(true);
+        assert_eq!(
+            support.status,
+            WaylandEmbeddedCompositorStatus::FeatureDisabled
+        );
+        assert!(!support.available);
     }
 
     #[cfg(feature = "wayland-embedded-compositor")]
     #[test]
-    fn feature_build_keeps_incomplete_wayland_backend_off_by_default() {
-        let _guard = EnvVarGuard::unset("ASTER_WAYLAND_EMBEDDED_EXPERIMENTAL");
-
+    fn feature_build_exposes_available_wayland_backend_by_default() {
         let support = support_for_runtime(true);
 
-        assert_eq!(support.status, WaylandEmbeddedCompositorStatus::Incomplete);
-        assert!(!support.available);
+        assert_eq!(support.status, WaylandEmbeddedCompositorStatus::Available);
+        assert!(support.available);
     }
 
     #[test]

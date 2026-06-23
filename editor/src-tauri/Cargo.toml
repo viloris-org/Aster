@@ -11,7 +11,7 @@ name = "varg_editor_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = []
+default = ["wayland-embedded-compositor"]
 wayland-embedded-compositor = ["dep:smithay", "dep:wayland-egl", "smithay/backend_winit"]
 
 [build-dependencies]

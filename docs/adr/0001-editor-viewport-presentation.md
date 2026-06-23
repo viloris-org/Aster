@@ -29,7 +29,8 @@ Introduce an editor viewport presentation seam with these adapters:
 
 - `canvas-readback`: stable fallback, composed by the WebView, not zero-copy.
 - `embedded-native-experimental`: current GTK/GDK child-surface path, disabled by default and available only through an explicit diagnostic environment variable.
-- `native-host-window`: canonical zero-copy path where the native host owns the root window and embeds Web UI.
+- `native-host-window`: canonical zero-copy path for host-owned native surfaces, used by default on Linux X11 when available.
+- `wayland-embedded-compositor`: canonical zero-copy path for Wayland sessions, where the editor owns an embedded compositor rather than relying on foreign child-window embedding.
 - `editor-compositor`: legacy mode name for the target native-host-window zero-copy architecture.
 
 The target architecture is **Native host window owns the editor root**:
@@ -57,12 +58,12 @@ Negative:
 
 - The native host window requires deeper Tauri/WebView integration than the current child-surface experiment.
 - Transparent WebView behavior must be validated per platform.
-- The fallback path remains canvas readback until the compositor adapter is implemented.
+- The fallback path remains canvas readback when the selected native/compositor adapter is explicitly disabled or cannot initialize.
 
 ## Implementation plan
 
-1. Keep `canvas-readback` as the stable fallback when native host presentation is not requested or unavailable.
-2. Make `native-host-window` the default zero-copy presentation when `ASTER_EDITOR_COMPOSITOR=1` requests the host-owned editor path.
+1. Keep `canvas-readback` as the stable fallback when native host presentation is explicitly disabled or unavailable.
+2. Make `native-host-window` the default zero-copy presentation on X11 when the host-owned editor path is available. Make `wayland-embedded-compositor` the default zero-copy presentation on Wayland. `ASTER_EDITOR_COMPOSITOR=0` can force the fallback for diagnostics.
 3. Keep `embedded-native-experimental` behind `ASTER_ENABLE_EXPERIMENTAL_CHILD_SURFACE=1` for diagnostics only.
 4. Add backend/frontend presentation-mode APIs around viewport ownership.
 5. Implement the native host window on Linux first:

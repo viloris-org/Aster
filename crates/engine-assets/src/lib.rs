@@ -806,6 +806,11 @@ impl AssetDatabase {
             })
     }
 
+    /// Resolves a project-relative path to a GUID, returning `None` when unknown.
+    pub fn get_guid_for_path(&self, path: impl AsRef<Path>) -> Option<AssetGuid> {
+        self.path_to_guid.get(path.as_ref()).copied()
+    }
+
     /// Resolves `builtin:/x` or `project:/x` resource references to native paths.
     ///
     /// Rejects references whose resolved path escapes the intended root directory.

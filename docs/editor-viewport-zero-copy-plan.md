@@ -113,7 +113,7 @@ Wayland does not provide an X11-style stable foreign child-window embedding mode
 - Web UI surfaces are composed with Scene View inside the same host-owned presentation tree.
 - Viewport movement is a compositor state update, not OS child-window repositioning.
 
-The current `wayland-embedded-compositor` feature boundary is the right shape. It should not claim availability until DMA-BUF import, synchronization, input routing and WebView panel surfaces are wired.
+The `wayland-embedded-compositor` boundary is the default Wayland Scene View presentation path when the backend is built and available. It owns the Wayland no-readback route instead of falling back to canvas by default. Canvas readback remains the fallback for explicit disablement or initialization failure.
 
 Risks:
 
@@ -164,18 +164,19 @@ Risks:
 - Replace or extend `zero_copy` capability with `cpu_readback`, `gpu_native_surface`, `gpu_composited` and `direct_scanout_possible`.
 - Keep `zero_copy` as compatibility alias for `!cpu_readback` until frontend code is migrated.
 - Update frontend labels to say `native GPU` or `no CPU readback`, not guaranteed `direct scanout`.
-- Add tests for capability selection on Linux, Wayland feature-disabled, Windows and macOS.
+- Add tests for capability selection on Linux X11, Wayland embedded compositor, feature-disabled Wayland builds, Windows and macOS.
 
 ### Phase 1: Stabilize Linux X11 Native Host
 
 - Treat current GTK/X11 native host path as the first production no-readback path.
 - Verify resize, DPI, panel overlay, focus, input and scene restart behavior.
 - Add telemetry showing active adapter, surface size, viewport rect and CPU readback status.
-- Keep canvas readback as fallback when `ASTER_EDITOR_COMPOSITOR` is not enabled or native host setup fails.
+- Keep canvas readback as fallback when native presentation is explicitly disabled with `ASTER_EDITOR_COMPOSITOR=0` or native host setup fails.
 
 ### Phase 2: Wayland Embedded Compositor Backend
 
-- Implement the feature-gated embedded compositor backend behind the existing seam.
+- Build the embedded compositor backend by default for the editor.
+- Select `wayland-embedded-compositor` by default on Wayland sessions.
 - Add DMA-BUF import/export or compatible WGPU buffer presentation path.
 - Implement explicit synchronization, buffer lifecycle and format/modifier negotiation.
 - Route input through the host/compositor boundary.

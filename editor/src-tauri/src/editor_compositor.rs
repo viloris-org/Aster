@@ -271,7 +271,7 @@ pub fn presentation_capabilities_for(
                 available: wayland_embedded_available,
                 default: default_mode == ViewportPresentationMode::WaylandEmbeddedCompositor,
                 zero_copy: true,
-                experimental: true,
+                experimental: false,
                 backend: wayland_embedded_compositor::BACKEND_ID,
                 cpu_readback: false,
                 gpu_native_surface: true,
@@ -551,7 +551,7 @@ mod tests {
     }
 
     #[test]
-    fn presentation_capabilities_fall_back_to_canvas_when_not_requested() {
+    fn presentation_capabilities_fall_back_to_canvas_when_explicitly_disabled() {
         let capabilities = presentation_capabilities_for(
             false,
             EditorCompositorSupport {
@@ -709,7 +709,7 @@ mod tests {
             == ViewportPresentationMode::WaylandEmbeddedCompositor
             && adapter.available
             && adapter.default
-            && adapter.experimental
+            && !adapter.experimental
             && adapter.zero_copy
             && !adapter.cpu_readback
             && adapter.gpu_native_surface

@@ -46,9 +46,9 @@ use engine_platform::{ActionMap, InputState};
 use engine_render::{
     BatteryPolicy, FrameGenerationKind, HeadlessRenderDevice, ImageDesc, ImageFormat, ImageHandle,
     ImageUsage, PresentStrategy, RenderApi, RenderDevice, RenderFrame, RenderGraph,
-    RenderGraphBuilder, RenderPerformanceConfig, RenderPlatformClass, RenderQualityMode,
-    RenderScalingContext, RenderScalingSettings, RenderWorld, ThermalState, UiCompositionPolicy,
-    UpscalerKind,
+    RenderGraphBuilder, RenderMaterialTextures, RenderPerformanceConfig, RenderPlatformClass,
+    RenderQualityMode, RenderScalingContext, RenderScalingSettings, RenderWorld, ThermalState,
+    UiCompositionPolicy, UpscalerKind,
 };
 #[cfg(feature = "wgpu")]
 pub use engine_render_wgpu::WgpuRenderDevice;
@@ -559,7 +559,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
             if model.materials.is_empty() {
                 continue;
             }
-            obj.material = format!("material:{:032x}:0", model_guid.as_u128());
+            let material_index = model_material_index_for_mesh(&obj.mesh, model).unwrap_or(0);
+            obj.material = format!("material:{:032x}:{material_index}", model_guid.as_u128());
         }
     }
 
@@ -842,6 +843,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 self.hot_reload.observe(meta.guid, modified);
             }
         }
+        self.register_loaded_model_materials();
         Ok(())
     }
 
@@ -869,6 +871,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 changed.push(meta.guid.as_asset_id());
             }
         }
+        self.register_loaded_model_materials();
         Ok(changed)
     }
 
@@ -958,6 +961,9 @@ impl<R: RenderDevice> RuntimeServices<R> {
                         material.roughness,
                         material.emissive,
                     );
+                    let textures = self.material_textures_from_refs(source_path, material);
+                    self.renderer
+                        .register_material_textures(&material_name, &textures);
                 }
                 self.mesh_resources.insert(guid.as_asset_id(), model);
             }
@@ -989,6 +995,72 @@ impl<R: RenderDevice> RuntimeServices<R> {
             | ResourceKind::Scene => {}
         }
         Ok(())
+    }
+
+    fn material_textures_from_refs(
+        &self,
+        model_source_path: &Path,
+        material: &engine_assets::CpuMaterialResource,
+    ) -> RenderMaterialTextures {
+        RenderMaterialTextures {
+            base_color: self.texture_handle_for_material_ref(
+                model_source_path,
+                material.base_color_texture_ref.as_deref(),
+            ),
+            normal: self.texture_handle_for_material_ref(
+                model_source_path,
+                material.normal_texture_ref.as_deref(),
+            ),
+            metallic_roughness: self.texture_handle_for_material_ref(
+                model_source_path,
+                material.metallic_roughness_texture_ref.as_deref(),
+            ),
+            emissive: None,
+            occlusion: None,
+        }
+    }
+
+    fn texture_handle_for_material_ref(
+        &self,
+        model_source_path: &Path,
+        texture_ref: Option<&str>,
+    ) -> Option<ImageHandle> {
+        let relative = resolve_model_texture_ref(model_source_path, texture_ref?);
+        let guid = self.asset_database.get_guid_for_path(&relative)?;
+        self.texture_resources.get(&guid.as_asset_id()).copied()
+    }
+
+    fn register_loaded_model_materials(&mut self) {
+        let models: Vec<(engine_core::AssetId, PathBuf, ModelResource)> = self
+            .mesh_resources
+            .iter()
+            .filter_map(|(asset_id, model)| {
+                let guid = AssetGuid::from_asset_id(*asset_id);
+                let path = self
+                    .asset_database
+                    .resolve_guid(guid)
+                    .ok()?
+                    .as_path()
+                    .to_path_buf();
+                Some((*asset_id, path, model.clone()))
+            })
+            .collect();
+
+        for (asset_id, source_path, model) in models {
+            for (mat_idx, material) in model.materials.iter().enumerate() {
+                let material_name = format!("material:{:032x}:{mat_idx}", asset_id.as_u128());
+                self.renderer.register_material_params(
+                    &material_name,
+                    material.base_color,
+                    material.metallic,
+                    material.roughness,
+                    material.emissive,
+                );
+                let textures = self.material_textures_from_refs(&source_path, material);
+                self.renderer
+                    .register_material_textures(&material_name, &textures);
+            }
+        }
     }
 
     fn apply_builtin_player_controller(&mut self) {
@@ -2394,6 +2466,45 @@ fn parse_asset_guid(name: &str) -> Option<engine_core::AssetId> {
     Some(engine_core::AssetId::from_u128(value))
 }
 
+fn parse_asset_mesh_index(name: &str) -> Option<usize> {
+    name.strip_prefix("asset:")?.split(':').nth(1)?.parse().ok()
+}
+
+fn model_material_index_for_mesh(mesh_name: &str, model: &ModelResource) -> Option<usize> {
+    let mesh_index = parse_asset_mesh_index(mesh_name).unwrap_or(0);
+    model.meshes.get(mesh_index)?.material_index
+}
+
+fn resolve_model_texture_ref(model_source_path: &Path, texture_ref: &str) -> PathBuf {
+    let texture_path = Path::new(texture_ref);
+    let joined = if texture_path.is_absolute() {
+        texture_path.to_path_buf()
+    } else {
+        model_source_path.parent().map_or_else(
+            || texture_path.to_path_buf(),
+            |parent| parent.join(texture_path),
+        )
+    };
+    normalize_relative_path(&joined)
+}
+
+fn normalize_relative_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
+}
+
 /// Builds the default forward render graph used by the minimal runtime.
 pub fn build_default_render_graph() -> RenderGraph {
     use engine_render::RenderStage;
@@ -2932,6 +3043,73 @@ mod tests {
         assert_eq!(
             world.objects[1].material,
             format!("material:{:032x}:0", model_guid.as_u128())
+        );
+    }
+
+    #[test]
+    fn model_material_resolution_uses_mesh_primitive_material_index() {
+        let model_guid = engine_core::AssetId::from_u128(0x1234);
+        let mut mesh_resources = HashMap::new();
+        mesh_resources.insert(
+            model_guid,
+            ModelResource {
+                meshes: vec![
+                    engine_assets::BasicMeshResource {
+                        positions: Vec::new(),
+                        normals: Vec::new(),
+                        texcoords: Vec::new(),
+                        indices: Vec::new(),
+                        material_index: Some(2),
+                    },
+                    engine_assets::BasicMeshResource {
+                        positions: Vec::new(),
+                        normals: Vec::new(),
+                        texcoords: Vec::new(),
+                        indices: Vec::new(),
+                        material_index: Some(1),
+                    },
+                ],
+                materials: vec![
+                    engine_assets::CpuMaterialResource::default(),
+                    engine_assets::CpuMaterialResource::default(),
+                    engine_assets::CpuMaterialResource::default(),
+                ],
+            },
+        );
+        let mut world = RenderWorld {
+            objects: vec![engine_render::RenderObject {
+                object: engine_core::EntityId::from_u128(1),
+                transform: engine_core::math::Transform::IDENTITY,
+                mesh: format!("asset:{:032x}:1", model_guid.as_u128()),
+                material: String::new(),
+                casts_shadows: true,
+                receive_shadows: true,
+                bounds: engine_render::RenderBounds::default(),
+                lods: Vec::new(),
+            }],
+            ..RenderWorld::default()
+        };
+
+        RuntimeServices::<HeadlessRenderDevice>::resolve_render_materials(
+            &mut world,
+            &mesh_resources,
+        );
+
+        assert_eq!(
+            world.objects[0].material,
+            format!("material:{:032x}:1", model_guid.as_u128())
+        );
+    }
+
+    #[test]
+    fn model_texture_refs_resolve_relative_to_model_source() {
+        assert_eq!(
+            resolve_model_texture_ref(Path::new("models/ship/ship.gltf"), "textures/albedo.png"),
+            PathBuf::from("models/ship/textures/albedo.png")
+        );
+        assert_eq!(
+            resolve_model_texture_ref(Path::new("models/ship/ship.gltf"), "../shared/normal.png"),
+            PathBuf::from("models/shared/normal.png")
         );
     }
 

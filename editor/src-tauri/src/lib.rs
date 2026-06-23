@@ -80,7 +80,16 @@ fn editor_compositor_requested() -> bool {
 }
 
 fn default_editor_compositor_requested() -> bool {
-    editor_compositor::platform_support().available
+    let support = editor_compositor::platform_support();
+    let wayland_support = wayland_embedded_compositor::support();
+    default_editor_compositor_requested_for(support, wayland_support)
+}
+
+fn default_editor_compositor_requested_for(
+    support: editor_compositor::EditorCompositorSupport,
+    wayland_support: wayland_embedded_compositor::WaylandEmbeddedCompositorSupport,
+) -> bool {
+    support.available || wayland_support.available
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -8537,6 +8546,44 @@ mod tests {
     #[test]
     fn kde_keeps_native_chrome_when_using_x11_backend() {
         assert!(DesktopEnvironment::Kde.prefers_native_chrome_for_backend(false));
+    }
+
+    #[test]
+    fn viewport_compositor_is_requested_by_default_when_a_native_adapter_is_available() {
+        let native_host = super::editor_compositor::EditorCompositorSupport {
+            backend: super::editor_compositor::EditorCompositorBackend::LinuxGtk,
+            available: true,
+            reason: "available",
+        };
+        let unavailable_host = super::editor_compositor::EditorCompositorSupport {
+            backend: super::editor_compositor::EditorCompositorBackend::LinuxGtk,
+            available: false,
+            reason: "unavailable",
+        };
+        let wayland = super::wayland_embedded_compositor::WaylandEmbeddedCompositorSupport {
+            status: super::wayland_embedded_compositor::WaylandEmbeddedCompositorStatus::Available,
+            available: true,
+            reason: "available",
+        };
+        let unavailable_wayland =
+            super::wayland_embedded_compositor::WaylandEmbeddedCompositorSupport {
+                status: super::wayland_embedded_compositor::WaylandEmbeddedCompositorStatus::FeatureDisabled,
+                available: false,
+                reason: "feature disabled",
+            };
+
+        assert!(super::default_editor_compositor_requested_for(
+            native_host,
+            unavailable_wayland
+        ));
+        assert!(super::default_editor_compositor_requested_for(
+            unavailable_host,
+            wayland
+        ));
+        assert!(!super::default_editor_compositor_requested_for(
+            unavailable_host,
+            unavailable_wayland
+        ));
     }
 
     #[test]
