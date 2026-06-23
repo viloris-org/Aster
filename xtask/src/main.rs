@@ -22,7 +22,6 @@ fn run() -> EngineResult<()> {
     match args.next().as_deref() {
         Some("runtime-min") => build_profile(Profile::RuntimeMin, false),
         Some("build-editor") => build_profile(Profile::Editor, false),
-        Some("build-editor-slint") => cargo(["build", "-p", "aster-editor-slint"]),
         Some("agent-smoke") => cargo([
             "test",
             "-p",
@@ -47,7 +46,7 @@ fn run() -> EngineResult<()> {
             "unknown xtask command `{command}`"
         ))),
         None => Err(EngineError::config(
-            "expected xtask command: runtime-min, build-editor, build-editor-slint, agent-smoke, varg-lsp, viewport-perf, package, test, or check",
+            "expected xtask command: runtime-min, build-editor, agent-smoke, varg-lsp, viewport-perf, package, test, or check",
         )),
     }
 }

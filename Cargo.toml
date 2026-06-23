@@ -22,7 +22,6 @@ members = [
     "crates/engine-ai",
     "crates/engine-policy",
     "crates/engine-packager",
-    "editor-slint",
     "editor/src-tauri",
     "crates/runtime-min",
     "xtask",
