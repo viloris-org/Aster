@@ -545,6 +545,14 @@ scope_scene_snapshot = "シーンスナップショット"
 scope_no_entity = "エンティティ未固定"
 policy_session_allow = "このセッションで許可"
 policy_ask_write = "書き込み前に確認"
+approval_mode_prompt = "How should Varg actions be approved?"
+approval_mode_learn_more = "Learn more"
+approval_mode_ask = "Ask for approval"
+approval_mode_ask_desc = "Always ask before editing files or running commands"
+approval_mode_auto_safe = "Approve for me"
+approval_mode_auto_safe_desc = "Only ask for actions detected as potentially unsafe"
+approval_mode_full_access = "Full access"
+approval_mode_full_access_desc = "Unrestricted access to the project, commands, and network"
 
 # Changes workspace
 changes_bundle_title = "提案された変更バンドル"
@@ -607,7 +615,7 @@ input_queue_next = "次の指示をキューイング"
 input_describe = "結果を記述"
 input_queue_hint = "現在のステップの後に実行されます"
 input_send_hint = "Enter で送信 · Shift+Enter で改行"
-ai_input_placeholder = "構築、変更、検査、または修正... @ でエンティティを参照。"
+ai_input_placeholder = "Do Anything"
 
 # Thinking effort
 thinking_effort_title = "思考/推論の強度レベル"

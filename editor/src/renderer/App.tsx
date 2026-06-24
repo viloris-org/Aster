@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import HubPage from './pages/HubPage';
 import CalmEditorPrototype from './pages/CalmEditorPrototype';
 import QuestPage from './pages/QuestPage';
-import { rpc } from './api';
+import { closeNativeSceneView, rpc } from './api';
 import { I18nProvider, useTranslation } from './i18n';
 import { buttonClass } from './uiClasses';
 
@@ -147,6 +147,11 @@ export default function App() {
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  useEffect(() => {
+    if (screen === 'editor') return;
+    closeNativeSceneView().catch(() => {});
+  }, [screen]);
 
   // ── Handlers ──
 

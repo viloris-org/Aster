@@ -719,6 +719,16 @@ interface CopilotSettingsData {
   glm_config?: GlmConfig;
 }
 
+function normalizeCopilotSettings(settings: CopilotSettingsData): CopilotSettingsData {
+  const providerMap: Record<string, CopilotSettingsData['provider']> = { open_a_i: 'openai' };
+  const provider = providerMap[settings.provider] ?? settings.provider;
+  return {
+    ...settings,
+    provider,
+    model: provider === 'stub' ? 'none' : settings.model,
+  };
+}
+
 function CopilotSettingsSection() {
   const { t } = useTranslation();
   const providerOptions: Array<{ value: CopilotSettingsData['provider']; label: string }> = [
@@ -735,7 +745,7 @@ function CopilotSettingsSection() {
   ];
   const [settings, setSettings] = useState<CopilotSettingsData>({
     provider: 'stub',
-    model: '',
+    model: 'none',
     api_endpoint: null,
     api_key: null,
     max_tokens: 4096,
@@ -757,9 +767,7 @@ function CopilotSettingsSection() {
       rpc<{ providers: ProviderMeta[] }>('app/get_model_registry').catch(() => ({ providers: [] })),
     ]).then(([s, reg]) => {
       if (s) {
-        const providerMap: Record<string, CopilotSettingsData['provider']> = { open_a_i: 'openai' };
-        const normalized = providerMap[s.provider] ?? s.provider;
-        setSettings({ ...s, provider: normalized as CopilotSettingsData['provider'] });
+        setSettings(normalizeCopilotSettings(s));
       }
       setProviderMetas(reg.providers);
       setLoaded(true);
@@ -781,6 +789,7 @@ function CopilotSettingsSection() {
     setSettings(s => ({
       ...s,
       provider,
+      model: provider === 'stub' ? 'none' : s.model,
       api_endpoint: endpointConfigurable ? s.api_endpoint : null,
     }));
   }, [providerMetas]);
@@ -790,14 +799,12 @@ function CopilotSettingsSection() {
     setSaved(false);
     setSaveError(null);
     try {
-      const payload = { ...settings };
+      const payload = normalizeCopilotSettings(settings);
       if (!keyChanged) delete (payload as any).api_key;
       await rpc('app/update_copilot_settings', payload);
       const refreshed = await rpc<CopilotSettingsData>('app/get_copilot_settings').catch(() => null);
       if (refreshed) {
-        const providerMap: Record<string, CopilotSettingsData['provider']> = { open_a_i: 'openai' };
-        const normalized = providerMap[refreshed.provider] ?? refreshed.provider;
-        setSettings({ ...refreshed, provider: normalized as CopilotSettingsData['provider'] });
+        setSettings(normalizeCopilotSettings(refreshed));
       }
       setSaved(true);
       setKeyChanged(false);

@@ -161,6 +161,38 @@ function isNoCpuReadbackAdapter(adapter?: ViewportPresentationAdapter) {
   return Boolean(adapter?.available && !adapter.cpu_readback && adapter.gpu_native_surface);
 }
 
+function useMeasuredFps() {
+  const [fps, setFps] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let frameId = 0;
+    let frameCount = 0;
+    let sampleStartedAt = performance.now();
+
+    const tick = (timestamp: number) => {
+      frameCount += 1;
+      const elapsed = timestamp - sampleStartedAt;
+
+      if (elapsed >= 1000) {
+        setFps(Math.round((frameCount * 1000) / elapsed));
+        frameCount = 0;
+        sampleStartedAt = timestamp;
+      }
+
+      if (active) frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => {
+      active = false;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, []);
+
+  return fps;
+}
+
 interface BuildTargetOption {
   id: BuildTarget;
   label: string;
@@ -348,6 +380,25 @@ function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
+const leftDashboardMinWidth = 220;
+const leftDashboardMaxWidth = 520;
+const leftDashboardDefaultWidth = 276;
+const rightDashboardMinWidth = 260;
+const rightDashboardMaxWidth = 560;
+const rightDashboardDefaultWidth = 326;
+const bottomDashboardMinHeight = 96;
+const bottomDashboardMaxHeight = 360;
+const bottomDashboardDefaultHeight = 164;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(value, max));
+}
+
+function storedPanelSize(key: string, min: number, max: number, fallback: number) {
+  const saved = Number(window.localStorage.getItem(key));
+  return Number.isFinite(saved) ? clamp(saved, min, max) : fallback;
+}
+
 function viewportDevicePixelRatio() {
   return Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
 }
@@ -380,6 +431,40 @@ function iconForTool(tool: TransformTool) {
   if (tool === 'rotate') return <IconRotate />;
   if (tool === 'scale') return <IconScale />;
   return <IconView />;
+}
+
+function usePanelResize(
+  axis: 'horizontal' | 'vertical',
+  onDelta: (delta: number) => void,
+) {
+  const dragging = useRef(false);
+  const startPosition = useRef(0);
+
+  return useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    dragging.current = true;
+    startPosition.current = axis === 'horizontal' ? event.clientX : event.clientY;
+    document.body.style.cursor = axis === 'horizontal' ? 'col-resize' : 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!dragging.current) return;
+      const currentPosition = axis === 'horizontal' ? moveEvent.clientX : moveEvent.clientY;
+      onDelta(currentPosition - startPosition.current);
+      startPosition.current = currentPosition;
+    };
+
+    const handleMouseUp = () => {
+      dragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [axis, onDelta]);
 }
 
 function sceneObjectType(object: SceneObject): string {
@@ -1067,12 +1152,31 @@ export default function CalmEditorPrototype({
   const [aiPrompt, setAiPrompt] = useState('');
   const [contextualRequest, setContextualRequest] = useState<{ id: number; prompt: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
+  const [leftDashboardWidth, setLeftDashboardWidth] = useState(() => storedPanelSize(
+    'aster.calmEditor.leftDashboardWidth',
+    leftDashboardMinWidth,
+    leftDashboardMaxWidth,
+    leftDashboardDefaultWidth,
+  ));
+  const [rightDashboardWidth, setRightDashboardWidth] = useState(() => storedPanelSize(
+    'aster.calmEditor.rightDashboardWidth',
+    rightDashboardMinWidth,
+    rightDashboardMaxWidth,
+    rightDashboardDefaultWidth,
+  ));
+  const [bottomDashboardHeight, setBottomDashboardHeight] = useState(() => storedPanelSize(
+    'aster.calmEditor.bottomDashboardHeight',
+    bottomDashboardMinHeight,
+    bottomDashboardMaxHeight,
+    bottomDashboardDefaultHeight,
+  ));
   const [viewportSize, setViewportSize] = useState({ width: 640, height: 480 });
   const [cameraRevision, setCameraRevision] = useState(0);
   const [viewportPresentation, setViewportPresentation] = useState<ViewportPresentationMode | null>(null);
   const [viewportPresentationAdapters, setViewportPresentationAdapters] = useState<ViewportPresentationAdapter[]>([]);
   const [viewportPresentationDiagnostics, setViewportPresentationDiagnostics] = useState<ViewportPresentationStatus | null>(null);
   const [nativeSceneError, setNativeSceneError] = useState<string | null>(null);
+  const [nativeSceneOpenRevision, setNativeSceneOpenRevision] = useState(0);
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
   const [scriptContent, setScriptContent] = useState('');
   const [scriptSavedContent, setScriptSavedContent] = useState('');
@@ -1101,6 +1205,7 @@ export default function CalmEditorPrototype({
   const [projectAssets, setProjectAssets] = useState(mockAssets);
   const [consoleEntries, setConsoleEntries] = useState<EditorConsoleEntry[]>([]);
   const [selectedEntityDetails, setSelectedEntityDetails] = useState<EntityDetails | null>(null);
+  const measuredFps = useMeasuredFps();
   const sceneVersionRef = useRef(0);
   const viewportFrameRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef({
@@ -1167,6 +1272,15 @@ export default function CalmEditorPrototype({
     position: entity.position,
     parent_id: entity.parentId ?? null,
   })), [entities]);
+  const handleLeftDashboardResize = usePanelResize('horizontal', (delta) => {
+    setLeftDashboardWidth((width) => clamp(width + delta, leftDashboardMinWidth, leftDashboardMaxWidth));
+  });
+  const handleRightDashboardResize = usePanelResize('horizontal', (delta) => {
+    setRightDashboardWidth((width) => clamp(width - delta, rightDashboardMinWidth, rightDashboardMaxWidth));
+  });
+  const handleBottomDashboardResize = usePanelResize('vertical', (delta) => {
+    setBottomDashboardHeight((height) => clamp(height - delta, bottomDashboardMinHeight, bottomDashboardMaxHeight));
+  });
 
   const refreshSceneTree = async () => {
     try {
@@ -1242,6 +1356,26 @@ export default function CalmEditorPrototype({
       height: Math.max(1, Math.round(rect.height)),
     };
   }, []);
+
+  const syncNativeSceneViewport = useCallback(async () => {
+    if (!viewportPresentation) return;
+    const viewport = embeddedSceneViewport();
+    if (!viewport) return;
+    const camera = cameraRef.current;
+    if (isWaylandEmbeddedCompositorPresentation(viewportPresentation)) {
+      await syncWaylandEmbeddedCompositorViewport({ viewport });
+    } else {
+      await syncNoCpuReadbackSceneView({
+        viewport,
+        yaw: camera.yaw,
+        pitch: camera.pitch,
+        distance: camera.distance,
+        targetX: camera.targetX,
+        targetY: camera.targetY,
+        targetZ: camera.targetZ,
+      });
+    }
+  }, [embeddedSceneViewport, viewportPresentation]);
 
   const openNativeSceneViewport = useCallback(async () => {
     if (!viewportPresentation) throw new Error('No native Scene View adapter is available.');
@@ -1418,6 +1552,18 @@ export default function CalmEditorPrototype({
   ];
 
   useEffect(() => {
+    window.localStorage.setItem('aster.calmEditor.leftDashboardWidth', String(leftDashboardWidth));
+  }, [leftDashboardWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem('aster.calmEditor.rightDashboardWidth', String(rightDashboardWidth));
+  }, [rightDashboardWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem('aster.calmEditor.bottomDashboardHeight', String(bottomDashboardHeight));
+  }, [bottomDashboardHeight]);
+
+  useEffect(() => {
     refreshSceneTree();
     refreshAssets();
     refreshConsole();
@@ -1443,6 +1589,10 @@ export default function CalmEditorPrototype({
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => () => {
+    closeNativeSceneView().catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!hierarchyContextMenu) return undefined;
     const close = () => setHierarchyContextMenu(null);
@@ -1464,7 +1614,10 @@ export default function CalmEditorPrototype({
     let cancelled = false;
     openNativeSceneViewport()
       .then(() => {
-        if (!cancelled) setNativeSceneError(null);
+        if (!cancelled) {
+          setNativeSceneError(null);
+          setNativeSceneOpenRevision((revision) => revision + 1);
+        }
       })
       .catch((error) => {
         if (cancelled) return;
@@ -1476,6 +1629,22 @@ export default function CalmEditorPrototype({
   }, [backendReady, isPlaying, noCpuReadbackPresentation, openNativeSceneViewport, sceneVersion, viewportPresentation, viewMode]);
 
   useEffect(() => {
+    if (!zeroCopySceneActive || nativeSceneOpenRevision === 0) return;
+    let cancelled = false;
+    const frameDelays = [0, 16, 50, 100, 200];
+    const timers = frameDelays.map((delay) => window.setTimeout(() => {
+      if (cancelled) return;
+      syncNativeSceneViewport().catch((error) => {
+        if (!cancelled) setNativeSceneError(error instanceof Error ? error.message : String(error));
+      });
+    }, delay));
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [nativeSceneOpenRevision, syncNativeSceneViewport, zeroCopySceneActive]);
+
+  useEffect(() => {
     if (!zeroCopySceneActive) return;
     const frame = viewportFrameRef.current;
     if (!frame) return;
@@ -1484,21 +1653,7 @@ export default function CalmEditorPrototype({
       if (raf !== null) window.cancelAnimationFrame(raf);
       raf = window.requestAnimationFrame(() => {
         raf = null;
-        const viewport = embeddedSceneViewport();
-        if (!viewport) return;
-        const camera = cameraRef.current;
-        const syncPromise = isWaylandEmbeddedCompositorPresentation(viewportPresentation)
-          ? syncWaylandEmbeddedCompositorViewport({ viewport })
-          : syncNoCpuReadbackSceneView({
-            viewport,
-            yaw: camera.yaw,
-            pitch: camera.pitch,
-            distance: camera.distance,
-            targetX: camera.targetX,
-            targetY: camera.targetY,
-            targetZ: camera.targetZ,
-          });
-        syncPromise.catch((error) => {
+        syncNativeSceneViewport().catch((error) => {
           setNativeSceneError(error instanceof Error ? error.message : String(error));
         });
       });
@@ -1514,7 +1669,7 @@ export default function CalmEditorPrototype({
       window.removeEventListener('scroll', syncViewport, true);
       if (raf !== null) window.cancelAnimationFrame(raf);
     };
-  }, [cameraRevision, embeddedSceneViewport, viewportPresentation, zeroCopySceneActive]);
+  }, [cameraRevision, syncNativeSceneViewport, zeroCopySceneActive]);
 
   useEffect(() => {
     if (!backendReady) return;
@@ -1814,7 +1969,10 @@ export default function CalmEditorPrototype({
           </button>
         </nav>
 
-        <aside className="flex w-[276px] shrink-0 flex-col border-r border-[var(--border)] bg-[rgba(21,22,25,0.92)]">
+        <aside
+          className="flex shrink-0 flex-col border-r border-[var(--border)] bg-[rgba(21,22,25,0.92)]"
+          style={{ width: leftDashboardWidth }}
+        >
           <div className="flex h-11 items-center justify-between border-b border-[var(--border)] px-3">
             <div>
               <div className="text-[12px] font-semibold text-[var(--text-primary)]">
@@ -2038,6 +2196,26 @@ export default function CalmEditorPrototype({
           </div>
         </aside>
 
+        <div
+          className="relative z-20 w-[6px] shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--brand)] hover:opacity-60 active:bg-[var(--brand)] active:opacity-60 focus-visible:bg-[var(--brand)] focus-visible:outline-none"
+          role="separator"
+          aria-label="Resize left dashboard"
+          aria-orientation="vertical"
+          aria-valuemin={leftDashboardMinWidth}
+          aria-valuemax={leftDashboardMaxWidth}
+          aria-valuenow={leftDashboardWidth}
+          tabIndex={0}
+          onMouseDown={handleLeftDashboardResize}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              setLeftDashboardWidth((width) => clamp(width - 16, leftDashboardMinWidth, leftDashboardMaxWidth));
+            }
+            if (event.key === 'ArrowRight') {
+              setLeftDashboardWidth((width) => clamp(width + 16, leftDashboardMinWidth, leftDashboardMaxWidth));
+            }
+          }}
+        />
+
         <section
           className={cx(
             'relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[#101114]',
@@ -2181,7 +2359,30 @@ export default function CalmEditorPrototype({
           </div>
 
           {showDrawer && (
-            <div className="h-[164px] min-h-[164px] border-t border-[var(--border)] bg-[var(--bg-surface)]">
+            <>
+              <div
+                className="relative z-20 h-[6px] shrink-0 cursor-row-resize bg-transparent transition-colors hover:bg-[var(--brand)] hover:opacity-60 active:bg-[var(--brand)] active:opacity-60 focus-visible:bg-[var(--brand)] focus-visible:outline-none"
+                role="separator"
+                aria-label="Resize bottom dashboard"
+                aria-orientation="horizontal"
+                aria-valuemin={bottomDashboardMinHeight}
+                aria-valuemax={bottomDashboardMaxHeight}
+                aria-valuenow={bottomDashboardHeight}
+                tabIndex={0}
+                onMouseDown={handleBottomDashboardResize}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowUp') {
+                    setBottomDashboardHeight((height) => clamp(height + 16, bottomDashboardMinHeight, bottomDashboardMaxHeight));
+                  }
+                  if (event.key === 'ArrowDown') {
+                    setBottomDashboardHeight((height) => clamp(height - 16, bottomDashboardMinHeight, bottomDashboardMaxHeight));
+                  }
+                }}
+              />
+              <div
+                className="shrink-0 border-t border-[var(--border)] bg-[var(--bg-surface)]"
+                style={{ height: bottomDashboardHeight }}
+              >
               <div className="flex h-9 items-center justify-between border-b border-[var(--border)] px-2">
                 <div className="flex items-center gap-1">
                   {(['console', 'problems', 'tasks', 'assets'] as BottomTab[]).map((tab) => (
@@ -2203,7 +2404,7 @@ export default function CalmEditorPrototype({
                   Hide
                 </button>
               </div>
-              <div className="h-[124px] overflow-auto">
+              <div className="overflow-auto" style={{ height: Math.max(0, bottomDashboardHeight - 40) }}>
                 {bottomTab === 'problems' && visibleProblems.map((problem) => (
                   <div key={problem.title} className="grid grid-cols-[20px_1fr_auto] items-center gap-2 border-b border-[rgba(212,212,216,0.08)] px-3 py-2 text-[12px]">
                     {problem.severity === 'error' ? <IconAlertCircle className="text-[var(--danger)]" /> : <IconAlertTriangle className="text-[var(--warning)]" />}
@@ -2240,10 +2441,34 @@ export default function CalmEditorPrototype({
                 ))}
               </div>
             </div>
+            </>
           )}
         </section>
 
-        <aside className="flex w-[326px] shrink-0 flex-col border-l border-[var(--border)] bg-[rgba(21,22,25,0.94)]">
+        <div
+          className="relative z-20 w-[6px] shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--brand)] hover:opacity-60 active:bg-[var(--brand)] active:opacity-60 focus-visible:bg-[var(--brand)] focus-visible:outline-none"
+          role="separator"
+          aria-label="Resize right dashboard"
+          aria-orientation="vertical"
+          aria-valuemin={rightDashboardMinWidth}
+          aria-valuemax={rightDashboardMaxWidth}
+          aria-valuenow={rightDashboardWidth}
+          tabIndex={0}
+          onMouseDown={handleRightDashboardResize}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              setRightDashboardWidth((width) => clamp(width + 16, rightDashboardMinWidth, rightDashboardMaxWidth));
+            }
+            if (event.key === 'ArrowRight') {
+              setRightDashboardWidth((width) => clamp(width - 16, rightDashboardMinWidth, rightDashboardMaxWidth));
+            }
+          }}
+        />
+
+        <aside
+          className="flex shrink-0 flex-col border-l border-[var(--border)] bg-[rgba(21,22,25,0.94)]"
+          style={{ width: rightDashboardWidth }}
+        >
           <div className="flex h-14 items-center justify-between border-b border-[var(--border)] px-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -2406,7 +2631,7 @@ export default function CalmEditorPrototype({
         <div className="flex items-center gap-3">
           <span>{visibleProblems.length} problems</span>
           <span>{entities.reduce((count, entity) => count + (entity.components?.length ?? 1), 0)} components</span>
-          <span>60 FPS</span>
+          <span>{measuredFps === null ? '--' : measuredFps} FPS</span>
         </div>
       </footer>
 

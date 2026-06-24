@@ -555,6 +555,14 @@ scope_no_entity = "No entity pinned"
 ai_scope_local_project = "Local project context"
 policy_session_allow = "Allowed for this session"
 policy_ask_write = "Ask before writing"
+approval_mode_prompt = "How should Varg actions be approved?"
+approval_mode_learn_more = "Learn more"
+approval_mode_ask = "Ask for approval"
+approval_mode_ask_desc = "Always ask before editing files or running commands"
+approval_mode_auto_safe = "Approve for me"
+approval_mode_auto_safe_desc = "Only ask for actions detected as potentially unsafe"
+approval_mode_full_access = "Full access"
+approval_mode_full_access_desc = "Unrestricted access to the project, commands, and network"
 
 # Changes workspace
 changes_bundle_title = "Proposed change bundle"
@@ -622,7 +630,7 @@ input_queue_next = "Queue the next instruction"
 input_describe = "Describe the outcome"
 input_queue_hint = "It will run after the current step"
 input_send_hint = "Enter to send · Shift+Enter for a new line"
-ai_input_placeholder = "Build, change, inspect, or fix something... Use @ to reference an entity."
+ai_input_placeholder = "Do Anything"
 
 # Thinking effort
 thinking_effort_title = "Thinking/reasoning effort level"

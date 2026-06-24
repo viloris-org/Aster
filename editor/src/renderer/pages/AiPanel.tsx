@@ -16,7 +16,7 @@ import {
   IconSend, IconBot, IconCheck, IconX, IconAlertCircle,
   IconChevronDown, IconChevronRight, IconInfo, IconLoader,
   IconSave, IconUndo, IconPlay, IconSettings, IconSparkles, IconRefresh,
-  IconBrain, IconFile,
+  IconBrain, IconFile, IconHand, IconShield, IconShieldCheck,
 } from '../icons';
 
 const cls = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
@@ -25,7 +25,6 @@ const panelIconButtonClass = 'flex h-[22px] w-[22px] cursor-pointer items-center
 const contextTagClass = 'rounded-[10px] bg-[var(--bg-base)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]';
 const contextSelectedTagClass = 'bg-[var(--accent)] text-white';
 const contextKnowledgeTagClass = 'border border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.08)] text-[#86efac]';
-const compactSelectClass = 'max-w-40 cursor-pointer truncate whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-2 py-[3px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none hover:border-[var(--accent)] focus:border-[var(--accent)]';
 const evidenceToggleClass = 'flex w-fit cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-0 py-0 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)]';
 const toolCallBaseClass = 'flex items-center gap-1.5 rounded-md px-2.5 py-1 font-[var(--font-mono)] text-xs';
 const toolCallClass = (complete: boolean) => cls(toolCallBaseClass, complete ? 'border border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.1)] text-[#4ade80]' : 'border border-[var(--border-light)] bg-[var(--accent-dim)] text-[var(--text-secondary)]');
@@ -127,6 +126,7 @@ export interface CompletedChangeBundle {
 export type AiStatus = 'idle' | 'thinking' | 'ready' | 'executing' | 'complete' | 'error';
 type AiWorkspaceView = 'chat' | 'changes';
 type ThinkingEffort = 'off' | 'low' | 'medium' | 'high';
+type ApprovalMode = 'ask' | 'auto-safe' | 'full-access';
 
 interface AiMessage {
   id: string;
@@ -205,6 +205,7 @@ interface CopilotSettingsFull {
 
 function useModelOptions() {
   const [currentModel, setCurrentModel] = useState<string>('');
+  const [currentProvider, setCurrentProvider] = useState<string>('stub');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
@@ -215,7 +216,8 @@ function useModelOptions() {
     try {
       const settings = await rpc<CopilotSettingsFull>('app/get_copilot_settings').catch(() => null);
       if (!settings) { setLoading(false); return; }
-      setCurrentModel(settings.model);
+      setCurrentProvider(settings.provider);
+      setCurrentModel(settings.provider === 'stub' ? 'none' : settings.model);
 
       let providerModels: ModelInfo[] = [];
 
@@ -255,51 +257,13 @@ function useModelOptions() {
 
   return {
     currentModel,
+    currentProvider,
     models,
     loading,
     discoveryError,
     loadModels,
     selectModel,
   };
-}
-
-function ModelSelector() {
-  const { t } = useTranslation();
-  const {
-    currentModel,
-    models,
-    loading,
-    discoveryError,
-    loadModels,
-    selectModel,
-  } = useModelOptions();
-
-  if (loading) return <span className="text-[var(--text-secondary)] [&_svg]:h-3 [&_svg]:w-3"><IconLoader className={commonSpinnerClass} /></span>;
-
-  const known = models.some(m => m.id === currentModel);
-
-  return (
-    <div className="flex items-center">
-      <select
-        className={compactSelectClass}
-        value={known ? currentModel : currentModel ? '__custom__' : ''}
-        title={discoveryError ?? t('model_available_title')}
-        onChange={(e) => {
-          const val = e.target.value;
-          if (val === '__refresh__') { loadModels(); return; }
-          selectModel(val === '__custom__' ? currentModel : val);
-        }}
-      >
-        {models.length === 0 && !currentModel && <option value="">{t('model_none')}</option>}
-        {models.map(m => (
-          <option key={m.id} value={m.id}>{m.display_name}</option>
-        ))}
-        {!known && currentModel && <option value="__custom__">{currentModel}</option>}
-        {discoveryError && <option value="__discovery_error__" disabled>{t('model_discovery_failed')}</option>}
-        <option value="__refresh__">↻ {t('model_refresh')}</option>
-      </select>
-    </div>
-  );
 }
 
 function CompactModelMenuItem({
@@ -317,28 +281,44 @@ function CompactModelMenuItem({
     <button
       type="button"
       className={cls(
-        'grid w-full cursor-pointer grid-cols-[16px_minmax(0,1fr)] items-start gap-2 border-0 bg-transparent px-2.5 py-2 text-left font-[var(--font-sans)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
-        active && 'bg-[var(--accent-dim)] text-[var(--text-primary)]',
+        'grid min-h-7 w-full cursor-pointer grid-cols-[minmax(0,1fr)_16px] items-center gap-2 border-0 bg-transparent px-2.5 py-1 text-left font-[var(--font-sans)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+        active && 'text-[var(--text-primary)]',
       )}
       onClick={onClick}
     >
-      <span className="mt-0.5 grid h-4 w-4 place-items-center text-[var(--accent)]">
-        {active && <IconCheck size={12} />}
-      </span>
       <span className="grid min-w-0 gap-0.5">
         <span className="truncate font-medium">{title}</span>
         {description && <span className="line-clamp-2 text-[10px] leading-[1.35] text-[var(--text-muted)]">{description}</span>}
+      </span>
+      <span className="grid h-4 w-4 place-items-center text-[var(--text-secondary)]">
+        {active && <IconCheck size={12} />}
       </span>
     </button>
   );
 }
 
-function CompactModelMenu() {
+const reasoningMenuOptions: Array<{ value: ThinkingEffort; label: string; titleKey: string }> = [
+  { value: 'off', label: 'Off', titleKey: 'thinking_off' },
+  { value: 'low', label: 'Low', titleKey: 'thinking_low' },
+  { value: 'medium', label: 'Medium', titleKey: 'thinking_medium' },
+  { value: 'high', label: 'High', titleKey: 'thinking_high' },
+];
+
+function CompactModelMenu({
+  thinkingEffort,
+  onThinkingEffortChange,
+  compact = false,
+}: {
+  thinkingEffort: ThinkingEffort;
+  onThinkingEffortChange: (value: ThinkingEffort) => void;
+  compact?: boolean;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const {
     currentModel,
+    currentProvider,
     models,
     loading,
     discoveryError,
@@ -358,49 +338,83 @@ function CompactModelMenu() {
   }, [open]);
 
   const currentModelInfo = models.find(model => model.id === currentModel);
-  const modelLabel = currentModelInfo?.display_name ?? currentModel ?? t('model_none');
-  const known = models.some(model => model.id === currentModel);
+  const noProviderConfigured = currentProvider === 'stub';
+  const modelLabel = noProviderConfigured ? 'none' : currentModelInfo?.display_name ?? currentModel ?? t('model_none');
+  const known = !noProviderConfigured && models.some(model => model.id === currentModel);
+  const reasoningLabel = reasoningMenuOptions.find(option => option.value === thinkingEffort)?.label ?? 'Medium';
 
   return (
     <div ref={menuRef} className="relative min-w-0">
       <button
         type="button"
-        className="flex h-7 max-w-[190px] cursor-pointer items-center gap-1.5 rounded-md border border-[var(--border)] bg-[rgba(255,255,255,0.04)] px-2 text-[11px] text-[var(--text-primary)] transition-colors hover:border-[var(--border-light)] hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-dim)]"
+        className={cls(
+          'flex h-7 max-w-[220px] cursor-pointer items-center gap-1.5 rounded-md border border-[var(--border)] bg-[rgba(255,255,255,0.04)] px-2 text-[11px] text-[var(--text-primary)] transition-colors hover:border-[var(--border-light)] hover:bg-[var(--bg-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-dim)]',
+          compact && 'border-0 bg-transparent px-1 text-[var(--text-secondary)] hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-primary)]',
+        )}
         onClick={() => setOpen(value => !value)}
-        title={modelLabel || t('model_none')}
+        title={`${modelLabel || t('model_none')} / ${t('thinking_effort_title')}: ${reasoningLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
       >
         <IconBrain size={12} />
         <span className="min-w-0 truncate">{modelLabel || t('model_none')}</span>
+        <span className="shrink-0 text-[var(--text-muted)]">{reasoningLabel}</span>
         <IconChevronDown size={12} />
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-[120] mb-2 w-[260px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] shadow-[0_18px_48px_rgba(0,0,0,0.42)]" role="menu">
-          <div className="px-2.5 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">{t('model_available_title')}</div>
+        <div className="absolute bottom-full left-0 z-[120] mb-2 w-[208px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] py-1 shadow-[0_18px_48px_rgba(0,0,0,0.42)]" role="menu">
+          <section className="py-1">
+            <div className="px-2.5 pb-1 text-[10px] text-[var(--text-muted)]">Reasoning</div>
+            <div className="grid">
+              {reasoningMenuOptions.map(option => {
+                const active = option.value === thinkingEffort;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={cls(
+                      'grid h-7 cursor-pointer grid-cols-[minmax(0,1fr)_16px] items-center gap-2 border-0 bg-transparent px-2.5 text-left font-[var(--font-sans)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+                      active && 'text-[var(--text-primary)]',
+                    )}
+                    onClick={() => onThinkingEffortChange(option.value)}
+                    title={t(option.titleKey)}
+                    aria-pressed={active}
+                  >
+                    <span>{option.label}</span>
+                    <span className="grid h-4 w-4 place-items-center text-[var(--text-secondary)]">
+                      {active && <IconCheck size={12} />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+          <div className="mx-2 h-px bg-[var(--border)]" />
+          <section className="py-1">
+            <div className="flex items-center justify-between gap-2 px-2.5 pb-1">
+              <div className="text-[10px] text-[var(--text-muted)]">Model</div>
               <button
                 type="button"
-                className="flex cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                className="flex h-5 cursor-pointer items-center gap-1 rounded border-0 bg-transparent px-1 text-[10px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={loadModels}
+                title={t('model_refresh')}
               >
                 <IconRefresh size={10} />
                 <span>{t('model_refresh_short')}</span>
               </button>
             </div>
-            <div className="mt-1 max-h-[168px] overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg-base)]">
+            <div className="max-h-[196px] overflow-y-auto">
               {loading && (
                 <div className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] text-[var(--text-muted)]">
                   <IconLoader className={commonSpinnerClass} size={12} />
                   <span>{t('model_loading')}</span>
                 </div>
               )}
-              {!loading && models.length === 0 && !currentModel && (
-                <div className="px-2.5 py-2 text-[11px] text-[var(--text-muted)]">{t('model_none')}</div>
+              {!loading && (noProviderConfigured || (models.length === 0 && !currentModel)) && (
+                <div className="px-2.5 py-2 text-[11px] text-[var(--text-muted)]">none</div>
               )}
-              {!loading && models.map(model => (
+              {!loading && !noProviderConfigured && models.map(model => (
                 <CompactModelMenuItem
                   key={model.id}
                   active={model.id === currentModel}
@@ -421,12 +435,12 @@ function CompactModelMenu() {
                 />
               )}
               {discoveryError && (
-                <div className="border-t border-[var(--border)] px-2.5 py-2 text-[10px] leading-[1.35] text-[var(--warning)]" title={discoveryError}>
+                <div className="mx-2 mt-1 border-t border-[var(--border)] px-0 py-1.5 text-[10px] leading-[1.35] text-[var(--warning)]" title={discoveryError}>
                   {t('model_discovery_failed')}
                 </div>
               )}
             </div>
-          </div>
+          </section>
         </div>
       )}
     </div>
@@ -636,6 +650,95 @@ interface PlanApprovalCtx {
 
 const PlanApprovalContext = createContext<PlanApprovalCtx | null>(null);
 
+const approvalModeStorageKey = 'aster.aiApprovalMode';
+
+function readStoredApprovalMode(): ApprovalMode {
+  try {
+    const stored = localStorage.getItem(approvalModeStorageKey);
+    if (stored === 'auto-safe' || stored === 'full-access') return stored;
+  } catch { /* localStorage unavailable */ }
+  return 'ask';
+}
+
+function approvalModeIcon(mode: ApprovalMode) {
+  if (mode === 'full-access') return <IconShieldCheck size={13} />;
+  if (mode === 'auto-safe') return <IconShield size={13} />;
+  return <IconHand size={13} />;
+}
+
+function ApprovalModeMenu({
+  mode,
+  onChange,
+}: {
+  mode: ApprovalMode;
+  onChange: (mode: ApprovalMode) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const options: Array<{ mode: ApprovalMode; title: string; desc: string }> = [
+    { mode: 'ask', title: t('approval_mode_ask'), desc: t('approval_mode_ask_desc') },
+    { mode: 'auto-safe', title: t('approval_mode_auto_safe'), desc: t('approval_mode_auto_safe_desc') },
+    { mode: 'full-access', title: t('approval_mode_full_access'), desc: t('approval_mode_full_access_desc') },
+  ];
+  const selected = options.find(option => option.mode === mode) ?? options[0];
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-[11px] font-medium text-[var(--warning)] hover:bg-[var(--bg-hover)]"
+        onClick={() => setOpen(current => !current)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={selected.desc}
+      >
+        {approvalModeIcon(mode)}
+        <span className="max-w-[124px] truncate">{selected.title}</span>
+        <IconChevronDown size={12} />
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-[calc(100%+6px)] left-0 z-[120] w-[388px] max-w-[calc(100vw-32px)] rounded-xl border border-[var(--border)] bg-[#171716] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,0.42)]"
+          role="menu"
+        >
+          <div className="flex items-center justify-between px-2 py-1.5 text-[11px] text-[var(--text-muted)]">
+            <span>{t('approval_mode_prompt')}</span>
+            <button
+              type="button"
+              className="cursor-pointer border-0 bg-transparent p-0 text-[11px] text-[var(--text-secondary)] underline underline-offset-2 hover:text-[var(--text-primary)]"
+              onClick={() => setOpen(false)}
+            >
+              {t('approval_mode_learn_more')}
+            </button>
+          </div>
+          <div className="grid gap-0.5">
+            {options.map(option => (
+              <button
+                key={option.mode}
+                type="button"
+                className="grid cursor-pointer grid-cols-[22px_minmax(0,1fr)_18px] items-center gap-2 rounded-lg border-0 bg-transparent px-2 py-2 text-left font-[var(--font-sans)] hover:bg-[var(--bg-hover)]"
+                onClick={() => {
+                  onChange(option.mode);
+                  setOpen(false);
+                }}
+                role="menuitemradio"
+                aria-checked={mode === option.mode}
+              >
+                <span className="text-[var(--text-muted)]">{approvalModeIcon(option.mode)}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">{option.title}</span>
+                  <span className="block truncate text-[11px] text-[var(--text-muted)]">{option.desc}</span>
+                </span>
+                {mode === option.mode && <IconCheck size={14} className="text-[var(--text-secondary)]" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Inline Cards ───────────────────────────────────────────────────────────
 
 function InlineCard({ card }: { card: AiCard }) {
@@ -670,9 +773,10 @@ function PlanCard({ data }: { data: CopilotPlan }) {
       {data.operations.map((op) => {
         const isRead = op.permission_kind === 'read';
         const isUnsupported = op.permission_kind === 'unsupported';
+        const isAutoAllowed = op.requires_approval === false;
         const isApproved = ctx?.approved.has(op.index);
         const isDenied = ctx?.denied.has(op.index);
-        const showControls = ctx?.active && !isRead && !isUnsupported;
+        const showControls = ctx?.active && !isRead && !isUnsupported && !isAutoAllowed;
 
         return (
           <div key={op.index} className="flex min-h-7 items-center gap-1.5 py-[5px] text-xs">
@@ -706,7 +810,7 @@ function PlanCard({ data }: { data: CopilotPlan }) {
                 )}
               </div>
             )}
-            {isRead && (
+            {(isRead || isAutoAllowed) && (
               <span className={planItemStateClass('auto')}>{t('op_auto')}</span>
             )}
             {isUnsupported && (
@@ -847,7 +951,7 @@ export default function AiPanel({
   const [plan, setPlan] = useState<CopilotPlan | null>(null);
   const [approved, setApproved] = useState<Set<number>>(new Set());
   const [denied, setDenied] = useState<Set<number>>(new Set());
-  const [sessionWritesAllowed, setSessionWritesAllowed] = useState(false);
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>(() => readStoredApprovalMode());
   const [entityDetails, setEntityDetails] = useState<EntityDetails | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -908,6 +1012,12 @@ export default function AiPanel({
   }, []);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(approvalModeStorageKey, approvalMode);
+    } catch { /* localStorage unavailable */ }
+  }, [approvalMode]);
 
   useEffect(() => {
     listKnowledge()
@@ -1018,7 +1128,7 @@ export default function AiPanel({
 
     try {
       // Build RPC params with structured entity context
-      const planParams: Record<string, unknown> = { prompt };
+      const planParams: Record<string, unknown> = { prompt, approval_mode: approvalMode };
       if (entityDetails) {
         planParams.selected_entity = entityDetails;
       }
@@ -1097,9 +1207,11 @@ export default function AiPanel({
 
       const autoApproved = new Set<number>();
       result.operations.forEach((op) => {
-        if (op.permission_kind === 'read'
-          || (op.permission_kind === 'write' && sessionWritesAllowed)
-          || (op.permission_kind === 'command' && op.permanently_allowed)) {
+        const needsApproval = op.requires_approval ?? (
+          op.permission_kind !== 'read'
+          && !(op.permission_kind === 'command' && op.permanently_allowed)
+        );
+        if (!needsApproval) {
           autoApproved.add(op.index);
         }
       });
@@ -1156,7 +1268,7 @@ export default function AiPanel({
       setInterruptRequested(false);
       cancelRef.current = null;
     }
-  }, [entityDetails, addMessage, sessionWritesAllowed, thinkingEffort, selectedKnowledgeIds]);
+  }, [entityDetails, addMessage, approvalMode, thinkingEffort, selectedKnowledgeIds]);
 
   const queueOrSubmitPrompt = useCallback((prompt: string) => {
     const trimmed = prompt.trim();
@@ -1206,6 +1318,7 @@ export default function AiPanel({
     try {
       const result = await rpc<ApplyResult>('copilot/apply', {
         approved_indices: indices,
+        approval_mode: approvalMode,
       });
 
       setStatus('complete');
@@ -1236,7 +1349,7 @@ export default function AiPanel({
       setStatus('error');
       addMessage('assistant', t('ai_execution_failed'), [{ type: 'error', data: msg }]);
     }
-  }, [approved, addMessage, onSceneChanged]);
+  }, [approved, addMessage, onSceneChanged, approvalMode]);
 
   const undoLastAiEdit = useCallback(async () => {
     setStatus('executing');
@@ -1278,7 +1391,7 @@ export default function AiPanel({
     }
 
     if (decision === 'session') {
-      setSessionWritesAllowed(true);
+      setApprovalMode('auto-safe');
       setApproved(current => {
         const next = new Set(current);
         plan?.operations
@@ -1669,13 +1782,15 @@ export default function AiPanel({
                     <span className={permissionStateClass(true)}>{t('op_allowed_auto')}</span>
                   ) : operation.permission_kind === 'unsupported' ? (
                     <span className={permissionStateClass(false)}>{t('op_unsupported')}</span>
-                  ) : approved.has(operation.index) ? (
-                    <span className={permissionStateClass(true)}>
-                      {operation.permission_kind === 'command' && operation.permanently_allowed ? t('op_always_allowed') : t('op_allowed')}
-                    </span>
-                  ) : denied.has(operation.index) ? (
-                    <span className={permissionStateClass(false)}>{t('op_denied_once')}</span>
-                  ) : operation.permission_kind === 'write' ? <>
+            ) : approved.has(operation.index) ? (
+              <span className={permissionStateClass(true)}>
+                {operation.permission_kind === 'command' && operation.permanently_allowed ? t('op_always_allowed') : t('op_allowed')}
+              </span>
+            ) : operation.requires_approval === false ? (
+              <span className={permissionStateClass(true)}>{t('op_allowed_auto')}</span>
+            ) : denied.has(operation.index) ? (
+              <span className={permissionStateClass(false)}>{t('op_denied_once')}</span>
+            ) : operation.permission_kind === 'write' ? <>
                     <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'once')}>{t('btn_allow_once')}</button>
                     <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'session')}>{t('btn_allow_session')}</button>
                     <button className={permissionButtonClass} onClick={() => decideOperation(operation, 'deny')}>{t('btn_deny_once')}</button>
@@ -1938,33 +2053,12 @@ export default function AiPanel({
           </button>
         </div>
         <div className={cls("mt-2 flex items-center gap-2", compact && "px-1 text-[11px]")}>
-          {compact && (
-            <span className="flex h-7 items-center gap-1.5 rounded-md px-1.5 text-[var(--warning)]" title={t('policy_ask_write')}>
-              <IconAlertCircle size={12} />
-              <span>{t('policy_ask_write')}</span>
-            </span>
-          )}
-          {compact ? (
-            <CompactModelMenu />
-          ) : (
-            <>
-              <ModelSelector />
-              <div className="flex items-center gap-1 text-[var(--text-secondary)] [&_svg]:shrink-0">
-                <IconBrain size={12} />
-                <select
-                  className="cursor-pointer whitespace-nowrap rounded-md border border-[var(--border)] bg-[var(--bg-base)] px-2 py-[3px] font-[var(--font-sans)] text-[11px] text-[var(--text-primary)] outline-none hover:border-[var(--accent)] focus:border-[var(--accent)]"
-                  value={thinkingEffort}
-                  onChange={(e) => setThinkingEffort(e.target.value as ThinkingEffort)}
-                  title={t('thinking_effort_title')}
-                >
-                  <option value="off">{t('thinking_off')}</option>
-                  <option value="low">{t('thinking_low')}</option>
-                  <option value="medium">{t('thinking_medium')}</option>
-                  <option value="high">{t('thinking_high')}</option>
-                </select>
-              </div>
-            </>
-          )}
+          <ApprovalModeMenu mode={approvalMode} onChange={setApprovalMode} />
+          <CompactModelMenu
+            thinkingEffort={thinkingEffort}
+            onThinkingEffortChange={setThinkingEffort}
+            compact={compact}
+          />
         </div>
         {compact && (
           <div className="mt-1 flex items-center gap-1.5 px-1 text-[11px] text-[var(--text-muted)]">

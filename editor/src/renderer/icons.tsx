@@ -143,6 +143,22 @@ export const IconInfo = icon('0 0 24 24', <>
   <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
 </>);
 
+export const IconHand = icon('0 0 24 24', <>
+  <path d="M18 11.5V9a2 2 0 0 0-2-2 2 2 0 0 0-2 2v1" />
+  <path d="M14 10V7a2 2 0 0 0-4 0v3" />
+  <path d="M10 10V8a2 2 0 0 0-4 0v7a6 6 0 0 0 6 6h1a7 7 0 0 0 7-7v-2.5a2 2 0 0 0-2-2z" />
+  <path d="M6 13 4.8 11.8a2 2 0 0 0-2.8 2.8L6.8 19" />
+</>);
+
+export const IconShield = icon('0 0 24 24', <>
+  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+</>);
+
+export const IconShieldCheck = icon('0 0 24 24', <>
+  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  <path d="m9 12 2 2 4-5" />
+</>);
+
 export const IconLoader = ({ size = 14, className }: IconProps = {}) => (
   <svg
     viewBox="0 0 24 24"

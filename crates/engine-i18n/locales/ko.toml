@@ -545,6 +545,14 @@ scope_scene_snapshot = "씬 스냅샷"
 scope_no_entity = "엔티티 미고정"
 policy_session_allow = "이 세션에서 허용"
 policy_ask_write = "쓰기 전 확인"
+approval_mode_prompt = "How should Varg actions be approved?"
+approval_mode_learn_more = "Learn more"
+approval_mode_ask = "Ask for approval"
+approval_mode_ask_desc = "Always ask before editing files or running commands"
+approval_mode_auto_safe = "Approve for me"
+approval_mode_auto_safe_desc = "Only ask for actions detected as potentially unsafe"
+approval_mode_full_access = "Full access"
+approval_mode_full_access_desc = "Unrestricted access to the project, commands, and network"
 
 # Changes workspace
 changes_bundle_title = "제안된 변경 번들"
@@ -607,7 +615,7 @@ input_queue_next = "다음 지시 대기"
 input_describe = "결과 설명"
 input_queue_hint = "현재 단계 후에 실행됩니다"
 input_send_hint = "Enter로 전송 · Shift+Enter로 줄바꿈"
-ai_input_placeholder = "구축, 변경, 검사 또는 수정... @로 엔티티를 참조하세요."
+ai_input_placeholder = "Do Anything"
 
 # Thinking effort
 thinking_effort_title = "사고/추론 강도 수준"

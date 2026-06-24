@@ -194,7 +194,7 @@ pub struct CopilotSettings {
 }
 
 fn default_copilot_model() -> String {
-    "claude-sonnet-4-20250514".to_owned()
+    "none".to_owned()
 }
 
 fn default_copilot_max_tokens() -> u32 {
@@ -1515,6 +1515,14 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.provider, CopilotProvider::OpenAI);
+    }
+
+    #[test]
+    fn default_copilot_settings_use_no_model_until_provider_is_configured() {
+        let settings = CopilotSettings::default();
+
+        assert_eq!(settings.provider, CopilotProvider::Stub);
+        assert_eq!(settings.model, "none");
     }
 
     #[test]

@@ -545,6 +545,14 @@ scope_scene_snapshot = "場景快照"
 scope_no_entity = "未固定實體"
 policy_session_allow = "本次工作階段允許"
 policy_ask_write = "寫入前詢問"
+approval_mode_prompt = "Varg 操作應如何批准？"
+approval_mode_learn_more = "了解更多"
+approval_mode_ask = "請求批准"
+approval_mode_ask_desc = "編輯檔案或執行命令前始終詢問"
+approval_mode_auto_safe = "為我批准"
+approval_mode_auto_safe_desc = "僅對偵測為可能不安全的操作詢問"
+approval_mode_full_access = "完整存取"
+approval_mode_full_access_desc = "不受限制地存取專案、命令和網路"
 
 # Changes workspace
 changes_bundle_title = "提議的變更套件"
@@ -607,7 +615,7 @@ input_queue_next = "排隊下一條指令"
 input_describe = "描述結果"
 input_queue_hint = "將在當前步驟之後執行"
 input_send_hint = "Enter 傳送 · Shift+Enter 換行"
-ai_input_placeholder = "建構、更改、檢查或修復某些內容... 使用 @ 引用實體。"
+ai_input_placeholder = "Do Anything"
 
 # Thinking effort
 thinking_effort_title = "思考/推理強度級別"

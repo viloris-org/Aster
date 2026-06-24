@@ -69,6 +69,17 @@ impl PermissionPolicy {
         }
     }
 
+    /// Creates a direct active-project write policy with process and network access.
+    pub const fn full_access() -> Self {
+        Self {
+            write_mode: AgentWriteMode::Direct,
+            filesystem_write: true,
+            process_execution: true,
+            network: true,
+            direct_write: true,
+        }
+    }
+
     /// Validates whether the policy allows the requested write mode.
     pub fn require_write_mode(&self, requested: AgentWriteMode) -> EngineResult<()> {
         if self.write_mode == requested {

@@ -560,6 +560,14 @@ scope_no_entity = "未固定实体"
 ai_scope_local_project = "本地项目上下文"
 policy_session_allow = "本次会话允许"
 policy_ask_write = "写入前询问"
+approval_mode_prompt = "Varg 操作应如何批准？"
+approval_mode_learn_more = "了解更多"
+approval_mode_ask = "请求批准"
+approval_mode_ask_desc = "编辑文件或运行命令前始终询问"
+approval_mode_auto_safe = "为我批准"
+approval_mode_auto_safe_desc = "仅对检测为可能不安全的操作询问"
+approval_mode_full_access = "完全访问"
+approval_mode_full_access_desc = "不受限制地访问项目、命令和网络"
 
 # Changes workspace
 changes_bundle_title = "提议的变更包"
@@ -627,7 +635,7 @@ input_queue_next = "排队下一条指令"
 input_describe = "描述结果"
 input_queue_hint = "将在当前步骤之后运行"
 input_send_hint = "Enter 发送 · Shift+Enter 换行"
-ai_input_placeholder = "构建、更改、检查或修复某些内容... 使用 @ 引用实体。"
+ai_input_placeholder = "Do Anything"
 
 # Thinking effort
 thinking_effort_title = "思考/推理强度级别"

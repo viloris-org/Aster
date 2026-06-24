@@ -1271,21 +1271,23 @@ export default function QuestPage({
       let models: QuestModelOption[] = [];
       if (provider) {
         models = await rpc<QuestModelOption[]>('app/detect_models', { provider }).catch(() => []);
-      }
-      if (models.length === 0) {
-        const registry = await rpc<{ providers: Array<{ provider: string; models: QuestModelOption[] }> }>('app/get_model_registry')
-          .catch(() => ({ providers: [] }));
-        models = registry.providers.flatMap(meta => meta.models.map(model => ({ ...model, provider: model.provider || meta.provider })));
+        if (models.length === 0) {
+          const registry = await rpc<{ providers: Array<{ provider: string; models: QuestModelOption[] }> }>('app/get_model_registry')
+            .catch(() => ({ providers: [] }));
+          models = registry.providers
+            .filter(meta => meta.provider === provider)
+            .flatMap(meta => meta.models.map(model => ({ ...model, provider: model.provider || meta.provider })));
+        }
       }
       if (!canceled) {
         setModelOptions(models);
-        const preferred = settings?.model || models[0]?.id || '';
+        const preferred = provider ? settings?.model || models[0]?.id || '' : 'none';
         setModelConfig(prev => {
           const selectedModel = models.find(model => model.id === (prev.model || preferred));
           return {
             ...prev,
-            provider: selectedModel?.provider ?? provider ?? prev.provider,
-            model: prev.model || preferred,
+            provider: selectedModel?.provider ?? provider ?? 'stub',
+            model: provider ? prev.model || preferred : 'none',
             api_endpoint: prev.api_endpoint ?? settings?.api_endpoint ?? null,
             max_tokens: selectedModel?.default_max_tokens ?? settings?.max_tokens ?? prev.max_tokens,
           };
@@ -1317,7 +1319,7 @@ export default function QuestPage({
 
   const modelSelectOptions = useMemo<QuestSelectOption[]>(() => {
     if (modelOptions.length === 0) {
-      return [{ value: '', label: t('quest_no_models_available') }];
+      return [{ value: 'none', label: 'none' }];
     }
     return modelOptions.map(option => ({
       value: option.id,

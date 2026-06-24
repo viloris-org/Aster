@@ -9,8 +9,9 @@ use std::time::{Duration, Instant};
 use engine_core::math::{Transform, Vec3};
 use engine_core::{EngineConfig, EntityId};
 use engine_render::{
-    PresentStrategy, RenderCamera, RenderDevice, RenderFrame, RenderPerformanceConfig,
-    RenderProjection,
+    AntiAliasingMode, PresentStrategy, RenderCamera, RenderDevice, RenderFrame,
+    RenderPerformanceConfig, RenderProjection, RenderQualityMode, RenderScalingContext,
+    RenderScalingSettings, UpscalerKind,
 };
 use engine_render_wgpu::WgpuRenderDevice;
 use runtime_min::RuntimeServices;
@@ -632,8 +633,8 @@ impl SceneApp {
             .into_runtime(renderer)
             .map_err(|error| format!("runtime: {error}"))?;
         runtime.set_render_scaling(
-            runtime_min::runtime_scaling_settings_from_env(),
-            runtime_min::runtime_scaling_context(),
+            scene_view_render_scaling_settings(),
+            RenderScalingContext::default(),
         );
         self.runtime = Some(runtime);
         self.last_frame = Instant::now();
@@ -989,8 +990,8 @@ impl RawSceneApp {
             .into_runtime(renderer)
             .map_err(|error| format!("runtime: {error}"))?;
         runtime.set_render_scaling(
-            runtime_min::runtime_scaling_settings_from_env(),
-            runtime_min::runtime_scaling_context(),
+            scene_view_render_scaling_settings(),
+            RenderScalingContext::default(),
         );
         self.runtime = Some(runtime);
         self.last_frame = Instant::now();
@@ -1079,6 +1080,18 @@ fn scene_surface_performance_config(mode: &SceneWindowMode) -> RenderPerformance
     config
 }
 
+fn scene_view_render_scaling_settings() -> RenderScalingSettings {
+    RenderScalingSettings {
+        quality: RenderQualityMode::Native,
+        preferred_upscaler: Some(UpscalerKind::Native),
+        dynamic_resolution: false,
+        min_render_scale: 1.0,
+        max_render_scale: 1.0,
+        anti_aliasing: AntiAliasingMode::Off,
+        ..RenderScalingSettings::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1130,6 +1143,18 @@ mod tests {
 
         assert_eq!(config.present_strategy, PresentStrategy::VSync);
         assert_eq!(config.maximum_frame_latency, 2);
+    }
+
+    #[test]
+    fn scene_view_scaling_prefers_crisp_native_preview() {
+        let settings = scene_view_render_scaling_settings();
+
+        assert_eq!(settings.quality, RenderQualityMode::Native);
+        assert_eq!(settings.preferred_upscaler, Some(UpscalerKind::Native));
+        assert!(!settings.dynamic_resolution);
+        assert_eq!(settings.min_render_scale, 1.0);
+        assert_eq!(settings.max_render_scale, 1.0);
+        assert_eq!(settings.anti_aliasing, AntiAliasingMode::Off);
     }
 
     #[test]

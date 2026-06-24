@@ -60,6 +60,42 @@ use quest::{
     ValidationResult, transaction_groups_from_changed_files,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CopilotApprovalMode {
+    Ask,
+    AutoSafe,
+    FullAccess,
+}
+
+impl CopilotApprovalMode {
+    fn from_params(params: &Value) -> Self {
+        match params.get("approval_mode").and_then(Value::as_str) {
+            Some("auto-safe") => Self::AutoSafe,
+            Some("full-access") => Self::FullAccess,
+            _ => Self::Ask,
+        }
+    }
+
+    fn planning_policy(self) -> PermissionPolicy {
+        PermissionPolicy::full_access()
+    }
+
+    fn apply_policy(self) -> PermissionPolicy {
+        match self {
+            Self::FullAccess => PermissionPolicy::full_access(),
+            Self::Ask | Self::AutoSafe => PermissionPolicy::transactional_write(),
+        }
+    }
+
+    fn auto_approves_write(self) -> bool {
+        matches!(self, Self::AutoSafe | Self::FullAccess)
+    }
+
+    fn auto_approves_command(self) -> bool {
+        matches!(self, Self::FullAccess)
+    }
+}
+
 const APP_WINDOW_ICON: Image<'static> = tauri::include_image!("./icons/128x128.png");
 
 const WINDOW_BACKGROUND: &str = "#181818";
@@ -559,6 +595,7 @@ struct PreparedCopilotRequest {
     glm_config: Option<engine_editor::GlmConfig>,
     cached_context: engine_editor::ProjectContext,
     knowledge_entries_used: usize,
+    approval_mode: CopilotApprovalMode,
 }
 
 struct CompletedCopilotRequest {
@@ -567,6 +604,7 @@ struct CompletedCopilotRequest {
     tool_calls: Vec<engine_ai::ToolCall>,
     cached_context: engine_editor::ProjectContext,
     knowledge_entries_used: usize,
+    approval_mode: CopilotApprovalMode,
 }
 
 struct PreparedQuestModelRequest {
@@ -4209,6 +4247,12 @@ impl EditorHost {
 
     fn get_copilot_settings(&self, _params: &Value) -> EngineResult<Value> {
         let mut value = serde_json::to_value(&self.copilot_settings).unwrap_or_default();
+        if matches!(
+            self.copilot_settings.provider,
+            engine_editor::CopilotProvider::Stub
+        ) {
+            value["model"] = serde_json::json!("none");
+        }
         value["has_api_key"] = serde_json::json!(self.copilot_settings.api_key.is_some());
         Ok(value)
     }
@@ -4233,6 +4277,9 @@ impl EditorHost {
         }
         if !settings.provider.endpoint_configurable() {
             settings.api_endpoint = None;
+        }
+        if matches!(settings.provider, engine_editor::CopilotProvider::Stub) {
+            settings.model = "none".to_owned();
         }
 
         // Persist non-secret settings into durable state
@@ -4543,6 +4590,7 @@ impl EditorHost {
             &response.tool_calls,
             prepared.cached_context,
             prepared.knowledge_entries_used,
+            prepared.approval_mode,
         )
     }
 
@@ -4666,6 +4714,7 @@ impl EditorHost {
             },
             cached_context: session.context,
             knowledge_entries_used: attached_knowledge.len(),
+            approval_mode: CopilotApprovalMode::from_params(params),
         })
     }
 
@@ -4707,17 +4756,15 @@ impl EditorHost {
         tool_calls: &[engine_ai::ToolCall],
         cached_context: engine_editor::ProjectContext,
         knowledge_entries_used: usize,
+        approval_mode: CopilotApprovalMode,
     ) -> EngineResult<Value> {
         let mut session = AgentSession::new(cached_context)?;
+        let planning_policy = approval_mode.planning_policy();
 
         let mut plan = if !tool_calls.is_empty() {
-            session.plan_from_tool_calls(
-                tool_calls,
-                response,
-                PermissionPolicy::transactional_write(),
-            )?
+            session.plan_from_tool_calls(tool_calls, response, planning_policy)?
         } else {
-            session.plan_from_response(response, PermissionPolicy::transactional_write())?
+            session.plan_from_response(response, planning_policy)?
         };
 
         let assistant_message = plan
@@ -4743,7 +4790,8 @@ impl EditorHost {
             .enumerate()
             .map(|(i, op)| {
                 let command = match &op.operation {
-                    engine_ai::AgentOperation::ExecuteCommand { command, .. } => {
+                    engine_ai::AgentOperation::ExecuteCommand { command, .. }
+                    | engine_ai::AgentOperation::RunCommand { command, .. } => {
                         Some(command.as_str())
                     }
                     _ => None,
@@ -4766,6 +4814,13 @@ impl EditorHost {
                     "preview": op.preview,
                     "requires_write": op.requires_write,
                     "permission_kind": permission_kind,
+                    "requires_approval": if command.is_some() {
+                        !permanently_allowed && !approval_mode.auto_approves_command()
+                    } else if op.requires_write {
+                        !approval_mode.auto_approves_write()
+                    } else {
+                        false
+                    },
                     "command": command,
                     "permanently_allowed": permanently_allowed,
                 })
@@ -4809,6 +4864,7 @@ impl EditorHost {
     }
 
     fn copilot_apply(&mut self, params: &Value) -> EngineResult<Value> {
+        let approval_mode = CopilotApprovalMode::from_params(params);
         let approved_indices: Vec<usize> = params
             .get("approved_indices")
             .and_then(|v| v.as_array())
@@ -4854,7 +4910,7 @@ impl EditorHost {
             operations: filtered_ops,
             read_only: false,
             requires_write: true,
-            policy: PermissionPolicy::transactional_write(),
+            policy: approval_mode.apply_policy(),
         };
 
         let outcome = session.apply_plan(&apply_plan)?;
@@ -7333,6 +7389,7 @@ fn start_copilot_plan(
         let original_prompt = prepared.original_prompt.clone();
         let cached_context = prepared.cached_context;
         let knowledge_entries_used = prepared.knowledge_entries_used;
+        let approval_mode = prepared.approval_mode;
         let result = engine_ai::providers::create_provider(
             &prepared.provider,
             &prepared.model,
@@ -7390,6 +7447,7 @@ fn start_copilot_plan(
                 tool_calls,
                 cached_context,
                 knowledge_entries_used,
+                approval_mode,
             },
         );
         drop(request_state);
@@ -7423,6 +7481,7 @@ fn finish_copilot_plan(
                 &completed.tool_calls,
                 completed.cached_context,
                 completed.knowledge_entries_used,
+                completed.approval_mode,
             )
         })
         .map_err(|error| error.to_string())
@@ -8047,6 +8106,9 @@ fn open_no_cpu_readback_scene_view(
     );
     state.with_host(|host| {
         update_native_host_layout_state(host, scene_rect, None);
+        let compositor_viewport =
+            editor_compositor::EditorCompositorViewport::from_scene_rect(viewport);
+        host.editor_compositor.set_viewport(compositor_viewport);
         host.poll_scene_window();
         let snapshot = host
             .create_scene_runtime_snapshot()
