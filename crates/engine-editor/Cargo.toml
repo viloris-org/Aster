@@ -9,17 +9,17 @@ rust-version.workspace = true
 
 [features]
 default = []
-editor = ["engine-core/editor"]
+editor = ["engine-assets/importers", "engine-core/editor"]
 agent-tools = ["engine-core/agent-tools"]
 dev-full = ["editor", "agent-tools", "engine-core/dev-full"]
-physics = ["engine-ecs/physics"]
+physics = ["dep:engine-physics", "engine-ecs/physics"]
 
 [dependencies]
-engine-assets.workspace = true
+engine-assets = { workspace = true, default-features = false }
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-i18n.workspace = true
-engine-physics.workspace = true
+engine-physics = { workspace = true, optional = true }
 engine-render.workspace = true
 serde.workspace = true
 serde_json.workspace = true

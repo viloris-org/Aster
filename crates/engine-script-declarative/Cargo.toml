@@ -10,13 +10,12 @@ rust-version.workspace = true
 [features]
 default = []
 script-declarative = []
+physics = ["dep:engine-physics"]
 
 [dependencies]
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-platform.workspace = true
-engine-physics.workspace = true
-engine-assets.workspace = true
-engine-editor.workspace = true
+engine-physics = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

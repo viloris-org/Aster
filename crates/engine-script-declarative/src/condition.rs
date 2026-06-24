@@ -19,10 +19,9 @@ pub struct ConditionContext<'a> {
     pub scene: &'a engine_ecs::Scene,
     /// Current input state.
     pub input: &'a engine_platform::InputState,
+    #[cfg(feature = "physics")]
     /// Current physics backend.
     pub physics: Option<&'a dyn engine_physics::PhysicsBackend>,
-    /// Asset database for resource lookups.
-    pub assets: Option<&'a engine_assets::AssetDatabase>,
     /// Delta time since last frame.
     pub delta_time: f32,
 }
@@ -511,19 +510,28 @@ impl ConditionExpr {
                 direction,
                 max_distance,
             } => {
-                if let Some(physics) = ctx.physics {
-                    if let Some(transform) = ctx.scene.transforms().local(ctx.entity) {
-                        use engine_physics::{QueryFilter, Vec3};
-                        let origin = transform.translation;
-                        let dir = Vec3::new(direction[0], direction[1], direction[2]).normalized();
-                        let filter = QueryFilter::default();
-                        physics
-                            .raycast(origin, dir, *max_distance, filter)
-                            .is_some()
+                #[cfg(feature = "physics")]
+                {
+                    if let Some(physics) = ctx.physics {
+                        if let Some(transform) = ctx.scene.transforms().local(ctx.entity) {
+                            use engine_physics::{QueryFilter, Vec3};
+                            let origin = transform.translation;
+                            let dir =
+                                Vec3::new(direction[0], direction[1], direction[2]).normalized();
+                            let filter = QueryFilter::default();
+                            physics
+                                .raycast(origin, dir, *max_distance, filter)
+                                .is_some()
+                        } else {
+                            false
+                        }
                     } else {
                         false
                     }
-                } else {
+                }
+                #[cfg(not(feature = "physics"))]
+                {
+                    let _ = (direction, max_distance);
                     false
                 }
             }

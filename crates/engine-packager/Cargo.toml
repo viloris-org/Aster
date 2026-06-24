@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-engine-assets.workspace = true
+engine-assets = { workspace = true, default-features = false }
 engine-core.workspace = true
 engine-ecs.workspace = true
 runtime-min.workspace = true

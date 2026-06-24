@@ -8,7 +8,9 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
-default = []
+default = ["importers", "watch"]
+importers = ["dep:gltf", "dep:image"]
+watch = ["dep:notify"]
 runtime-min = ["engine-core/runtime-min"]
 runtime-game = ["runtime-min"]
 editor = ["engine-core/editor"]
@@ -26,9 +28,9 @@ dev-full = [
 
 [dependencies]
 engine-core.workspace = true
-gltf.workspace = true
-image.workspace = true
-notify.workspace = true
+gltf = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+notify = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

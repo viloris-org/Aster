@@ -24,10 +24,9 @@ pub struct ActionContext<'a> {
     pub scene: &'a mut engine_ecs::Scene,
     /// Current input state.
     pub input: &'a engine_platform::InputState,
+    #[cfg(feature = "physics")]
     /// Current physics backend.
     pub physics: Option<&'a mut dyn engine_physics::PhysicsBackend>,
-    /// Asset database for resource lookups.
-    pub assets: Option<&'a engine_assets::AssetDatabase>,
     /// Delta time since last frame.
     pub delta_time: f32,
     /// Execution state for multi-frame actions.

@@ -13,9 +13,10 @@ use std::{
 };
 
 use engine_assets::{
-    AssetDatabase, AssetRegistry, ImportTask, ResourceKind, ResourceMetaFormat,
-    import_builtin_asset, scan_project_assets,
+    AssetDatabase, AssetRegistry, ResourceKind, ResourceMetaFormat, scan_project_assets,
 };
+#[cfg(feature = "editor")]
+use engine_assets::{ImportTask, import_builtin_asset};
 use engine_core::{
     EngineError, EngineResult, EntityId,
     math::{Transform, Vec3},
@@ -537,6 +538,7 @@ impl ProjectContext {
     }
 
     /// Copies an external file into the asset root, rescans, and runs the built-in importer.
+    #[cfg(feature = "editor")]
     pub fn import_file(&mut self, source: impl AsRef<Path>) -> EngineResult<()> {
         let source = source.as_ref();
         let file_name = source

@@ -10,6 +10,7 @@ rust-version.workspace = true
 [features]
 default = ["runtime-min"]
 runtime-min = [
+    "engine-assets/importers",
     "engine-assets/runtime-min",
     "engine-core/runtime-min",
     "engine-ecs/runtime-min",
@@ -66,7 +67,7 @@ skeleton = ["dep:engine-skeleton", "engine-skeleton/runtime-game"]
 dev-full = ["runtime-game", "editor", "agent-tools", "physics", "audio", "shader", "render-2d", "ui", "animation", "skeleton"]
 
 [dependencies]
-engine-assets.workspace = true
+engine-assets = { workspace = true, features = ["importers"] }
 engine-audio = { workspace = true, optional = true }
 engine-core.workspace = true
 engine-ecs.workspace = true

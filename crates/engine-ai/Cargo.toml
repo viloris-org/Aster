@@ -11,7 +11,7 @@ rust-version.workspace = true
 default = []
 
 [dependencies]
-engine-assets.workspace = true
+engine-assets = { workspace = true, default-features = false }
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-editor = { workspace = true, features = ["agent-tools"] }

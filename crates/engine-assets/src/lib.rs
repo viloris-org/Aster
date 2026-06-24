@@ -25,16 +25,19 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     fmt, fs,
     hash::{Hash, Hasher},
-    io::Read,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender},
     },
-    thread::{self, JoinHandle},
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(any(feature = "importers", feature = "watch"))]
+use std::sync::mpsc::{self, Receiver};
+#[cfg(feature = "importers")]
+use std::{io::Read, sync::mpsc::Sender, thread::JoinHandle};
 
 use engine_core::{AssetId, EngineError, EngineResult, Handle, HandleAllocator, ResourceId};
 use serde::{Deserialize, Serialize};
@@ -582,6 +585,7 @@ impl ModelResource {
         })
     }
 
+    #[cfg(feature = "importers")]
     fn to_bytes(&self) -> EngineResult<Arc<[u8]>> {
         serde_json::to_vec(self)
             .map(Arc::from)
@@ -1347,8 +1351,10 @@ pub struct ImportOutcome {
 }
 
 /// glTF importer for mesh extraction.
+#[cfg(feature = "importers")]
 pub struct GltfImporter;
 
+#[cfg(feature = "importers")]
 impl GltfImporter {
     /// Imports a glTF file into a model resource with mesh primitives.
     ///
@@ -1453,8 +1459,10 @@ impl GltfImporter {
 }
 
 /// PNG importer with mip chain generation.
+#[cfg(feature = "importers")]
 pub struct PngImporter;
 
+#[cfg(feature = "importers")]
 impl PngImporter {
     /// Imports a PNG file into a CPU texture resource with mip chain.
     ///
@@ -1600,6 +1608,7 @@ impl PngImporter {
 }
 
 /// Generates a mip chain from a base RGBA8 image using box filtering.
+#[cfg(feature = "importers")]
 fn generate_mip_chain(base: &image::RgbaImage) -> Vec<Vec<u8>> {
     let mut mip_levels = Vec::new();
 
@@ -1622,6 +1631,7 @@ fn generate_mip_chain(base: &image::RgbaImage) -> Vec<Vec<u8>> {
 }
 
 /// Downsamples an RGBA8 image to a smaller size using box filtering.
+#[cfg(feature = "importers")]
 fn downsample_rgba8(
     source: &image::RgbaImage,
     target_width: u32,
@@ -1643,12 +1653,14 @@ pub struct ImportJob {
 }
 
 /// Handle to a background import worker thread.
+#[cfg(feature = "importers")]
 pub struct ImportWorker {
     thread_handle: Option<JoinHandle<()>>,
     job_sender: Sender<ImportJob>,
     outcome_receiver: Receiver<ImportOutcome>,
 }
 
+#[cfg(feature = "importers")]
 impl ImportWorker {
     /// Spawns a new background worker thread for processing imports.
     pub fn spawn() -> Self {
@@ -1739,6 +1751,7 @@ impl ImportWorker {
     }
 }
 
+#[cfg(feature = "importers")]
 impl Drop for ImportWorker {
     fn drop(&mut self) {
         // Take the thread handle first
@@ -1789,6 +1802,7 @@ impl ImportQueue {
         }
     }
 
+    #[cfg(feature = "importers")]
     /// Spawns a background worker thread for processing imports.
     ///
     /// The worker will process import jobs and produce GPU upload tasks
@@ -1875,6 +1889,7 @@ impl HotReloadTracker {
 /// Hot reload coordinator that manages the full reimport flow.
 ///
 /// Handles file change events → mark stale → reimport → GPU upload → swap.
+#[cfg(feature = "importers")]
 pub struct HotReloadCoordinator {
     /// Import queue for background processing.
     import_queue: ImportQueue,
@@ -1884,6 +1899,7 @@ pub struct HotReloadCoordinator {
     gpu_destroy_delay_frames: u32,
 }
 
+#[cfg(feature = "importers")]
 impl HotReloadCoordinator {
     /// Creates a new hot reload coordinator.
     pub fn new(_asset_root: impl Into<PathBuf>) -> Self {
@@ -2259,6 +2275,7 @@ pub struct FileEvent {
 }
 
 /// File watcher for asset change detection with debouncing.
+#[cfg(feature = "watch")]
 pub struct FileWatcher {
     _watcher: notify::RecommendedWatcher,
     receiver: Receiver<notify::Result<notify::Event>>,
@@ -2267,6 +2284,7 @@ pub struct FileWatcher {
     debounce_duration: std::time::Duration,
 }
 
+#[cfg(feature = "watch")]
 impl FileWatcher {
     /// Starts watching the given directory for file changes.
     pub fn start(asset_root: impl AsRef<Path>) -> EngineResult<Self> {
@@ -2469,6 +2487,7 @@ fn discover_asset_dependencies(
 }
 
 /// Runs a built-in import task into CPU cache and queues a GPU upload.
+#[cfg(feature = "importers")]
 pub fn import_builtin_asset(
     project_asset_root: impl AsRef<Path>,
     registry: &mut AssetRegistry,
@@ -2512,12 +2531,14 @@ pub fn import_builtin_asset(
     })
 }
 
+#[cfg(feature = "importers")]
 struct ImportedCpuPayload {
     bytes: Arc<[u8]>,
     summary: String,
     diagnostics: Vec<AssetDiagnostic>,
 }
 
+#[cfg(feature = "importers")]
 fn import_cpu_payload(
     path: &Path,
     kind: ResourceKind,
@@ -2543,6 +2564,7 @@ fn import_cpu_payload(
     }
 }
 
+#[cfg(feature = "importers")]
 fn import_texture_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedCpuPayload {
     if importer == "cubemap-json" {
         return import_cubemap_payload(path, importer, bytes);
@@ -2602,6 +2624,7 @@ fn import_texture_payload(path: &Path, importer: &str, bytes: &[u8]) -> Imported
     }
 }
 
+#[cfg(feature = "importers")]
 fn import_cubemap_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedCpuPayload {
     let mut diagnostics = Vec::new();
     let source = match serde_json::from_slice::<CubemapSource>(bytes) {
@@ -2725,6 +2748,7 @@ fn import_cubemap_payload(path: &Path, importer: &str, bytes: &[u8]) -> Imported
     }
 }
 
+#[cfg(feature = "importers")]
 fn import_model_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedCpuPayload {
     let mut diagnostics = Vec::new();
     let (payload, summary) = if importer == "amdl" {
@@ -2823,6 +2847,7 @@ fn import_model_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedCp
     }
 }
 
+#[cfg(feature = "importers")]
 fn import_gltf_model(path: &Path) -> EngineResult<ModelResource> {
     let (document, buffers, _) =
         gltf::import(path).map_err(|error| EngineError::other(error.to_string()))?;
@@ -2918,6 +2943,7 @@ fn import_gltf_model(path: &Path) -> EngineResult<ModelResource> {
     Ok(model)
 }
 
+#[cfg(feature = "importers")]
 fn import_material_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedCpuPayload {
     let mut diagnostics = Vec::new();
     let material = if importer == "material-toml" {
@@ -2956,6 +2982,7 @@ fn import_material_payload(path: &Path, importer: &str, bytes: &[u8]) -> Importe
     }
 }
 
+#[cfg(feature = "importers")]
 fn import_shader_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedCpuPayload {
     let mut diagnostics = Vec::new();
     if std::str::from_utf8(bytes).is_err() {
@@ -2975,10 +3002,12 @@ fn import_shader_payload(path: &Path, importer: &str, bytes: &[u8]) -> ImportedC
     }
 }
 
+#[cfg(feature = "importers")]
 fn parse_image_dimensions(bytes: &[u8]) -> Option<(&'static str, u32, u32)> {
     parse_png_dimensions(bytes).or_else(|| parse_jpeg_dimensions(bytes))
 }
 
+#[cfg(feature = "importers")]
 fn parse_png_dimensions(bytes: &[u8]) -> Option<(&'static str, u32, u32)> {
     if bytes.len() < 24 || &bytes[0..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
         return None;
@@ -2988,6 +3017,7 @@ fn parse_png_dimensions(bytes: &[u8]) -> Option<(&'static str, u32, u32)> {
     Some(("png", width, height))
 }
 
+#[cfg(feature = "importers")]
 fn parse_jpeg_dimensions(bytes: &[u8]) -> Option<(&'static str, u32, u32)> {
     if bytes.len() < 4 || bytes[0] != 0xff || bytes[1] != 0xd8 {
         return None;

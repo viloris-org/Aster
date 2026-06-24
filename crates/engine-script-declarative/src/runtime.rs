@@ -30,11 +30,9 @@ pub struct DeclarativeScriptBackend {
     /// Shared scene reference.
     scene: Option<engine_ecs::Scene>,
 
+    #[cfg(feature = "physics")]
     /// Shared physics backend reference.
     physics_backend: Option<Box<dyn engine_physics::PhysicsBackend>>,
-
-    /// Shared asset database reference.
-    asset_database: Option<engine_assets::AssetDatabase>,
 }
 
 /// Runtime execution state for a single entity's behavior tree.
@@ -99,8 +97,8 @@ impl DeclarativeScriptBackend {
             entity_states: HashMap::new(),
             input_state: None,
             scene: None,
+            #[cfg(feature = "physics")]
             physics_backend: None,
-            asset_database: None,
         }
     }
 
@@ -130,24 +128,16 @@ impl DeclarativeScriptBackend {
         self.scene.take()
     }
 
+    #[cfg(feature = "physics")]
     /// Sets the physics backend reference.
     pub fn set_physics_backend(&mut self, backend: Box<dyn engine_physics::PhysicsBackend>) {
         self.physics_backend = Some(backend);
     }
 
+    #[cfg(feature = "physics")]
     /// Takes the physics backend back.
     pub fn take_physics_backend(&mut self) -> Option<Box<dyn engine_physics::PhysicsBackend>> {
         self.physics_backend.take()
-    }
-
-    /// Sets the asset database reference.
-    pub fn set_asset_database(&mut self, database: engine_assets::AssetDatabase) {
-        self.asset_database = Some(database);
-    }
-
-    /// Takes the asset database back.
-    pub fn take_asset_database(&mut self) -> Option<engine_assets::AssetDatabase> {
-        self.asset_database.take()
     }
 
     /// Executes a behavior tree for an entity.
@@ -190,8 +180,8 @@ impl DeclarativeScriptBackend {
             entity,
             scene,
             input,
+            #[cfg(feature = "physics")]
             physics: self.physics_backend.as_deref(),
-            assets: self.asset_database.as_ref(),
             delta_time,
         };
 
@@ -311,8 +301,6 @@ impl DeclarativeScriptBackend {
             .take()
             .ok_or_else(|| engine_core::EngineError::other("Scene not set"))?;
 
-        let assets = self.asset_database.as_ref();
-
         // Create execution state for actions
         let mut exec_state = crate::action::ExecutionState {
             wait_timer,
@@ -324,8 +312,8 @@ impl DeclarativeScriptBackend {
             entity,
             scene: &mut scene,
             input: &input,
+            #[cfg(feature = "physics")]
             physics: None, // Simplified: no physics mutations for now
-            assets,
             delta_time,
             execution_state: &mut exec_state,
         };
@@ -400,8 +388,8 @@ impl DeclarativeScriptBackend {
                     entity: ctx.entity,
                     scene: ctx.scene,
                     input: ctx.input,
+                    #[cfg(feature = "physics")]
                     physics: ctx.physics.as_deref(),
-                    assets: ctx.assets,
                     delta_time: ctx.delta_time,
                 };
 

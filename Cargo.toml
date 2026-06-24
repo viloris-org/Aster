@@ -58,7 +58,7 @@ symphonia = { version = "0.5.4", default-features = false, features = ["ogg", "p
 engine-core = { path = "crates/engine-core", version = "0.1.0" }
 engine-ecs = { path = "crates/engine-ecs", version = "0.1.0" }
 engine-platform = { path = "crates/engine-platform", version = "0.1.0" }
-engine-assets = { path = "crates/engine-assets", version = "0.1.0" }
+engine-assets = { path = "crates/engine-assets", version = "0.1.0", default-features = false }
 engine-render = { path = "crates/engine-render", version = "0.1.0" }
 engine-render-wgpu = { path = "crates/engine-render-wgpu", version = "0.1.0" }
 engine-physics = { path = "crates/engine-physics", version = "0.1.0" }

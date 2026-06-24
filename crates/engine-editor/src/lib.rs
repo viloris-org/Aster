@@ -18,6 +18,7 @@ pub mod agent;
 
 pub mod memory;
 pub mod native;
+#[cfg(feature = "physics")]
 pub mod physics;
 pub mod render;
 

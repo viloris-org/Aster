@@ -1447,10 +1447,8 @@ dependencies = [
 name = "engine-script-declarative"
 version = "0.1.0"
 dependencies = [
- "engine-assets",
  "engine-core",
  "engine-ecs",
- "engine-editor",
  "engine-physics",
  "engine-platform",
  "serde",
