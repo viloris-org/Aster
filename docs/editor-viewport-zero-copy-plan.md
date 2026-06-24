@@ -78,24 +78,29 @@ Initial mapping:
 | --- | --- | --- | --- | --- |
 | `canvas-readback` | Yes | No | WebView-dependent | No |
 | `native-host-window` | No | Yes | Yes | Maybe |
-| `wayland-embedded-compositor` | No | DMA-BUF/imported buffer | Yes | Maybe |
+| `wayland-embedded-compositor` | No | DMA-BUF/imported buffer | Yes | Maybe, diagnostic only |
 | `floating-native-scene-view` | No | Yes | OS-dependent | Yes when unobscured |
 
 `zero_copy` may remain as a compatibility field temporarily, but it should mean `!cpu_readback`, not guaranteed direct scanout.
 
 ## Platform Strategy
 
-### Linux X11
+### Linux X11/Xwayland
 
-Use the existing native host adapter around a GTK DrawingArea/X11 native window:
+Use a Linux GTK host root around a `DrawingArea`/X11 native window:
 
-- Create or reuse a host-owned native drawing surface.
+- Create or reuse a host-owned GTK root container.
+- Create a host-owned native drawing surface inside that root.
 - Extract Xlib/XCB raw display/window handles.
 - Create a WGPU surface through raw-window-handle.
 - Present Scene View directly to that surface.
-- Put Web UI in the same host window as overlays/panels, avoiding DOM-driven child window movement.
+- Put Web UI in the same GTK host window under host-controlled widget geometry, avoiding a separate floating Scene View and avoiding DOM-driven native-window movement.
 
 This path should be described as no-CPU-readback native presentation. It may still be GPU-composited by the X11 compositor, so direct scanout is only opportunistic.
+
+Important boundary: the current Tauri implementation now uses a GTK `Fixed` host root that owns the Scene View `DrawingArea`, the main workspace WebView, and separate child WebViews for the toolbar, hierarchy, inspector, and statusbar. The central workspace WebView is still retained as a compatibility/control layer for non-panel editor surfaces and Scene View layout reporting, but active dock panels are host-managed child WebViews instead of full-window transparent WebView regions.
+
+When the desktop session is Wayland, the editor runs this path through Xwayland. Startup sets GTK/Winit to prefer X11 so the parent editor window and embedded Scene View share X11 handles.
 
 Risks:
 
@@ -105,22 +110,15 @@ Risks:
 
 ### Linux Wayland
 
-Wayland does not provide an X11-style stable foreign child-window embedding model. The production path should be an application-owned embedded compositor or equivalent toolkit path that imports render buffers through DMA-BUF:
+Wayland does not provide an X11-style stable foreign child-window embedding model. To avoid spending implementation time on that limitation, native Wayland Scene View embedding is out of scope for now. Linux no-CPU-readback presentation runs under X11/Xwayland instead.
 
-- Host owns editor root.
-- Scene View renderer exports or presents buffers that the embedded compositor can import.
-- Embedded compositor exposes/imports `zwp_linux_dmabuf_v1` buffers and handles explicit synchronization.
-- Web UI surfaces are composed with Scene View inside the same host-owned presentation tree.
-- Viewport movement is a compositor state update, not OS child-window repositioning.
-
-The `wayland-embedded-compositor` boundary is the default Wayland Scene View presentation path when the backend is built and available. It owns the Wayland no-readback route instead of falling back to canvas by default. Canvas readback remains the fallback for explicit disablement or initialization failure.
+The `wayland-embedded-compositor` boundary may remain in code for compatibility and future research, but it is not a default production path. Canvas readback remains the fallback when X11/Xwayland native host presentation is explicitly disabled or unavailable.
 
 Risks:
 
-- DMA-BUF format/modifier negotiation is hardware and driver dependent.
-- Explicit sync must be correct to avoid tearing, stalls or undefined buffer reuse.
-- WebKitGTK/WebView integration with embedded composition must be validated carefully.
-- Direct scanout is rarely guaranteed when editor overlays are visible.
+- Users without a working `DISPLAY`/Xwayland environment cannot use native-host-window presentation.
+- Xwayland compositor behavior and fractional scaling still need validation.
+- Future native Wayland work would require a separate architecture decision.
 
 ### Windows
 
@@ -164,23 +162,29 @@ Risks:
 - Replace or extend `zero_copy` capability with `cpu_readback`, `gpu_native_surface`, `gpu_composited` and `direct_scanout_possible`.
 - Keep `zero_copy` as compatibility alias for `!cpu_readback` until frontend code is migrated.
 - Update frontend labels to say `native GPU` or `no CPU readback`, not guaranteed `direct scanout`.
-- Add tests for capability selection on Linux X11, Wayland embedded compositor, feature-disabled Wayland builds, Windows and macOS.
+- Add tests for capability selection on Linux X11/Xwayland, native Wayland refusal, Windows and macOS.
 
 ### Phase 1: Stabilize Linux X11 Native Host
 
-- Treat current GTK/X11 native host path as the first production no-readback path.
+- Treat the GTK/X11 host-root path as the first usable no-readback path.
 - Verify resize, DPI, panel overlay, focus, input and scene restart behavior.
 - Add telemetry showing active adapter, surface size, viewport rect and CPU readback status.
 - Keep canvas readback as fallback when native presentation is explicitly disabled with `ASTER_EDITOR_COMPOSITOR=0` or native host setup fails.
 
-### Phase 2: Wayland Embedded Compositor Backend
+### Phase 1.5: Split Web UI Panels
 
-- Build the embedded compositor backend by default for the editor.
-- Select `wayland-embedded-compositor` by default on Wayland sessions.
-- Add DMA-BUF import/export or compatible WGPU buffer presentation path.
-- Implement explicit synchronization, buffer lifecycle and format/modifier negotiation.
-- Route input through the host/compositor boundary.
-- Keep refusal semantics strict when backend requirements are missing.
+- Split the current single React/WebView shell into hosted panel WebViews or native-hosted panel surfaces.
+- Route Web UI as explicit hosted panels/overlays in the GTK root instead of depending on full-window WebView transparency.
+- Keep the main workspace WebView as the compatibility/control layer until all editor surfaces have resize, DPI, input, focus, and restart parity as hosted views.
+- Split WebView panels are enabled by default on the X11 native-host-window path. Set `ASTER_NATIVE_PANEL_WEBVIEWS=0` to disable them for diagnostics.
+- The toolbar, hierarchy, inspector, and statusbar routes render real editor data and editing controls while the main WebView keeps the central Scene View and non-panel workspace surfaces.
+
+### Phase 2: Native Wayland Deferral
+
+- Do not select `wayland-embedded-compositor` by default.
+- Keep native Wayland presentation refusal semantics explicit.
+- Document that Linux no-CPU-readback presentation requires X11/Xwayland.
+- Revisit native Wayland only behind a new ADR if Xwayland becomes insufficient.
 
 ### Phase 3: macOS Native Host
 
@@ -220,7 +224,7 @@ Each adapter must pass these checks before it can become default:
 ## Open Questions
 
 - Can WGPU expose enough platform-specific surface control for DirectComposition composition swapchains, or does Aster need a lower-level Windows presentation adapter?
-- Should Wayland use a fully application-owned embedded compositor, a toolkit-provided offload path, or both behind one capability?
+- What user-facing check should report missing Xwayland/`DISPLAY` before native presentation is requested?
 - How should selection/gizmo overlays split between native renderer and Web UI to minimize transparent WebView requirements?
 - What is the minimal telemetry needed to prove a frame used no CPU readback?
 - Should floating native Scene View remain a user-visible diagnostic mode for comparing native surface performance?

@@ -32,14 +32,12 @@ use engine_render_wgpu::{WgpuOffscreenConfig, WgpuRenderDevice};
 use runtime_min::{RuntimeServices, headless_services_from_scene};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{
-    Emitter, Manager, State, image::Image, utils::config::Color, webview::WebviewBuilder,
-    window::WindowBuilder,
-};
+use tauri::{Emitter, Manager, State, WebviewWindowBuilder, image::Image, utils::config::Color};
 
 mod editor_compositor;
 mod game_window;
 mod native_host_window;
+mod native_panel_host;
 mod quest;
 mod scene_window;
 mod wayland_embedded_compositor;
@@ -65,7 +63,6 @@ use quest::{
 const APP_WINDOW_ICON: Image<'static> = tauri::include_image!("./icons/128x128.png");
 
 const WINDOW_BACKGROUND: &str = "#181818";
-const TRANSPARENT_WINDOW_BACKGROUND: &str = "transparent";
 const SOLO_REPAIR_LIMIT: usize = 1;
 
 fn editor_compositor_requested() -> bool {
@@ -87,9 +84,23 @@ fn default_editor_compositor_requested() -> bool {
 
 fn default_editor_compositor_requested_for(
     support: editor_compositor::EditorCompositorSupport,
-    wayland_support: wayland_embedded_compositor::WaylandEmbeddedCompositorSupport,
+    _wayland_support: wayland_embedded_compositor::WaylandEmbeddedCompositorSupport,
 ) -> bool {
-    support.available || wayland_support.available
+    support.available
+}
+
+fn main_window_editor_compositor_support(
+    app: &tauri::AppHandle,
+) -> editor_compositor::EditorCompositorSupport {
+    use raw_window_handle::HasWindowHandle;
+
+    let Some(window) = app.get_window("main") else {
+        return editor_compositor::platform_support();
+    };
+    let Ok(handle) = window.window_handle() else {
+        return editor_compositor::platform_support();
+    };
+    editor_compositor::platform_support_for_window_handle(handle.as_raw())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -488,7 +499,7 @@ impl DesktopIntegration {
         serde_json::json!({
             "desktop_environment": self.desktop.id(),
             "prefers_native_chrome": self.prefers_native_chrome(),
-            "window_background": if editor_compositor_requested() { TRANSPARENT_WINDOW_BACKGROUND } else { WINDOW_BACKGROUND },
+            "window_background": WINDOW_BACKGROUND,
             "window_backend": std::env::var("GDK_BACKEND").unwrap_or_else(|_| "default".to_owned()),
             "editor_compositor_requested": editor_compositor_requested(),
         })
@@ -1075,6 +1086,10 @@ pub struct EditorHost {
     scene_window: Option<scene_window::SceneWindowHandle>,
     /// Full-window editor compositor seam for the future no-CPU-readback viewport.
     editor_compositor: editor_compositor::EditorCompositor,
+    /// Host-owned native editor layout state used by native Scene View presentation.
+    native_host_layout: native_host_window::NativeHostLayoutState,
+    /// Experimental split WebView panels hosted by the native editor window.
+    native_panel_host: native_panel_host::NativePanelHost,
     /// Wayland production no-CPU-readback presentation seam backed by an embedded compositor.
     wayland_embedded_compositor: wayland_embedded_compositor::WaylandEmbeddedCompositor,
     /// Cross-project Quest registry and append-only history store.
@@ -1136,6 +1151,8 @@ impl EditorHost {
             game_window: None,
             scene_window: None,
             editor_compositor: editor_compositor::EditorCompositor::default(),
+            native_host_layout: native_host_window::NativeHostLayoutState::default(),
+            native_panel_host: native_panel_host::NativePanelHost::default(),
             wayland_embedded_compositor:
                 wayland_embedded_compositor::WaylandEmbeddedCompositor::default(),
             quest_store: QuestStore::new(quest_root),
@@ -5009,6 +5026,10 @@ impl EditorHost {
     }
 
     fn shell_get_state(&mut self, _params: &Value) -> EngineResult<Value> {
+        let selected_entity = self
+            .shell
+            .selected_entity_id()
+            .map(|id| format!("{:032x}", id.as_u128()));
         Ok(serde_json::json!({
             "has_project": self.shell.project().is_some(),
             "project_name": self.shell.project().map(|p| p.name()),
@@ -5016,6 +5037,7 @@ impl EditorHost {
             "can_undo": self.shell.undo_stack().can_undo(),
             "can_redo": self.shell.undo_stack().can_redo(),
             "scene_version": self.scene_version,
+            "selected_entity": selected_entity,
             "desktop_integration": self.desktop_integration.as_json(),
         }))
     }
@@ -7300,6 +7322,31 @@ impl EditorHostState {
     }
 }
 
+fn update_native_host_layout_state(
+    host: &mut EditorHost,
+    scene_rect: native_host_window::NativeHostSceneRect,
+    panels: Option<native_host_window::NativeHostPanelState>,
+) {
+    host.native_host_layout.scene_rect = Some(scene_rect);
+    if let Some(panels) = panels {
+        host.native_host_layout.panels = panels;
+    }
+    host.native_host_layout.host_root_active = true;
+}
+
+fn native_host_panel_state_from_options(
+    current: native_host_window::NativeHostPanelState,
+    hierarchy_open: Option<bool>,
+    inspector_open: Option<bool>,
+    ai_panel_open: Option<bool>,
+) -> native_host_window::NativeHostPanelState {
+    native_host_window::NativeHostPanelState {
+        hierarchy_open: hierarchy_open.unwrap_or(current.hierarchy_open),
+        inspector_open: inspector_open.unwrap_or(current.inspector_open),
+        ai_panel_open: ai_panel_open.unwrap_or(current.ai_panel_open),
+    }
+}
+
 // ─── Tauri commands ─────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -7802,6 +7849,17 @@ fn viewport_presentation_status() -> editor_compositor::ViewportPresentationStat
 }
 
 #[tauri::command]
+fn viewport_presentation_status_for_main_window(
+    app: tauri::AppHandle,
+) -> editor_compositor::ViewportPresentationStatus {
+    editor_compositor::presentation_status_for(
+        editor_compositor_requested(),
+        main_window_editor_compositor_support(&app),
+        wayland_embedded_compositor::support(),
+    )
+}
+
+#[tauri::command]
 fn sync_editor_compositor_viewport(
     state: State<'_, EditorHostState>,
     viewport: EmbeddedSceneViewport,
@@ -7838,6 +7896,84 @@ fn wayland_embedded_compositor_status(
     state.with_host(|host| Ok(host.wayland_embedded_compositor.status()))
 }
 
+#[derive(Debug, Deserialize)]
+struct NativeHostEditorLayout {
+    viewport: EmbeddedSceneViewport,
+    hierarchy_open: bool,
+    inspector_open: bool,
+    ai_panel_open: bool,
+}
+
+#[tauri::command]
+fn sync_native_host_editor_layout(
+    app: tauri::AppHandle,
+    state: State<'_, EditorHostState>,
+    layout: NativeHostEditorLayout,
+) -> Result<native_host_window::NativeHostLayoutState, String> {
+    native_host_window::install_host_root_on_main_thread(&app)?;
+    let viewport = layout.viewport.into_rect();
+    let scene_rect = native_host_window::NativeHostSceneRect::from(viewport);
+    native_host_window::resize_main_window_scene_surface(app, scene_rect)?;
+    state.with_host(|host| {
+        host.native_host_layout = native_host_window::NativeHostLayoutState {
+            scene_rect: Some(scene_rect),
+            panels: native_host_window::NativeHostPanelState {
+                hierarchy_open: layout.hierarchy_open,
+                inspector_open: layout.inspector_open,
+                ai_panel_open: layout.ai_panel_open,
+            },
+            host_root_active: true,
+        };
+        Ok(host.native_host_layout)
+    })
+}
+
+#[tauri::command]
+fn native_panel_host_status(
+    state: State<'_, EditorHostState>,
+) -> native_panel_host::NativePanelHostStatus {
+    state.with_host(|host| host.native_panel_host.status())
+}
+
+#[tauri::command]
+fn ensure_native_panel_host(
+    app: tauri::AppHandle,
+    state: State<'_, EditorHostState>,
+) -> Result<native_panel_host::NativePanelHostStatus, String> {
+    if !editor_compositor_requested() {
+        return Ok(state.with_host(|host| host.native_panel_host.status()));
+    }
+    let support = main_window_editor_compositor_support(&app);
+    if !support.available {
+        return Ok(state.with_host(|host| host.native_panel_host.status()));
+    }
+    let window_config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .ok_or_else(|| "main editor window config is not available".to_owned())?;
+    state.with_host(|host| {
+        host.native_panel_host
+            .ensure_installed(&app, window_config, false, Color(24, 24, 24, 255))
+            .map_err(|error| error.to_string())?;
+        Ok(host.native_panel_host.status())
+    })
+}
+
+#[tauri::command]
+fn sync_native_panel_layout(
+    state: State<'_, EditorHostState>,
+    layout: native_panel_host::NativePanelLayout,
+) -> Result<native_panel_host::NativePanelHostStatus, String> {
+    state.with_host(|host| {
+        host.native_panel_host
+            .apply_layout(layout)
+            .map_err(|error| error.to_string())?;
+        Ok(host.native_panel_host.status())
+    })
+}
+
 #[tauri::command]
 fn sync_no_cpu_readback_scene_view(
     app: tauri::AppHandle,
@@ -7849,13 +7985,22 @@ fn sync_no_cpu_readback_scene_view(
     target_x: Option<f32>,
     target_y: Option<f32>,
     target_z: Option<f32>,
+    hierarchy_open: Option<bool>,
+    inspector_open: Option<bool>,
+    ai_panel_open: Option<bool>,
 ) -> Result<(), String> {
     let viewport = viewport.into_rect();
-    native_host_window::resize_main_window_scene_surface(
-        app,
-        native_host_window::NativeHostSceneRect::from(viewport),
-    )?;
+    let scene_rect = native_host_window::NativeHostSceneRect::from(viewport);
+    native_host_window::install_host_root_on_main_thread(&app)?;
+    native_host_window::resize_main_window_scene_surface(app, scene_rect)?;
     state.with_host(|host| {
+        let panels = native_host_panel_state_from_options(
+            host.native_host_layout.panels,
+            hierarchy_open,
+            inspector_open,
+            ai_panel_open,
+        );
+        update_native_host_layout_state(host, scene_rect, Some(panels));
         let compositor_viewport =
             editor_compositor::EditorCompositorViewport::from_scene_rect(viewport);
         host.editor_compositor.set_viewport(compositor_viewport);
@@ -7898,7 +8043,7 @@ fn sync_zero_copy_scene_view(
     target_z: Option<f32>,
 ) -> Result<(), String> {
     sync_no_cpu_readback_scene_view(
-        app, state, viewport, yaw, pitch, distance, target_x, target_y, target_z,
+        app, state, viewport, yaw, pitch, distance, target_x, target_y, target_z, None, None, None,
     )
 }
 
@@ -7914,7 +8059,7 @@ fn open_no_cpu_readback_scene_view(
     target_y: f32,
     target_z: f32,
 ) -> Result<(), String> {
-    let support = editor_compositor::platform_support();
+    let support = main_window_editor_compositor_support(&app);
     if !editor_compositor_requested() || !support.available {
         return Err(format!(
             "no-CPU-readback scene view is unavailable on backend {}: {}",
@@ -7923,10 +8068,9 @@ fn open_no_cpu_readback_scene_view(
         ));
     }
     let viewport = viewport.into_rect();
-    native_host_window::resize_main_window_scene_surface(
-        app.clone(),
-        native_host_window::NativeHostSceneRect::from(viewport),
-    )?;
+    let scene_rect = native_host_window::NativeHostSceneRect::from(viewport);
+    native_host_window::install_host_root_on_main_thread(&app)?;
+    native_host_window::resize_main_window_scene_surface(app.clone(), scene_rect)?;
     let target = native_host_window::main_window_scene_target(&app)?;
     tracing::info!(
         target: "editor",
@@ -7934,6 +8078,7 @@ fn open_no_cpu_readback_scene_view(
         "opening no-CPU-readback Scene View through native host window adapter"
     );
     state.with_host(|host| {
+        update_native_host_layout_state(host, scene_rect, None);
         host.poll_scene_window();
         let snapshot = host
             .create_scene_runtime_snapshot()
@@ -8282,8 +8427,13 @@ impl EmbeddedSceneViewport {
 }
 
 #[tauri::command]
-fn close_native_scene_view(state: State<'_, EditorHostState>) -> Result<(), String> {
+fn close_native_scene_view(
+    app: tauri::AppHandle,
+    state: State<'_, EditorHostState>,
+) -> Result<(), String> {
+    native_host_window::hide_main_window_scene_surface(app)?;
     state.with_host(|host| {
+        host.native_host_layout.host_root_active = false;
         host.poll_scene_window();
         if let Some(scene_window) = host.scene_window.as_ref() {
             scene_window.hide()?;
@@ -8339,12 +8489,7 @@ fn apply_desktop_window_adaptations(app: &tauri::App) -> Result<(), Box<dyn std:
     let desktop = DesktopIntegration::detect();
     if let Some(window) = app.get_window("main") {
         window.set_icon(APP_WINDOW_ICON.clone())?;
-        let background = if editor_compositor_requested() {
-            Color(0, 0, 0, 0)
-        } else {
-            Color(24, 24, 24, 255)
-        };
-        window.set_background_color(Some(background))?;
+        window.set_background_color(Some(Color(24, 24, 24, 255)))?;
         window.set_decorations(desktop.prefers_native_chrome())?;
     }
     Ok(())
@@ -8355,51 +8500,33 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
         return Ok(());
     };
 
-    let compositor_requested = editor_compositor_requested();
-    let background = if compositor_requested {
-        Color(0, 0, 0, 0)
-    } else {
-        Color(24, 24, 24, 255)
-    };
-    let window = WindowBuilder::from_config(app, window_config)?
-        .transparent(compositor_requested)
+    let background = Color(24, 24, 24, 255);
+    let window = WebviewWindowBuilder::from_config(app, window_config)?
+        .transparent(false)
         .background_color(background)
+        .on_page_load(|_webview, payload| {
+            tracing::info!(
+                target: "editor",
+                "webview page load {:?}: {}",
+                payload.event(),
+                payload.url()
+            );
+        })
         .icon(APP_WINDOW_ICON.clone())?
         .build()?;
-    let window_size = window.inner_size()?;
-    let webview = window.add_child(
-        WebviewBuilder::from_config(window_config)
-            .transparent(compositor_requested)
-            .background_color(background)
-            .on_page_load(|_webview, payload| {
-                tracing::info!(
-                    target: "editor",
-                    "webview page load {:?}: {}",
-                    payload.event(),
-                    payload.url()
-                );
-            }),
-        tauri::LogicalPosition::new(0.0, 0.0),
-        window_size,
-    )?;
-    webview.set_auto_resize(true)?;
+    window.set_background_color(Some(background))?;
 
-    tracing::info!(target: "editor", "native host root window with child web UI created");
+    tracing::info!(target: "editor", "main editor WebView window created");
     window.set_focus()?;
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn apply_pre_gtk_desktop_environment() {
-    let has_wayland_display = std::env::var("WAYLAND_DISPLAY").is_ok();
-    let backend_already_selected = std::env::var("GDK_BACKEND").is_ok();
-
-    if has_wayland_display && !backend_already_selected {
-        // Ask GTK/WebKit/Tao to try native Wayland first, while keeping X11 as a
-        // fallback for systems where the Wayland backend is unavailable at runtime.
-        // FIXME: Audit that the environment access only happens in single-threaded code.
-        unsafe { std::env::set_var("GDK_BACKEND", "wayland,x11") };
-    }
+    // Linux native-host-window presentation depends on X11 handles. On Wayland
+    // sessions this asks GTK/WebKit/Winit to run through Xwayland.
+    unsafe { std::env::set_var("GDK_BACKEND", "x11") };
+    unsafe { std::env::set_var("WINIT_UNIX_BACKEND", "x11") };
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -8480,6 +8607,11 @@ pub fn run() {
             close_native_scene_view,
             viewport_presentation_capabilities,
             viewport_presentation_status,
+            viewport_presentation_status_for_main_window,
+            sync_native_host_editor_layout,
+            native_panel_host_status,
+            ensure_native_panel_host,
+            sync_native_panel_layout,
             sync_editor_compositor_viewport,
             sync_wayland_embedded_compositor_viewport,
             wayland_embedded_compositor_status,
@@ -8499,19 +8631,19 @@ pub fn run() {
             create_main_window(app)?;
             apply_desktop_window_adaptations(app)?;
             if editor_compositor_requested() {
-                if wayland_embedded_compositor::is_wayland_session() {
+                let support = main_window_editor_compositor_support(app.handle());
+                if !support.available {
                     tracing::info!(
                         target: "editor",
-                        backend = wayland_embedded_compositor::BACKEND_ID,
-                        "skipping GTK native host bridge on Wayland; embedded compositor owns no-CPU-readback presentation"
+                        backend = support.backend.id(),
+                        reason = support.reason,
+                        "skipping native host root; canvas readback remains active"
                     );
                 } else {
-                    let layout_mode =
-                        native_host_window::install_bridge_host_on_main_thread(app.handle())?;
                     tracing::info!(
                         target: "editor",
-                        ?layout_mode,
-                        "native host window bridge installed"
+                        backend = support.backend.id(),
+                        "native host window root available; deferred until Scene View layout is ready"
                     );
                 }
             }
@@ -8576,7 +8708,7 @@ mod tests {
             native_host,
             unavailable_wayland
         ));
-        assert!(super::default_editor_compositor_requested_for(
+        assert!(!super::default_editor_compositor_requested_for(
             unavailable_host,
             wayland
         ));

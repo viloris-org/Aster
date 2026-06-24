@@ -1,4 +1,4 @@
-# ADR 0001: Replace embedded child-surface Scene View with a native host window seam
+# ADR 0001: Replace DOM-tracked child-surface Scene View with a native host window seam
 
 Date: 2026-06-22
 
@@ -23,14 +23,14 @@ Project language:
 
 ## Decision
 
-Treat the GTK/GDK child-surface Scene View as an experimental adapter only.
+Treat DOM-tracked native child-surface movement as an experimental adapter only.
 
 Introduce an editor viewport presentation seam with these adapters:
 
 - `canvas-readback`: stable fallback, composed by the WebView, not zero-copy.
-- `embedded-native-experimental`: current GTK/GDK child-surface path, disabled by default and available only through an explicit diagnostic environment variable.
-- `native-host-window`: canonical zero-copy path for host-owned native surfaces, used by default on Linux X11 when available.
-- `wayland-embedded-compositor`: canonical zero-copy path for Wayland sessions, where the editor owns an embedded compositor rather than relying on foreign child-window embedding.
+- `native-host-window`: canonical no-CPU-readback path for host-owned native surfaces. The current Linux X11 implementation creates a GTK `Fixed` host root that owns the Scene View `DrawingArea`, the main workspace WebView, and child panel WebViews for toolbar, hierarchy, inspector, and statusbar.
+- `embedded-native-experimental`: legacy DOM-tracked GTK/GDK child-surface path, disabled by default and available only through an explicit diagnostic environment variable if retained.
+- `wayland-embedded-compositor`: retained as a compatibility/diagnostic boundary, but not selected by default because Linux editor embedding is standardized on X11/Xwayland.
 - `editor-compositor`: legacy mode name for the target native-host-window zero-copy architecture.
 
 The target architecture is **Native host window owns the editor root**:
@@ -50,20 +50,20 @@ Detailed capability semantics, platform adapters, and phased delivery are tracke
 Positive:
 
 - The final Scene View path remains zero-copy.
-- The native surface no longer has to track a DOM rectangle as an OS child window.
+- The native surface ownership moves behind a presentation seam instead of scattered React calls.
 - Viewport placement becomes part of the renderer's Frame Pipeline/presentation state.
 - The presentation seam gives tests and future adapters a stable interface.
 
 Negative:
 
-- The native host window requires deeper Tauri/WebView integration than the current child-surface experiment.
+- The central workspace WebView still exists as the compatibility/control layer for non-panel editor surfaces and Scene View layout reporting.
 - Transparent WebView behavior must be validated per platform.
 - The fallback path remains canvas readback when the selected native/compositor adapter is explicitly disabled or cannot initialize.
 
 ## Implementation plan
 
 1. Keep `canvas-readback` as the stable fallback when native host presentation is explicitly disabled or unavailable.
-2. Make `native-host-window` the default zero-copy presentation on X11 when the host-owned editor path is available. Make `wayland-embedded-compositor` the default zero-copy presentation on Wayland. `ASTER_EDITOR_COMPOSITOR=0` can force the fallback for diagnostics.
+2. Make the X11 `native-host-window` GTK host root the default no-CPU-readback presentation on Linux X11/Xwayland when it is available. Native Wayland Scene View embedding is not supported; Linux users should start the editor under Xwayland. `ASTER_EDITOR_COMPOSITOR=0` can force the fallback for diagnostics.
 3. Keep `embedded-native-experimental` behind `ASTER_ENABLE_EXPERIMENTAL_CHILD_SURFACE=1` for diagnostics only.
 4. Add backend/frontend presentation-mode APIs around viewport ownership.
 5. Implement the native host window on Linux first:

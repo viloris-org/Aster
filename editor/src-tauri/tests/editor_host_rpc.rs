@@ -1,8 +1,8 @@
 //! Integration tests for the Tauri editor RPC backend.
 //!
 //! Tests the `EditorHost` RPC dispatch directly (headless, no Tauri window).
-use varg_editor_tauri_lib::EditorHost;
 use engine_editor::FileEditorStore;
+use varg_editor_tauri_lib::EditorHost;
 
 fn temp_store() -> (tempfile::TempDir, FileEditorStore) {
     let dir = tempfile::tempdir().expect("create temp dir");

@@ -188,7 +188,7 @@
     font-family: var(--font-sans);
     font-size: 13px;
     color: var(--text-primary);
-    background: var(--bg-base);
+    background: #181818;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -207,6 +207,7 @@
     overflow: hidden;
   }
 
+  .app-frame,
   #root {
     width: 100%;
     height: 100%;
@@ -218,7 +219,316 @@
   }
 
   body[data-editor-compositor="true"] #root {
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.025), transparent 36%),
+      var(--bg-base);
+  }
+
+  html[data-editor-compositor="true"],
+  body[data-editor-compositor="true"] {
+    background: var(--bg-base);
+  }
+
+  body[data-editor-compositor="true"] .app-frame {
+    background: var(--bg-base);
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--bg-base);
+  }
+
+  .native-panel-root {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-overlay);
+    color: var(--text-secondary);
+    font: 600 10px/1 var(--font-mono);
+    text-transform: uppercase;
+  }
+
+  .native-panel-bar,
+  .native-panel-stack,
+  .native-panel-empty {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 11px;
+    min-width: 0;
+  }
+
+  .native-panel-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .native-panel-bar button {
+    flex: none;
+    min-height: 24px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 10px;
+  }
+
+  .native-panel-toolbar strong,
+  .native-panel-status strong {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .native-panel-stack {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .native-panel-header {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    padding: 0 10px;
+    color: var(--text-primary);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .native-panel-actions {
+    display: inline-flex;
+    gap: 4px;
+  }
+
+  .native-panel-actions button {
+    min-width: 22px;
+    min-height: 22px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+  }
+
+  .native-panel-list {
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
+    padding: 4px 0;
+  }
+
+  .native-panel-tree-row {
+    display: grid;
+    width: 100%;
+    min-height: 27px;
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    border: 0;
+    border-left: 2px solid transparent;
     background: transparent;
+    color: var(--text-secondary);
+    text-align: left;
+  }
+
+  .native-panel-tree-row:hover,
+  .native-panel-tree-row.selected {
+    border-left-color: var(--brand);
+    background: var(--brand-dim);
+    color: var(--text-primary);
+  }
+
+  .native-panel-twisty,
+  .native-panel-tree-name {
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+  }
+
+  .native-panel-twisty {
+    display: grid;
+    width: 16px;
+    height: 20px;
+    place-items: center;
+    padding: 0;
+    font: 10px/1 var(--font-mono);
+  }
+
+  .native-panel-tree-name {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px 0 0;
+    text-align: left;
+  }
+
+  .native-panel-tree-name span,
+  .native-panel-bar span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .native-panel-inline-input {
+    min-width: 0;
+    height: 22px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .native-panel-list small,
+  .native-panel-section small {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .native-panel-field,
+  .native-panel-section {
+    display: grid;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    padding: 10px;
+  }
+
+  .native-panel-field span,
+  .native-panel-section strong {
+    color: var(--text-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  .native-panel-field input,
+  .native-panel-section select,
+  .native-panel-section button,
+  .native-panel-component-field input,
+  .native-panel-component-field select {
+    min-height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    padding: 0 8px;
+  }
+
+  .native-panel-vector-label {
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .native-panel-vector {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .native-panel-vector4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .native-panel-vector input {
+    min-width: 0;
+    min-height: 26px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font: 10px/1 var(--font-mono);
+    padding: 0 5px;
+  }
+
+  .native-panel-empty {
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+
+  .native-panel-component {
+    display: grid;
+    gap: 6px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+
+  .native-panel-component-title,
+  .native-panel-add-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .native-panel-component-title span {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .native-panel-component-title button,
+  .native-panel-add-row button {
+    min-width: 28px;
+    min-height: 24px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+  }
+
+  .native-panel-component-field {
+    display: grid;
+    grid-template-columns: minmax(74px, 0.45fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+  }
+
+  .native-panel-component-field span {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-muted);
+    text-overflow: ellipsis;
+    text-transform: capitalize;
+    white-space: nowrap;
+  }
+
+  .native-panel-component-field input[type="checkbox"] {
+    width: 16px;
+    min-height: 16px;
+    justify-self: start;
+    padding: 0;
+  }
+
+  .native-panel-add-row select {
+    min-width: 0;
   }
 
   ::-webkit-scrollbar {

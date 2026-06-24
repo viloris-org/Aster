@@ -1,14 +1,13 @@
 //! Wayland embedded compositor presentation boundary.
 //!
 //! Wayland does not provide an X11-style foreign child-window embedding model.
-//! The production zero-copy path for Wayland is therefore an application-owned
-//! embedded compositor that imports render buffers through DMA-BUF and composites
-//! them with Web UI views inside the host window.
+//! Aster's Linux editor embedding path intentionally runs under X11/Xwayland
+//! instead of native Wayland so viewport embedding can use X11 window handles
+//! without depending on experimental compositor ownership.
 //!
-//! This module owns that boundary. The default Linux build enables this backend
-//! so Wayland sessions prefer the embedded compositor instead of falling back to
-//! WebView canvas readback. Builds that explicitly disable the feature still
-//! expose clear refusal semantics.
+//! This module owns that boundary. The backend is retained for compatibility and
+//! future research, but current production selection returns clear refusal
+//! semantics for native Wayland presentation.
 
 use std::thread;
 #[cfg(feature = "wayland-embedded-compositor")]
@@ -57,9 +56,22 @@ pub fn support_for_runtime(is_wayland: bool) -> WaylandEmbeddedCompositorSupport
         };
     }
 
+    if prefers_x11_backend() {
+        return WaylandEmbeddedCompositorSupport {
+            status: WaylandEmbeddedCompositorStatus::FeatureDisabled,
+            available: false,
+            reason: "native Wayland Scene View embedding is disabled; run the editor under X11/Xwayland instead",
+        };
+    }
+
     #[cfg(feature = "wayland-embedded-compositor")]
     {
-        backend_support()
+        let _ = backend_support as fn() -> WaylandEmbeddedCompositorSupport;
+        WaylandEmbeddedCompositorSupport {
+            status: WaylandEmbeddedCompositorStatus::FeatureDisabled,
+            available: false,
+            reason: "native Wayland Scene View embedding is disabled; run the editor under X11/Xwayland instead",
+        }
     }
 
     #[cfg(not(feature = "wayland-embedded-compositor"))]
@@ -67,14 +79,30 @@ pub fn support_for_runtime(is_wayland: bool) -> WaylandEmbeddedCompositorSupport
         WaylandEmbeddedCompositorSupport {
             status: WaylandEmbeddedCompositorStatus::FeatureDisabled,
             available: false,
-            reason: "built without the wayland-embedded-compositor backend feature",
+            reason: "native Wayland Scene View embedding is disabled; run the editor under X11/Xwayland instead",
         }
     }
 }
 
 pub fn is_wayland_session() -> bool {
+    if prefers_x11_backend() {
+        return false;
+    }
+
     std::env::var("XDG_SESSION_TYPE").is_ok_and(|value| value.eq_ignore_ascii_case("wayland"))
         || std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
+fn prefers_x11_backend() -> bool {
+    env_list_contains("GDK_BACKEND", "x11") || env_list_contains("WINIT_UNIX_BACKEND", "x11")
+}
+
+fn env_list_contains(key: &str, needle: &str) -> bool {
+    std::env::var(key).is_ok_and(|value| {
+        value
+            .split([',', ':', ';'])
+            .any(|part| part.trim().eq_ignore_ascii_case(needle))
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -1636,15 +1664,20 @@ mod tests {
             WaylandEmbeddedCompositorStatus::FeatureDisabled
         );
         assert!(!support.available);
+        assert!(support.reason.contains("X11/Xwayland"));
     }
 
     #[cfg(feature = "wayland-embedded-compositor")]
     #[test]
-    fn feature_build_exposes_available_wayland_backend_by_default() {
+    fn feature_build_keeps_native_wayland_backend_disabled() {
         let support = support_for_runtime(true);
 
-        assert_eq!(support.status, WaylandEmbeddedCompositorStatus::Available);
-        assert!(support.available);
+        assert_eq!(
+            support.status,
+            WaylandEmbeddedCompositorStatus::FeatureDisabled
+        );
+        assert!(!support.available);
+        assert!(support.reason.contains("X11/Xwayland"));
     }
 
     #[test]

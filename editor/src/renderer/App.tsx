@@ -46,7 +46,7 @@ export interface QuestEditorArtifact {
 
 function AppFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-[var(--bg-base)]">
+    <div className="app-frame flex h-full min-h-0 w-full flex-col bg-[var(--bg-base)]">
       <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
     </div>
   );
@@ -98,8 +98,9 @@ export default function App() {
     document.body.dataset.desktopEnvironment = integration.desktop_environment;
     document.body.dataset.nativeChrome = String(integration.prefers_native_chrome);
     document.body.dataset.editorCompositor = String(Boolean(integration.editor_compositor_requested));
-    document.documentElement.style.background = integration.window_background;
-    document.body.style.background = integration.window_background;
+    document.documentElement.dataset.editorCompositor = String(Boolean(integration.editor_compositor_requested));
+    document.documentElement.style.background = '';
+    document.body.style.background = '';
   }, []);
 
   const initialize = useCallback(() => {

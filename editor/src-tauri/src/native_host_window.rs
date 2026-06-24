@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::editor_compositor;
@@ -18,12 +19,26 @@ pub struct NativeHostSceneTarget {
     pub layout_mode: NativeHostLayoutMode,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct NativeHostSceneRect {
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+pub struct NativeHostPanelState {
+    pub hierarchy_open: bool,
+    pub inspector_open: bool,
+    pub ai_panel_open: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+pub struct NativeHostLayoutState {
+    pub scene_rect: Option<NativeHostSceneRect>,
+    pub panels: NativeHostPanelState,
+    pub host_root_active: bool,
 }
 
 impl From<scene_window::SceneViewportRect> for NativeHostSceneRect {
@@ -41,9 +56,7 @@ impl From<scene_window::SceneViewportRect> for NativeHostSceneRect {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub enum NativeHostLayoutMode {
-    /// Legacy Linux bridge: retrofit a host surface around Tauri's main WebView.
-    BridgeTauriWebView,
-    /// Target model: native host window owns root and embeds Web UI views.
+    /// Target model: native host window owns root geometry and embeds Web UI views.
     HostOwnedRoot,
 }
 
@@ -65,7 +78,7 @@ enum NativeHostWindowBackend {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NativeHostRoute {
-    LinuxBridge(NativeHostBackend),
+    LinuxHostRoot(NativeHostBackend),
     WindowsDirectComposition,
     MacosCoreAnimation,
     RootWindowSurface,
@@ -129,7 +142,7 @@ const MACOS_CORE_ANIMATION_HOST_PLAN: MacosCoreAnimationHostPlan = MacosCoreAnim
     web_ui_route: "web UI route: WKWebView/AppKit panels embedded in the native view tree",
 };
 
-pub fn install_bridge_host_on_main_thread(
+pub fn install_host_root_on_main_thread(
     app: &tauri::AppHandle,
 ) -> Result<NativeHostLayoutMode, String> {
     let window = app
@@ -140,12 +153,11 @@ pub fn install_bridge_host_on_main_thread(
         .map_err(|error| format!("main window handle: {error}"))?
         .as_raw();
     match native_host_route(native_host_window_backend(handle)) {
-        NativeHostRoute::LinuxBridge(NativeHostBackend::X11) => {
-            ensure_linux_host_surface_on_main_thread(app, NativeHostBackend::X11)
+        NativeHostRoute::LinuxHostRoot(NativeHostBackend::X11) => {
+            ensure_x11_host_surface_on_main_thread(app)?;
+            Ok(NativeHostLayoutMode::HostOwnedRoot)
         }
-        NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland) => {
-            ensure_linux_host_surface_on_main_thread(app, NativeHostBackend::Wayland)
-        }
+        NativeHostRoute::LinuxHostRoot(NativeHostBackend::Wayland) => Err(native_wayland_error()),
         NativeHostRoute::WindowsDirectComposition => {
             Err(WINDOWS_DIRECTCOMPOSITION_HOST_PLAN.unavailable_error())
         }
@@ -174,9 +186,9 @@ fn native_host_window_backend(handle: RawWindowHandle) -> NativeHostWindowBacken
 
 fn native_host_route(backend: NativeHostWindowBackend) -> NativeHostRoute {
     match backend {
-        NativeHostWindowBackend::LinuxX11 => NativeHostRoute::LinuxBridge(NativeHostBackend::X11),
+        NativeHostWindowBackend::LinuxX11 => NativeHostRoute::LinuxHostRoot(NativeHostBackend::X11),
         NativeHostWindowBackend::LinuxWayland => {
-            NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland)
+            NativeHostRoute::LinuxHostRoot(NativeHostBackend::Wayland)
         }
         NativeHostWindowBackend::Win32 => NativeHostRoute::WindowsDirectComposition,
         NativeHostWindowBackend::AppKit => NativeHostRoute::MacosCoreAnimation,
@@ -194,12 +206,10 @@ pub fn main_window_scene_target(app: &tauri::AppHandle) -> Result<NativeHostScen
         .map_err(|error| format!("main window handle: {error}"))?
         .as_raw();
     match native_host_route(native_host_window_backend(handle)) {
-        NativeHostRoute::LinuxBridge(NativeHostBackend::X11) => {
+        NativeHostRoute::LinuxHostRoot(NativeHostBackend::X11) => {
             create_linux_host_surface(app.clone(), NativeHostBackend::X11)
         }
-        NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland) => {
-            create_linux_host_surface(app.clone(), NativeHostBackend::Wayland)
-        }
+        NativeHostRoute::LinuxHostRoot(NativeHostBackend::Wayland) => Err(native_wayland_error()),
         NativeHostRoute::WindowsDirectComposition => create_windows_host_scene_target(),
         NativeHostRoute::MacosCoreAnimation => create_macos_host_scene_target(),
         NativeHostRoute::RootWindowSurface => create_root_window_scene_surface(app),
@@ -207,6 +217,10 @@ pub fn main_window_scene_target(app: &tauri::AppHandle) -> Result<NativeHostScen
             "native host window Scene View does not support this desktop backend yet: {handle:?}"
         )),
     }
+}
+
+fn native_wayland_error() -> String {
+    "native Wayland Scene View embedding is disabled; start the editor under X11/Xwayland so GTK exposes X11 handles".to_owned()
 }
 
 pub fn resize_main_window_scene_surface(
@@ -322,16 +336,8 @@ fn create_linux_host_surface(
         .map_err(|error| format!("native host surface creation timed out: {error}"))?
 }
 
-#[cfg(target_os = "linux")]
-fn ensure_linux_host_surface_on_main_thread(
-    app: &tauri::AppHandle,
-    backend: NativeHostBackend,
-) -> Result<NativeHostLayoutMode, String> {
-    create_linux_host_surface_on_main_thread(app, backend).map(|target| target.layout_mode)
-}
-
 #[cfg(not(target_os = "linux"))]
-fn ensure_linux_host_surface_on_main_thread(
+fn ensure_linux_host_root_on_main_thread(
     _app: &tauri::AppHandle,
     _backend: NativeHostBackend,
 ) -> Result<NativeHostLayoutMode, String> {
@@ -361,6 +367,14 @@ fn create_linux_host_surface_on_main_thread(
 ) -> Result<NativeHostSceneTarget, String> {
     use gtk::prelude::*;
 
+    if backend == NativeHostBackend::X11 {
+        let surface = ensure_x11_host_surface_on_main_thread(app)?;
+        return Ok(NativeHostSceneTarget {
+            surface,
+            layout_mode: NativeHostLayoutMode::HostOwnedRoot,
+        });
+    }
+
     let window = app
         .get_window("main")
         .ok_or_else(|| "main editor window is not available".to_owned())?;
@@ -368,7 +382,7 @@ fn create_linux_host_surface_on_main_thread(
         .default_vbox()
         .map_err(|error| format!("main GTK vbox: {error}"))?;
     let vbox_widget: gtk::Widget = vbox.upcast();
-    let _overlay = ensure_native_host_root(&vbox_widget)?;
+    let _host_root = ensure_native_host_root(&vbox_widget)?;
 
     let drawing = find_named_widget(&vbox_widget, HOST_DRAWING_NAME)
         .and_then(|widget| widget.downcast::<gtk::DrawingArea>().ok())
@@ -396,41 +410,206 @@ fn resize_linux_host_surface_on_main_thread(
     let window = app
         .get_window("main")
         .ok_or_else(|| "main editor window is not available".to_owned())?;
+    let handle = window
+        .window_handle()
+        .map_err(|error| format!("main window handle: {error}"))?
+        .as_raw();
+    if native_host_window_backend(handle) == NativeHostWindowBackend::LinuxX11 {
+        ensure_x11_host_surface_on_main_thread(app)?;
+        return resize_x11_host_surface_on_main_thread(rect);
+    }
+
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main editor window is not available".to_owned())?;
     let vbox = window
         .default_vbox()
         .map_err(|error| format!("main GTK vbox: {error}"))?;
     let vbox_widget: gtk::Widget = vbox.upcast();
-    let overlay = ensure_native_host_root(&vbox_widget)?;
+    let host_root = ensure_native_host_root(&vbox_widget)?;
     let drawing = find_named_widget(&vbox_widget, HOST_DRAWING_NAME)
         .and_then(|widget| widget.downcast::<gtk::DrawingArea>().ok())
         .ok_or_else(|| "native host drawing surface is missing".to_owned())?;
 
-    let allocation = overlay.allocation();
-    let right = (allocation.width() - rect.x - rect.width as i32).max(0);
-    let bottom = (allocation.height() - rect.y - rect.height as i32).max(0);
-    drawing.set_margin_start(rect.x.max(0));
-    drawing.set_margin_top(rect.y.max(0));
-    drawing.set_margin_end(right);
-    drawing.set_margin_bottom(bottom);
     drawing.set_size_request(rect.width.max(1) as i32, rect.height.max(1) as i32);
+    host_root.move_(&drawing, rect.x.max(0), rect.y.max(0));
     drawing.queue_resize();
     drawing.show_all();
+    configure_native_scene_window(&drawing, Some(rect));
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-const HOST_OVERLAY_NAME: &str = "aster-native-host-overlay";
+const HOST_ROOT_NAME: &str = "aster-native-host-root";
 #[cfg(target_os = "linux")]
 const HOST_DRAWING_NAME: &str = "aster-native-host-scene-surface";
+#[cfg(target_os = "linux")]
+thread_local! {
+    static X11_HOST_SURFACE: std::cell::RefCell<Option<X11HostSurface>> = const { std::cell::RefCell::new(None) };
+}
 
 #[cfg(target_os = "linux")]
-fn ensure_native_host_root(vbox_widget: &gtk::Widget) -> Result<gtk::Overlay, String> {
+struct X11HostSurface {
+    display: *mut x11::xlib::Display,
+    parent: x11::xlib::Window,
+    window: x11::xlib::Window,
+    mapped: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for X11HostSurface {
+    fn drop(&mut self) {
+        if !self.display.is_null() && self.window != 0 {
+            unsafe {
+                x11::xlib::XDestroyWindow(self.display, self.window);
+                x11::xlib::XFlush(self.display);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_x11_host_surface_on_main_thread(
+    app: &tauri::AppHandle,
+) -> Result<scene_window::SceneRawSurface, String> {
     use gtk::prelude::*;
 
-    if let Some(widget) = find_named_widget(vbox_widget, HOST_OVERLAY_NAME) {
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "main editor window is not available".to_owned())?;
+    let parent = match window
+        .window_handle()
+        .map_err(|error| format!("main window handle: {error}"))?
+        .as_raw()
+    {
+        RawWindowHandle::Xlib(handle) => handle.window,
+        RawWindowHandle::Xcb(handle) => handle.window.get() as x11::xlib::Window,
+        other => {
+            return Err(format!(
+                "X11 native scene surface requires Xlib/Xcb main window, got {other:?}"
+            ));
+        }
+    };
+    let vbox = window
+        .default_vbox()
+        .map_err(|error| format!("main GTK vbox: {error}"))?;
+    let vbox_widget: gtk::Widget = vbox.upcast();
+    let gdk_window = vbox_widget.toplevel().and_then(|widget| widget.window());
+    let gdk_window = gdk_window
+        .ok_or_else(|| "main GTK toplevel did not realize a native GDK window".to_owned())?;
+    if !gdk_window.ensure_native() {
+        return Err("main GTK toplevel could not expose a native X11 window".to_owned());
+    }
+    let display = gdk_window.display();
+    let xdisplay = unsafe {
+        gdk_x11_sys::gdk_x11_display_get_xdisplay(
+            display.as_ptr() as *mut gdk_x11_sys::GdkX11Display
+        )
+    };
+    if xdisplay.is_null() || parent == 0 {
+        return Err("GTK did not expose main X11 parent handles".to_owned());
+    }
+
+    X11_HOST_SURFACE.with(|cell| {
+        let mut surface = cell.borrow_mut();
+        let recreate = surface
+            .as_ref()
+            .is_none_or(|surface| surface.display != xdisplay || surface.parent != parent);
+        if recreate {
+            *surface = Some(create_x11_child_surface(xdisplay, parent)?);
+        }
+        let surface = surface
+            .as_ref()
+            .ok_or_else(|| "X11 native scene surface is missing".to_owned())?;
+        Ok(scene_window::SceneRawSurface::Xlib {
+            display: surface.display as usize,
+            window: surface.window as u64,
+        })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn create_x11_child_surface(
+    display: *mut x11::xlib::Display,
+    parent: x11::xlib::Window,
+) -> Result<X11HostSurface, String> {
+    let window = unsafe { x11::xlib::XCreateSimpleWindow(display, parent, 0, 0, 1, 1, 0, 0, 0) };
+    if window == 0 {
+        return Err("X11 could not create native scene child window".to_owned());
+    }
+    unsafe {
+        x11::xlib::XFlush(display);
+    }
+    Ok(X11HostSurface {
+        display,
+        parent,
+        window,
+        mapped: false,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn resize_x11_host_surface_on_main_thread(rect: NativeHostSceneRect) -> Result<(), String> {
+    X11_HOST_SURFACE.with(|cell| {
+        let mut surface = cell.borrow_mut();
+        let surface = surface
+            .as_mut()
+            .ok_or_else(|| "X11 native scene surface is missing".to_owned())?;
+        unsafe {
+            x11::xlib::XMoveResizeWindow(
+                surface.display,
+                surface.window,
+                rect.x.max(0),
+                rect.y.max(0),
+                rect.width.max(1),
+                rect.height.max(1),
+            );
+            x11::xlib::XRaiseWindow(surface.display, surface.window);
+            if !surface.mapped {
+                x11::xlib::XMapWindow(surface.display, surface.window);
+                surface.mapped = true;
+            }
+            x11::xlib::XFlush(surface.display);
+        }
+        Ok(())
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub fn hide_main_window_scene_surface(app: tauri::AppHandle) -> Result<(), String> {
+    let (tx, rx) = mpsc::channel();
+    app.run_on_main_thread(move || {
+        let result = X11_HOST_SURFACE.with(|cell| {
+            let mut surface = cell.borrow_mut();
+            if let Some(surface) = surface.as_mut() {
+                unsafe {
+                    x11::xlib::XUnmapWindow(surface.display, surface.window);
+                    x11::xlib::XFlush(surface.display);
+                }
+                surface.mapped = false;
+            }
+            Ok(())
+        });
+        let _ = tx.send(result);
+    })
+    .map_err(|error| format!("schedule native host surface hide: {error}"))?;
+    rx.recv_timeout(Duration::from_secs(2))
+        .map_err(|error| format!("native host surface hide timed out: {error}"))?
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn hide_main_window_scene_surface(_app: tauri::AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_native_host_root(vbox_widget: &gtk::Widget) -> Result<gtk::Fixed, String> {
+    use gtk::prelude::*;
+
+    if let Some(widget) = find_named_widget(vbox_widget, HOST_ROOT_NAME) {
         return widget
-            .downcast::<gtk::Overlay>()
-            .map_err(|_| "native host overlay has unexpected GTK type".to_owned());
+            .downcast::<gtk::Fixed>()
+            .map_err(|_| "native host root has unexpected GTK type".to_owned());
     }
 
     let vbox = vbox_widget
@@ -445,32 +624,69 @@ fn ensure_native_host_root(vbox_widget: &gtk::Widget) -> Result<gtk::Overlay, St
     let drawing = gtk::DrawingArea::new();
     drawing.set_widget_name(HOST_DRAWING_NAME);
     drawing.set_has_window(true);
-    drawing.set_hexpand(true);
-    drawing.set_vexpand(true);
-    drawing.set_halign(gtk::Align::Fill);
-    drawing.set_valign(gtk::Align::Fill);
-    drawing.set_no_show_all(false);
+    drawing.set_size_request(1, 1);
+    drawing.set_hexpand(false);
+    drawing.set_vexpand(false);
+    drawing.set_halign(gtk::Align::Start);
+    drawing.set_valign(gtk::Align::Start);
+    drawing.set_no_show_all(true);
 
-    let overlay = gtk::Overlay::new();
-    overlay.set_widget_name(HOST_OVERLAY_NAME);
-    overlay.set_hexpand(true);
-    overlay.set_vexpand(true);
-    overlay.set_halign(gtk::Align::Fill);
-    overlay.set_valign(gtk::Align::Fill);
-    overlay.add(&drawing);
+    let host_root = gtk::Fixed::new();
+    host_root.set_widget_name(HOST_ROOT_NAME);
+    host_root.set_hexpand(true);
+    host_root.set_vexpand(true);
+    host_root.set_halign(gtk::Align::Fill);
+    host_root.set_valign(gtk::Align::Fill);
+    host_root.put(&drawing, 0, 0);
 
     for child in children {
         child.set_hexpand(true);
         child.set_vexpand(true);
         child.set_halign(gtk::Align::Fill);
         child.set_valign(gtk::Align::Fill);
-        overlay.add_overlay(&child);
-        overlay.set_overlay_pass_through(&child, false);
+        host_root.put(&child, 0, 0);
     }
 
-    vbox.pack_start(&overlay, true, true, 0);
-    overlay.show_all();
-    Ok(overlay)
+    let host_root_resize = host_root.clone();
+    host_root.connect_size_allocate(move |root, allocation| {
+        for child in root.children() {
+            if child.widget_name().as_str() == HOST_DRAWING_NAME {
+                continue;
+            }
+            child.set_size_request(allocation.width().max(1), allocation.height().max(1));
+            host_root_resize.move_(&child, 0, 0);
+        }
+    });
+
+    vbox.pack_start(&host_root, true, true, 0);
+    host_root.show_all();
+    drawing.hide();
+    Ok(host_root)
+}
+
+#[cfg(target_os = "linux")]
+fn configure_native_scene_window(drawing: &gtk::DrawingArea, rect: Option<NativeHostSceneRect>) {
+    use gtk::prelude::*;
+
+    if let (Some(window), Some(rect)) = (drawing.window(), rect) {
+        let _ = window.ensure_native();
+        window.move_resize(
+            rect.x.max(0),
+            rect.y.max(0),
+            rect.width.max(1) as i32,
+            rect.height.max(1) as i32,
+        );
+        let region = gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
+            0,
+            0,
+            rect.width.max(1) as i32,
+            rect.height.max(1) as i32,
+        ));
+        window.set_opaque_region(Some(&region));
+        window.show();
+        window.restack(None, true);
+        window.raise();
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -554,11 +770,11 @@ mod tests {
     fn native_host_route_classifies_desktop_backends() {
         assert_eq!(
             native_host_route(NativeHostWindowBackend::LinuxX11),
-            NativeHostRoute::LinuxBridge(NativeHostBackend::X11)
+            NativeHostRoute::LinuxHostRoot(NativeHostBackend::X11)
         );
         assert_eq!(
             native_host_route(NativeHostWindowBackend::LinuxWayland),
-            NativeHostRoute::LinuxBridge(NativeHostBackend::Wayland)
+            NativeHostRoute::LinuxHostRoot(NativeHostBackend::Wayland)
         );
         assert_eq!(
             native_host_route(NativeHostWindowBackend::Win32),
@@ -579,6 +795,26 @@ mod tests {
         assert_eq!(
             native_host_route(NativeHostWindowBackend::UnsupportedDesktop),
             NativeHostRoute::UnsupportedDesktop
+        );
+    }
+
+    #[test]
+    fn native_host_scene_rect_sanitizes_scene_viewport_size() {
+        let rect = NativeHostSceneRect::from(scene_window::SceneViewportRect {
+            x: -12,
+            y: 24,
+            width: 0,
+            height: 0,
+        });
+
+        assert_eq!(
+            rect,
+            NativeHostSceneRect {
+                x: -12,
+                y: 24,
+                width: 1,
+                height: 1,
+            }
         );
     }
 

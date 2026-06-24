@@ -143,20 +143,47 @@ pub fn platform_support() -> EditorCompositorSupport {
     }
 }
 
+pub fn platform_support_for_window_handle(
+    handle: raw_window_handle::RawWindowHandle,
+) -> EditorCompositorSupport {
+    #[cfg(target_os = "linux")]
+    {
+        match handle {
+            raw_window_handle::RawWindowHandle::Xlib(_)
+            | raw_window_handle::RawWindowHandle::Xcb(_) => {
+                linux_platform_support_for_runtime(false)
+            }
+            raw_window_handle::RawWindowHandle::Wayland(_) => {
+                linux_platform_support_for_runtime(true)
+            }
+            _ => EditorCompositorSupport {
+                backend: EditorCompositorBackend::LinuxGtk,
+                available: false,
+                reason: "Linux native-host-window Scene View requires an X11/Xwayland GTK window handle; using canvas readback fallback.",
+            },
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = handle;
+        platform_support()
+    }
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn linux_platform_support_for_runtime(is_wayland: bool) -> EditorCompositorSupport {
     if is_wayland {
         return EditorCompositorSupport {
             backend: EditorCompositorBackend::LinuxGtk,
             available: false,
-            reason: "Linux GTK/Wayland native-host-window adapter is disabled because it creates a separate child surface instead of a real host-composited Scene View; use wayland-embedded-compositor or canvas fallback.",
+            reason: "Linux native Wayland Scene View embedding is disabled; using canvas readback fallback.",
         };
     }
 
     EditorCompositorSupport {
         backend: EditorCompositorBackend::LinuxGtk,
         available: true,
-        reason: "Linux GTK/X11 native-host-window adapter is available; the host owns Scene View presentation and embeds Web UI panels.",
+        reason: "Linux GTK/X11 native-host-window adapter is available; the Scene View renders into the host-owned GTK/X11 surface.",
     }
 }
 
@@ -243,10 +270,10 @@ pub fn presentation_capabilities_for(
 ) -> ViewportPresentationCapabilities {
     let native_host_available = compositor_requested && support.available;
     let wayland_embedded_available = compositor_requested && wayland_support.available;
-    let default_mode = if wayland_embedded_available {
-        ViewportPresentationMode::WaylandEmbeddedCompositor
-    } else if native_host_available {
+    let default_mode = if native_host_available {
         ViewportPresentationMode::NativeHostWindow
+    } else if wayland_embedded_available {
+        ViewportPresentationMode::WaylandEmbeddedCompositor
     } else {
         ViewportPresentationMode::CanvasReadback
     };
@@ -510,7 +537,7 @@ mod tests {
         let support = linux_platform_support_for_runtime(true);
         assert_eq!(support.backend, EditorCompositorBackend::LinuxGtk);
         assert!(!support.available);
-        assert!(support.reason.contains("wayland-embedded-compositor"));
+        assert!(support.reason.contains("canvas readback"));
     }
 
     #[cfg(target_os = "linux")]
@@ -690,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn presentation_capabilities_select_wayland_embedded_compositor_when_available() {
+    fn presentation_capabilities_prefer_native_host_over_wayland_backend_when_both_available() {
         let capabilities = presentation_capabilities_for(
             true,
             EditorCompositorSupport {
@@ -703,12 +730,12 @@ mod tests {
 
         assert_eq!(
             capabilities.default_mode,
-            ViewportPresentationMode::WaylandEmbeddedCompositor
+            ViewportPresentationMode::NativeHostWindow
         );
         assert!(capabilities.adapters.iter().any(|adapter| adapter.mode
             == ViewportPresentationMode::WaylandEmbeddedCompositor
             && adapter.available
-            && adapter.default
+            && !adapter.default
             && !adapter.experimental
             && adapter.zero_copy
             && !adapter.cpu_readback
@@ -719,6 +746,6 @@ mod tests {
             && !adapter.default));
         assert!(capabilities.adapters.iter().any(|adapter| adapter.mode
             == ViewportPresentationMode::NativeHostWindow
-            && !adapter.default));
+            && adapter.default));
     }
 }

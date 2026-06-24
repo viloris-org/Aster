@@ -197,11 +197,71 @@ export function viewportPresentationCapabilities(): Promise<ViewportPresentation
 }
 
 export function viewportPresentationStatus(): Promise<ViewportPresentationStatus> {
-  return invoke<ViewportPresentationStatus>('viewport_presentation_status');
+  return invoke<ViewportPresentationStatus>('viewport_presentation_status_for_main_window')
+    .catch(() => invoke<ViewportPresentationStatus>('viewport_presentation_status'));
 }
 
 export function waylandEmbeddedCompositorStatus(): Promise<WaylandEmbeddedCompositorRuntimeStatus> {
   return invoke<WaylandEmbeddedCompositorRuntimeStatus>('wayland_embedded_compositor_status');
+}
+
+export interface NativeHostEditorLayout {
+  viewport: { x: number; y: number; width: number; height: number };
+  hierarchy_open: boolean;
+  inspector_open: boolean;
+  ai_panel_open: boolean;
+}
+
+export interface NativeHostLayoutState {
+  scene_rect: { x: number; y: number; width: number; height: number } | null;
+  panels: {
+    hierarchy_open: boolean;
+    inspector_open: boolean;
+    ai_panel_open: boolean;
+  };
+  host_root_active: boolean;
+}
+
+export type NativePanelKind = 'toolbar' | 'hierarchy' | 'inspector' | 'statusbar';
+
+export interface NativePanelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface NativePanelLayout {
+  toolbar: NativePanelRect;
+  hierarchy: NativePanelRect;
+  inspector: NativePanelRect;
+  statusbar: NativePanelRect;
+}
+
+export interface NativePanelHostStatus {
+  enabled: boolean;
+  installed: boolean;
+  panels: NativePanelKind[];
+  visible_panels: NativePanelKind[];
+  layout: NativePanelLayout;
+}
+
+export async function syncNativeHostEditorLayout(
+  layout: NativeHostEditorLayout,
+): Promise<NativeHostLayoutState> {
+  return invoke<NativeHostLayoutState>('sync_native_host_editor_layout', { layout });
+}
+
+export function nativePanelHostStatus(): Promise<NativePanelHostStatus> {
+  return invoke<NativePanelHostStatus>('native_panel_host_status');
+}
+
+export function ensureNativePanelHost(): Promise<NativePanelHostStatus> {
+  return invoke<NativePanelHostStatus>('ensure_native_panel_host');
+}
+
+export function syncNativePanelLayout(layout: NativePanelLayout): Promise<NativePanelHostStatus> {
+  return invoke<NativePanelHostStatus>('sync_native_panel_layout', { layout });
 }
 
 export async function syncEditorCompositorViewport(params: {
@@ -300,6 +360,9 @@ export async function syncNoCpuReadbackSceneView(params: {
   targetX?: number;
   targetY?: number;
   targetZ?: number;
+  hierarchyOpen?: boolean;
+  inspectorOpen?: boolean;
+  aiPanelOpen?: boolean;
 }): Promise<void> {
   await invoke('sync_no_cpu_readback_scene_view', {
     viewport: params.viewport,
@@ -309,6 +372,9 @@ export async function syncNoCpuReadbackSceneView(params: {
     targetX: params.targetX ?? null,
     targetY: params.targetY ?? null,
     targetZ: params.targetZ ?? null,
+    hierarchyOpen: params.hierarchyOpen ?? null,
+    inspectorOpen: params.inspectorOpen ?? null,
+    aiPanelOpen: params.aiPanelOpen ?? null,
   });
 }
 

@@ -275,7 +275,7 @@ pub fn spawn_scene_window_with_mode(
                     width: surface_width,
                     height: surface_height,
                 },
-                Some(viewport),
+                Some(raw_surface_local_viewport(viewport)),
                 snapshot,
                 camera,
                 cmd_rx,
@@ -826,10 +826,15 @@ impl RawSceneApp {
     }
 
     fn apply_viewport(&mut self, viewport: SceneViewportRect) {
-        let viewport = viewport.sanitized();
+        let viewport = raw_surface_local_viewport(viewport);
         if let Some(runtime) = self.runtime.as_mut() {
             if self.viewport.is_some() {
                 self.viewport = Some(viewport);
+                self.width = viewport.width;
+                self.height = viewport.height;
+                runtime
+                    .renderer
+                    .resize_surface(viewport.width, viewport.height);
                 runtime.renderer.set_surface_viewport(Some(
                     engine_render_wgpu::SurfaceViewportRect::new(
                         viewport.x.max(0) as u32,
@@ -1021,6 +1026,16 @@ impl RawSceneApp {
     }
 }
 
+fn raw_surface_local_viewport(viewport: SceneViewportRect) -> SceneViewportRect {
+    let viewport = viewport.sanitized();
+    SceneViewportRect {
+        x: 0,
+        y: 0,
+        width: viewport.width,
+        height: viewport.height,
+    }
+}
+
 fn scene_surface_performance_config(mode: &SceneWindowMode) -> RenderPerformanceConfig {
     let mut config = RenderPerformanceConfig::editor_1080p75();
     if matches!(
@@ -1084,6 +1099,21 @@ mod tests {
 
         assert_eq!(config.present_strategy, PresentStrategy::VSync);
         assert_eq!(config.maximum_frame_latency, 2);
+    }
+
+    #[test]
+    fn raw_surface_viewport_uses_surface_local_coordinates() {
+        let viewport = raw_surface_local_viewport(SceneViewportRect {
+            x: 320,
+            y: 96,
+            width: 1273,
+            height: 752,
+        });
+
+        assert_eq!(viewport.x, 0);
+        assert_eq!(viewport.y, 0);
+        assert_eq!(viewport.width, 1273);
+        assert_eq!(viewport.height, 752);
     }
 
     #[test]

@@ -122,6 +122,7 @@ interface ShellState {
   can_undo: boolean;
   can_redo: boolean;
   scene_version?: number;
+  selected_entity?: string | null;
 }
 
 interface SceneObject {
@@ -1605,6 +1606,10 @@ export default function EditorPage({
   const [waylandRuntimeDiagnostics, setWaylandRuntimeDiagnostics] = useState<WaylandEmbeddedCompositorRuntimeStatus | null>(null);
   const [nativeSceneError, setNativeSceneError] = useState<string | null>(null);
   const cameraRevisionFrameRef = useRef<number | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const statusbarRef = useRef<HTMLDivElement>(null);
+  const hierarchyPanelRef = useRef<HTMLElement>(null);
+  const inspectorPanelRef = useRef<HTMLElement>(null);
   const viewportFrameRef = useRef<HTMLDivElement>(null);
   const prevSceneVersionRef = useRef(0);
   const cameraRef = useRef({
@@ -1730,6 +1735,7 @@ export default function EditorPage({
       try {
         const state = await rpc<ShellState>('shell/get_state');
         setShellState(state);
+        setSelectedId(current => current === (state.selected_entity ?? null) ? current : state.selected_entity ?? null);
         const newVer = state.scene_version ?? 0;
         if (newVer !== prevSceneVersionRef.current) {
           prevSceneVersionRef.current = newVer;
@@ -1753,6 +1759,10 @@ export default function EditorPage({
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
     };
+  }, []);
+
+  const syncNativePanelBounds = useCallback(async () => {
+    return;
   }, []);
 
   const openDefaultScenePresentation = useCallback(async () => {
@@ -1831,6 +1841,7 @@ export default function EditorPage({
         const viewport = embeddedSceneViewport();
         if (!viewport) return;
         const camera = cameraRef.current;
+        syncNativePanelBounds().catch(() => {});
         const syncPromise = isWaylandEmbeddedCompositorPresentation(viewportPresentation)
           ? syncWaylandEmbeddedCompositorViewport({ viewport })
           : syncNoCpuReadbackSceneView({
@@ -1841,6 +1852,9 @@ export default function EditorPage({
             targetX: camera.targetX,
             targetY: camera.targetY,
             targetZ: camera.targetZ,
+            hierarchyOpen,
+            inspectorOpen,
+            aiPanelOpen,
           });
         syncPromise.catch((error) => {
           setNativeSceneError(error instanceof Error ? error.message : String(error));
@@ -1858,7 +1872,16 @@ export default function EditorPage({
       window.removeEventListener('scroll', syncViewport, true);
       if (raf !== null) window.cancelAnimationFrame(raf);
     };
-  }, [cameraRevision, embeddedSceneViewport, nativeSceneActive, viewportPresentation]);
+  }, [
+    aiPanelOpen,
+    cameraRevision,
+    embeddedSceneViewport,
+    hierarchyOpen,
+    inspectorOpen,
+    nativeSceneActive,
+    syncNativePanelBounds,
+    viewportPresentation,
+  ]);
 
   useEffect(() => {
     if (shellState?.has_project) {
@@ -2559,9 +2582,12 @@ export default function EditorPage({
   }
 
   return (
-    <div className={shellClass.root}>
+    <div
+      className={shellClass.root}
+      data-native-panels="false"
+    >
       {/* Editor toolbar */}
-      <div className={shellClass.toolbar}>
+      <div ref={toolbarRef} className={shellClass.toolbar} data-native-panel-shadow="true">
         <div className={shellClass.toolbarProject}>
           <span className={shellClass.toolbarProjectKicker}>{t('editor_workspace_kicker')}</span>
           <span className={shellClass.toolbarProjectName}>{shellState.project_name || t('editor_untitled')}</span>
@@ -2697,7 +2723,7 @@ export default function EditorPage({
             </div>}
 
             {workspaceView === 'game' && <div className={gameSurfaceClass(hierarchyOpen, inspectorOpen)}>
-              {hierarchyOpen && <aside className={gameClass.sidePanel}>
+              {hierarchyOpen && <aside ref={hierarchyPanelRef} className={gameClass.sidePanel} data-native-panel-shadow="true">
                 <header className={gameClass.panelHeader}>
                   <div className={gameClass.panelHeaderText}><span>Hierarchy</span><strong className={gameClass.panelHeaderTitle}>{sceneTree.length} objects</strong></div>
                   <div className={gameClass.panelHeaderActions}>
@@ -2780,7 +2806,11 @@ export default function EditorPage({
                   <button className={gameClass.createButton} onClick={() => createPresetObject('Wind Zone', 'WindZone')}><IconPlus /> Wind</button>
                   <button className={gameClass.createButton} onClick={createBehaviorObject}><IconCode /> Behavior</button>
                 </div>
-                <div ref={viewportFrameRef} className={gameClass.previewCanvas} onClick={handleViewportClick}>
+                <div
+                  ref={viewportFrameRef}
+                  className={gameClass.previewCanvas}
+                  onClick={handleViewportClick}
+                >
                   {nativeSceneError && (
                     <div className={gameClass.nativeError}>
                       Native Scene View failed, using canvas fallback: {nativeSceneError}
@@ -2799,7 +2829,7 @@ export default function EditorPage({
                 </div>
               </section>
 
-              {inspectorOpen && <aside className={gameClass.inspectorPanel}>
+              {inspectorOpen && <aside ref={inspectorPanelRef} className={gameClass.inspectorPanel} data-native-panel-shadow="true">
                 <header className={gameClass.panelHeader}>
                   <div className={gameClass.panelHeaderText}>
                     <span>Inspector</span>
@@ -3260,7 +3290,7 @@ export default function EditorPage({
       </div>
 
       {/* Status Bar */}
-      <footer className={shellClass.statusbar}>
+      <footer ref={statusbarRef} className={shellClass.statusbar} data-native-panel-shadow="true">
         <div className={shellClass.statusGroup}>
           <span className={shellClass.statusItem}>{shellState.project_name || t('status_no_project')}</span>
           <span className={shellClass.statusDivider} />
