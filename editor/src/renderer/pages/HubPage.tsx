@@ -722,10 +722,13 @@ interface CopilotSettingsData {
 function normalizeCopilotSettings(settings: CopilotSettingsData): CopilotSettingsData {
   const providerMap: Record<string, CopilotSettingsData['provider']> = { open_a_i: 'openai' };
   const provider = providerMap[settings.provider] ?? settings.provider;
+  const usesApiKey = provider !== 'codex_oauth' && provider !== 'ollama' && provider !== 'stub';
   return {
     ...settings,
     provider,
     model: provider === 'stub' ? 'none' : settings.model,
+    api_key: usesApiKey ? settings.api_key : null,
+    has_api_key: usesApiKey ? settings.has_api_key : false,
   };
 }
 
@@ -800,7 +803,11 @@ function CopilotSettingsSection() {
     setSaveError(null);
     try {
       const payload = normalizeCopilotSettings(settings);
-      if (!keyChanged) delete (payload as any).api_key;
+      if (settings.provider === 'codex_oauth' || settings.provider === 'ollama' || settings.provider === 'stub') {
+        payload.api_key = null;
+      } else if (!keyChanged) {
+        delete (payload as any).api_key;
+      }
       await rpc('app/update_copilot_settings', payload);
       const refreshed = await rpc<CopilotSettingsData>('app/get_copilot_settings').catch(() => null);
       if (refreshed) {
@@ -819,13 +826,13 @@ function CopilotSettingsSection() {
     setCodexAuthBusy(true);
     setCodexAuthError(null);
     try {
-      const auth = await rpc<{ url: string; user_code: string; interval_seconds: number }>(
+      const auth = await rpc<{ url: string; user_code?: string | null; interval_seconds: number }>(
         'app/codex_oauth_start',
       );
-      setCodexCode(auth.user_code);
+      setCodexCode(auth.user_code || null);
       await rpc('app/open_folder', { path: auth.url });
       for (let attempt = 0; attempt < 100; attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, (auth.interval_seconds + 3) * 1000));
+        await new Promise(resolve => setTimeout(resolve, Math.max(auth.interval_seconds, 1) * 1000));
         const result = await rpc<{ status: 'pending' | 'connected' }>('app/codex_oauth_poll');
         if (result.status === 'connected') {
           setCodexConnected(true);
@@ -848,7 +855,8 @@ function CopilotSettingsSection() {
     setCodexCode(null);
   }, []);
 
-  const showApiKey = currentMeta?.requires_api_key ?? (settings.provider !== 'ollama' && settings.provider !== 'stub');
+  const showApiKey = currentMeta?.requires_api_key
+    ?? (settings.provider !== 'codex_oauth' && settings.provider !== 'ollama' && settings.provider !== 'stub');
   const showEndpoint = currentMeta?.endpoint_configurable
     ?? (settings.provider === 'ollama' || settings.provider === 'custom');
   const endpointRequired = settings.provider === 'custom';

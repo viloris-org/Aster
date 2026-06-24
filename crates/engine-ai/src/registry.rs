@@ -297,35 +297,11 @@ fn builtin_models() -> Vec<ModelInfo> {
             },
         },
         ModelInfo {
-            id: "gpt-5.3-codex".into(),
-            display_name: "GPT-5.3 Codex (OAuth)".into(),
-            provider: ProviderKind::CodexOAuth,
-            context_window: 400_000,
-            default_max_tokens: 128_000,
-            capabilities: ModelCapabilities {
-                can_reason: true,
-                supports_vision: true,
-                supports_tools: true,
-            },
-        },
-        ModelInfo {
             id: "gpt-5.3-codex-spark".into(),
             display_name: "GPT-5.3 Codex Spark (OAuth)".into(),
             provider: ProviderKind::CodexOAuth,
             context_window: 400_000,
             default_max_tokens: 64_000,
-            capabilities: ModelCapabilities {
-                can_reason: true,
-                supports_vision: true,
-                supports_tools: true,
-            },
-        },
-        ModelInfo {
-            id: "gpt-5.2".into(),
-            display_name: "GPT-5.2 Codex (OAuth)".into(),
-            provider: ProviderKind::CodexOAuth,
-            context_window: 400_000,
-            default_max_tokens: 128_000,
             capabilities: ModelCapabilities {
                 can_reason: true,
                 supports_vision: true,
@@ -928,8 +904,8 @@ fn detect_openai_compatible_typed(
 #[cfg(test)]
 mod tests {
     use super::{
-        GlmEndpoints, MimoEndpoints, ProviderConfig, ProviderKind, detect_available_models,
-        is_openai_chat_model,
+        GlmEndpoints, MimoEndpoints, ModelRegistry, ProviderConfig, ProviderKind,
+        detect_available_models, is_openai_chat_model,
     };
     use engine_editor::{BillingMode, GlmRegion, MimoRegion};
     use std::io::Write;
@@ -949,6 +925,21 @@ mod tests {
         assert!(!is_openai_chat_model("gpt-image-1"));
         assert!(!is_openai_chat_model("gpt-4o-realtime-preview"));
         assert!(!is_openai_chat_model("text-embedding-3-large"));
+    }
+
+    #[test]
+    fn codex_oauth_builtin_models_match_opencode_allowlist() {
+        let registry = ModelRegistry::new();
+        let ids = registry
+            .builtin_for(&ProviderKind::CodexOAuth)
+            .into_iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            ["gpt-5.4", "gpt-5.5", "gpt-5.3-codex-spark", "gpt-5.4-mini"]
+        );
     }
 
     #[test]

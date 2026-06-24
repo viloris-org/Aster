@@ -370,7 +370,6 @@ pub struct CodexOAuthProvider {
     credentials: CodexOAuthCredentials,
     model: String,
     endpoint: String,
-    max_tokens: u32,
 }
 
 impl CodexOAuthProvider {
@@ -379,7 +378,7 @@ impl CodexOAuthProvider {
         model: &str,
         credentials: CodexOAuthCredentials,
         endpoint: Option<&str>,
-        max_tokens: u32,
+        _max_tokens: u32,
     ) -> Self {
         Self {
             credentials,
@@ -388,7 +387,6 @@ impl CodexOAuthProvider {
                 .unwrap_or("https://chatgpt.com/backend-api/codex/responses")
                 .trim_end_matches('/')
                 .to_owned(),
-            max_tokens,
         }
     }
 }
@@ -409,7 +407,6 @@ impl AiModel for CodexOAuthProvider {
             "model": self.model,
             "instructions": request.system,
             "input": input,
-            "max_output_tokens": self.max_tokens,
             "store": false,
             "stream": true,
             "include": ["reasoning.encrypted_content"]
@@ -436,8 +433,11 @@ impl AiModel for CodexOAuthProvider {
             )
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")
-            .header("originator", "aster")
-            .header("User-Agent", concat!("aster/", env!("CARGO_PKG_VERSION")));
+            .header("originator", "opencode")
+            .header(
+                "User-Agent",
+                concat!("opencode/", env!("CARGO_PKG_VERSION")),
+            );
         if let Some(account_id) = &self.credentials.account_id {
             request_builder = request_builder.header("ChatGPT-Account-Id", account_id);
         }
@@ -1029,6 +1029,11 @@ impl AiModel for GeminiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        thread,
+    };
 
     #[test]
     fn thinking_type_format_supports_enabling_and_disabling() {
@@ -1154,6 +1159,81 @@ mod tests {
 
         assert_eq!(response.content, "hello");
         assert_eq!(response.thinking, "checking");
+    }
+
+    #[test]
+    fn codex_oauth_matches_opencode_request_shape() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut headers = Vec::new();
+            let mut content_length = 0usize;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = line.trim_end().split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        content_length = value.trim().parse().unwrap();
+                    }
+                    headers.push((name.to_ascii_lowercase(), value.trim().to_owned()));
+                }
+            }
+            let mut body = vec![0_u8; content_length];
+            reader.read_exact(&mut body).unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 0\r\n\r\n",
+                )
+                .unwrap();
+            (headers, String::from_utf8(body).unwrap())
+        });
+
+        let provider = CodexOAuthProvider::new(
+            "gpt-5.4",
+            CodexOAuthCredentials {
+                access_token: "access-token".to_owned(),
+                account_id: Some("account-123".to_owned()),
+            },
+            Some(&endpoint),
+            128_000,
+        );
+        provider
+            .chat(AiRequest {
+                system: "system".to_owned(),
+                context: serde_json::Value::Null,
+                messages: vec![ChatMessage {
+                    role: ChatRole::User,
+                    content: "hello".to_owned(),
+                }],
+                tools: Vec::new(),
+                thinking_effort: None,
+            })
+            .unwrap();
+
+        let (headers, body) = server.join().unwrap();
+        let header = |name: &str| {
+            headers
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.as_str())
+        };
+        assert_eq!(header("authorization"), Some("Bearer access-token"));
+        assert_eq!(header("originator"), Some("opencode"));
+        assert_eq!(header("chatgpt-account-id"), Some("account-123"));
+        assert!(
+            header("user-agent").is_some_and(|value| value.starts_with("opencode/")),
+            "missing OpenCode-compatible user agent"
+        );
+
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["model"], "gpt-5.4");
+        assert_eq!(json["stream"], true);
+        assert!(json.get("max_output_tokens").is_none());
     }
 }
 

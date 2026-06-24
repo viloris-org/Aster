@@ -64,6 +64,7 @@ pub enum CopilotProvider {
     #[serde(rename = "openai")]
     OpenAI,
     /// OpenAI Codex using a ChatGPT subscription and OAuth.
+    #[serde(alias = "codex_o_auth")]
     #[serde(rename = "codex_oauth")]
     CodexOAuth,
     /// Anthropic API.
@@ -1515,6 +1516,31 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(legacy.provider, CopilotProvider::OpenAI);
+    }
+
+    #[test]
+    fn codex_oauth_provider_serializes_with_canonical_name() {
+        let settings: CopilotSettings = serde_json::from_value(serde_json::json!({
+            "provider": "codex_o_auth",
+            "model": "gpt-5.4",
+            "max_tokens": 4096
+        }))
+        .unwrap();
+
+        assert_eq!(settings.provider, CopilotProvider::CodexOAuth);
+
+        let serialized = serde_json::to_value(&settings).unwrap();
+        assert_eq!(serialized["provider"], "codex_oauth");
+
+        let preferences = EditorPreferences {
+            copilot: settings,
+            ..EditorPreferences::default()
+        };
+        let toml = write_preferences_toml(&preferences).unwrap();
+        assert!(toml.contains("provider = \"codex_oauth\""));
+        assert!(!toml.contains("codex_o_auth"));
+        let round_trip = read_preferences_toml(&toml).unwrap();
+        assert_eq!(round_trip.copilot.provider, CopilotProvider::CodexOAuth);
     }
 
     #[test]

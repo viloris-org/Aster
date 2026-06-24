@@ -7,6 +7,8 @@ use std::{
     cell::UnsafeCell,
     collections::{BTreeMap, HashMap},
     hash::{DefaultHasher, Hash, Hasher},
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
     path::{Component, Path, PathBuf},
     process::Command,
     sync::Mutex,
@@ -32,6 +34,7 @@ use engine_render_wgpu::{WgpuOffscreenConfig, WgpuRenderDevice};
 use runtime_min::{RuntimeServices, headless_services_from_scene};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tauri::{Emitter, Manager, State, WebviewWindowBuilder, image::Image, utils::config::Color};
 
 mod editor_compositor;
@@ -540,9 +543,9 @@ struct CodexOAuthCredential {
 
 #[derive(Debug)]
 struct PendingCodexOAuth {
-    device_auth_id: String,
-    user_code: String,
-    interval_seconds: u64,
+    state: String,
+    code_verifier: String,
+    listener: TcpListener,
 }
 
 #[derive(Debug)]
@@ -700,6 +703,9 @@ fn default_oauth_expires_in() -> u64 {
 
 const CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_OAUTH_ISSUER: &str = "https://auth.openai.com";
+const CODEX_OAUTH_REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+const CODEX_OAUTH_CALLBACK_BIND: &str = "127.0.0.1:1455";
+const CODEX_OAUTH_SCOPE: &str = "openid profile email offline_access";
 
 fn unix_time_ms() -> u64 {
     SystemTime::now()
@@ -710,6 +716,141 @@ fn unix_time_ms() -> u64 {
 
 fn elapsed_millis(started_at: Instant) -> u64 {
     started_at.elapsed().as_millis() as u64
+}
+
+fn random_urlsafe_string(len: usize) -> EngineResult<String> {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut bytes = vec![0_u8; len];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| EngineError::other(format!("secure random generation failed: {error}")))?;
+    Ok(bytes
+        .into_iter()
+        .map(|byte| CHARS[(byte as usize) % CHARS.len()] as char)
+        .collect())
+}
+
+fn random_hex_string(bytes_len: usize) -> EngineResult<String> {
+    let mut bytes = vec![0_u8; bytes_len];
+    getrandom::fill(&mut bytes)
+        .map_err(|error| EngineError::other(format!("secure random generation failed: {error}")))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn codex_pkce_challenge(verifier: &str) -> String {
+    let digest = Sha256::digest(verifier.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn codex_authorize_url(code_challenge: &str, state: &str) -> String {
+    let params = [
+        ("response_type", "code"),
+        ("client_id", CODEX_OAUTH_CLIENT_ID),
+        ("redirect_uri", CODEX_OAUTH_REDIRECT_URI),
+        ("scope", CODEX_OAUTH_SCOPE),
+        ("code_challenge", code_challenge),
+        ("code_challenge_method", "S256"),
+        ("state", state),
+        ("id_token_add_organizations", "true"),
+        ("codex_cli_simplified_flow", "true"),
+        ("originator", "codex_cli_rs"),
+    ];
+    let query = params
+        .into_iter()
+        .map(|(key, value)| format!("{key}={}", urlencoding::encode(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{CODEX_OAUTH_ISSUER}/oauth/authorize?{query}")
+}
+
+fn read_codex_oauth_callback(
+    stream: &mut TcpStream,
+    expected_state: &str,
+) -> EngineResult<Option<String>> {
+    let mut buffer = [0_u8; 8192];
+    let read = stream
+        .read(&mut buffer)
+        .map_err(|error| EngineError::other(format!("failed to read OAuth callback: {error}")))?;
+    if read == 0 {
+        return Ok(None);
+    }
+    let request = String::from_utf8_lossy(&buffer[..read]);
+    let Some(request_line) = request.lines().next() else {
+        return Ok(None);
+    };
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let target = parts.next().unwrap_or_default();
+    if method != "GET" {
+        write_oauth_callback_response(stream, 405, "Method Not Allowed", "Method not allowed")?;
+        return Ok(None);
+    }
+    let Some((path, query)) = target.split_once('?') else {
+        write_oauth_callback_response(stream, 404, "Not Found", "Not found")?;
+        return Ok(None);
+    };
+    if path != "/auth/callback" {
+        write_oauth_callback_response(stream, 404, "Not Found", "Not found")?;
+        return Ok(None);
+    }
+
+    let mut code = None;
+    let mut state = None;
+    let mut error = None;
+    let mut error_description = None;
+    for (key, value) in query.split('&').filter_map(|pair| pair.split_once('=')) {
+        let key = urlencoding::decode(key)
+            .map_err(|error| EngineError::other(format!("invalid OAuth callback query: {error}")))?
+            .into_owned();
+        let value = urlencoding::decode(value)
+            .map_err(|error| EngineError::other(format!("invalid OAuth callback query: {error}")))?
+            .into_owned();
+        match key.as_str() {
+            "code" => code = Some(value.to_owned()),
+            "state" => state = Some(value.to_owned()),
+            "error" => error = Some(value.to_owned()),
+            "error_description" => error_description = Some(value.to_owned()),
+            _ => {}
+        }
+    }
+    if let Some(error) = error {
+        let message = error_description.unwrap_or(error);
+        write_oauth_callback_response(stream, 400, "Bad Request", &message)?;
+        return Err(EngineError::other(format!(
+            "Codex authorization failed: {message}"
+        )));
+    }
+    if state.as_deref() != Some(expected_state) {
+        write_oauth_callback_response(stream, 400, "Bad Request", "State mismatch")?;
+        return Err(EngineError::other(
+            "Codex authorization failed because the OAuth state did not match",
+        ));
+    }
+    let code = code.ok_or_else(|| EngineError::other("Codex authorization omitted code"))?;
+    write_oauth_callback_response(
+        stream,
+        200,
+        "OK",
+        "Authorization successful. You can close this window and return to Varg.",
+    )?;
+    Ok(Some(code))
+}
+
+fn write_oauth_callback_response(
+    stream: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    message: &str,
+) -> EngineResult<()> {
+    let body = format!(
+        "<!doctype html><html><head><title>Varg Codex OAuth</title></head><body><h1>{}</h1><p>{}</p></body></html>",
+        reason, message
+    );
+    write!(
+        stream,
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .map_err(|error| EngineError::other(format!("failed to write OAuth callback: {error}")))
 }
 
 fn context_relevance_score(detail: &quest::QuestDetail) -> f32 {
@@ -1089,7 +1230,7 @@ pub struct EditorHost {
     copilot_settings: engine_editor::CopilotSettings,
     /// Persisted ChatGPT OAuth credentials for Codex.
     codex_oauth: Option<CodexOAuthCredential>,
-    /// Active device authorization request.
+    /// Active browser authorization request.
     pending_codex_oauth: Option<PendingCodexOAuth>,
     /// Active copilot conversation history for multi-turn dialogue.
     copilot_conversation: Vec<engine_ai::ChatMessage>,
@@ -4278,6 +4419,18 @@ impl EditorHost {
         if !settings.provider.endpoint_configurable() {
             settings.api_endpoint = None;
         }
+        if !matches!(
+            settings.provider,
+            engine_editor::CopilotProvider::Anthropic
+                | engine_editor::CopilotProvider::OpenAI
+                | engine_editor::CopilotProvider::Gemini
+                | engine_editor::CopilotProvider::Custom
+                | engine_editor::CopilotProvider::Mimo
+                | engine_editor::CopilotProvider::DeepSeek
+                | engine_editor::CopilotProvider::Glm
+        ) {
+            settings.api_key = None;
+        }
         if matches!(settings.provider, engine_editor::CopilotProvider::Stub) {
             settings.model = "none".to_owned();
         }
@@ -4367,88 +4520,70 @@ impl EditorHost {
     }
 
     fn codex_oauth_start(&mut self, _params: &Value) -> EngineResult<Value> {
-        let mut response = ureq::post(format!(
-            "{CODEX_OAUTH_ISSUER}/api/accounts/deviceauth/usercode"
-        ))
-        .header("Content-Type", "application/json")
-        .header("User-Agent", concat!("aster/", env!("CARGO_PKG_VERSION")))
-        .send_json(serde_json::json!({ "client_id": CODEX_OAUTH_CLIENT_ID }))
-        .map_err(|error| {
-            EngineError::other(format!("failed to start Codex authorization: {error}"))
+        self.pending_codex_oauth = None;
+        let listener = TcpListener::bind(CODEX_OAUTH_CALLBACK_BIND).map_err(|error| {
+            EngineError::other(format!(
+                "failed to listen for Codex OAuth callback on {CODEX_OAUTH_CALLBACK_BIND}: {error}"
+            ))
         })?;
-        let json: Value = response.body_mut().read_json().map_err(|error| {
-            EngineError::other(format!("invalid Codex authorization response: {error}"))
+        listener.set_nonblocking(true).map_err(|error| {
+            EngineError::other(format!("failed to configure Codex OAuth callback: {error}"))
         })?;
+        let code_verifier = random_urlsafe_string(64)?;
+        let code_challenge = codex_pkce_challenge(&code_verifier);
+        let state = random_hex_string(16)?;
+        let url = codex_authorize_url(&code_challenge, &state);
         let pending = PendingCodexOAuth {
-            device_auth_id: json["device_auth_id"]
-                .as_str()
-                .ok_or_else(|| EngineError::other("Codex authorization omitted device_auth_id"))?
-                .to_owned(),
-            user_code: json["user_code"]
-                .as_str()
-                .ok_or_else(|| EngineError::other("Codex authorization omitted user_code"))?
-                .to_owned(),
-            interval_seconds: json["interval"]
-                .as_str()
-                .and_then(|value| value.parse().ok())
-                .or_else(|| json["interval"].as_u64())
-                .unwrap_or(5)
-                .max(1),
+            state,
+            code_verifier,
+            listener,
         };
         let result = serde_json::json!({
-            "url": format!("{CODEX_OAUTH_ISSUER}/codex/device"),
-            "user_code": pending.user_code,
-            "interval_seconds": pending.interval_seconds,
+            "url": url,
+            "user_code": Value::Null,
+            "interval_seconds": 1,
+            "method": "browser",
         });
         self.pending_codex_oauth = Some(pending);
         Ok(result)
     }
 
     fn codex_oauth_poll(&mut self, _params: &Value) -> EngineResult<Value> {
-        let pending = self
-            .pending_codex_oauth
-            .as_ref()
-            .ok_or_else(|| EngineError::config("no Codex authorization is currently pending"))?;
-        let response = ureq::post(format!(
-            "{CODEX_OAUTH_ISSUER}/api/accounts/deviceauth/token"
-        ))
-        .header("Content-Type", "application/json")
-        .header("User-Agent", concat!("aster/", env!("CARGO_PKG_VERSION")))
-        .send_json(serde_json::json!({
-            "device_auth_id": pending.device_auth_id,
-            "user_code": pending.user_code,
-        }));
-
-        let mut response = match response {
-            Ok(response) => response,
-            Err(ureq::Error::StatusCode(403 | 404)) => {
-                return Ok(serde_json::json!({ "status": "pending" }));
-            }
-            Err(error) => {
-                return Err(EngineError::other(format!(
-                    "Codex authorization polling failed: {error}"
-                )));
+        let code = {
+            let pending = self.pending_codex_oauth.as_mut().ok_or_else(|| {
+                EngineError::config("no Codex authorization is currently pending")
+            })?;
+            loop {
+                match pending.listener.accept() {
+                    Ok((mut stream, _)) => {
+                        if let Some(code) = read_codex_oauth_callback(&mut stream, &pending.state)?
+                        {
+                            break code;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        return Ok(serde_json::json!({ "status": "pending" }));
+                    }
+                    Err(error) => {
+                        return Err(EngineError::other(format!(
+                            "Codex authorization callback failed: {error}"
+                        )));
+                    }
+                }
             }
         };
-        let authorization: Value = response.body_mut().read_json().map_err(|error| {
-            EngineError::other(format!("invalid Codex authorization result: {error}"))
-        })?;
-        let authorization_code = authorization["authorization_code"]
-            .as_str()
-            .ok_or_else(|| EngineError::other("Codex authorization omitted authorization_code"))?;
-        let code_verifier = authorization["code_verifier"]
-            .as_str()
-            .ok_or_else(|| EngineError::other("Codex authorization omitted code_verifier"))?;
+        let code_verifier = self
+            .pending_codex_oauth
+            .as_ref()
+            .map(|pending| pending.code_verifier.clone())
+            .ok_or_else(|| EngineError::config("no Codex authorization is currently pending"))?;
 
         let tokens = exchange_codex_token(&[
             ("grant_type", "authorization_code"),
-            ("code", authorization_code),
-            (
-                "redirect_uri",
-                "https://auth.openai.com/deviceauth/callback",
-            ),
+            ("code", &code),
+            ("redirect_uri", CODEX_OAUTH_REDIRECT_URI),
             ("client_id", CODEX_OAUTH_CLIENT_ID),
-            ("code_verifier", code_verifier),
+            ("code_verifier", &code_verifier),
         ])?;
         self.codex_oauth = Some(codex_credential_from_tokens(tokens));
         self.pending_codex_oauth = None;
@@ -8686,9 +8821,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChangedFile, DesktopEnvironment, EditorHost, QuestApplyDecision, QuestApplyPolicy,
-        QuestProject, QuestReview, QuestReviewMetrics, QuestStatus, SoloQuestRunner,
-        ValidationResult, asset_meta_path_for_source, copilot_execution_summary,
+        CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_REDIRECT_URI, CODEX_OAUTH_SCOPE, ChangedFile,
+        DesktopEnvironment, EditorHost, QuestApplyDecision, QuestApplyPolicy, QuestProject,
+        QuestReview, QuestReviewMetrics, QuestStatus, SoloQuestRunner, ValidationResult,
+        asset_meta_path_for_source, codex_authorize_url, copilot_execution_summary,
         extract_codex_account_id, model_detection_config, normalize_relative_path,
         parse_generated_quest_response, project_fingerprint, quest,
         quest_review_actions_for_result, resolve_existing_relative_path,
@@ -8697,8 +8833,8 @@ mod tests {
     };
     use base64::Engine as _;
     use engine_editor::{CopilotProvider, FileEditorStore};
-    use std::fs;
     use std::path::Path;
+    use std::{collections::HashMap, fs};
 
     #[test]
     fn kde_uses_native_chrome_when_native_wayland_is_preferred() {
@@ -9072,6 +9208,67 @@ mod tests {
             host.copilot_settings.api_endpoint.as_deref(),
             Some("http://192.168.1.20:11434")
         );
+    }
+
+    #[test]
+    fn oauth_provider_clears_api_key_when_settings_are_updated() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_path = temp.path().join("varg-editor-state.toml");
+        let store = FileEditorStore::new(&state_path);
+        let mut host = EditorHost::new(store).unwrap();
+
+        host.update_copilot_settings(&serde_json::json!({
+            "provider": "custom",
+            "model": "varg-test-model",
+            "api_endpoint": "https://provider.example/v1",
+            "api_key": "secret-test-key",
+            "max_tokens": 4096
+        }))
+        .unwrap();
+
+        host.update_copilot_settings(&serde_json::json!({
+            "provider": "codex_oauth",
+            "model": "gpt-5.4",
+            "api_key": "should-not-stick",
+            "max_tokens": 4096
+        }))
+        .unwrap();
+
+        assert_eq!(host.copilot_settings.provider, CopilotProvider::CodexOAuth);
+        assert_eq!(host.copilot_settings.api_key, None);
+
+        let credentials_path = state_path.parent().unwrap().join("credentials.toml");
+        let credentials = fs::read_to_string(credentials_path).unwrap();
+        assert!(!credentials.contains("secret-test-key"));
+        assert!(!credentials.contains("should-not-stick"));
+    }
+
+    #[test]
+    fn codex_authorize_url_uses_browser_pkce_flow() {
+        let url = codex_authorize_url("challenge-test", "state-test");
+        let (base, query) = url.split_once('?').unwrap();
+        let params = query
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .map(|(key, value)| {
+                (
+                    key.to_owned(),
+                    urlencoding::decode(value).unwrap().into_owned(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(base, "https://auth.openai.com/oauth/authorize");
+        assert_eq!(params["response_type"], "code");
+        assert_eq!(params["client_id"], CODEX_OAUTH_CLIENT_ID);
+        assert_eq!(params["redirect_uri"], CODEX_OAUTH_REDIRECT_URI);
+        assert_eq!(params["scope"], CODEX_OAUTH_SCOPE);
+        assert_eq!(params["code_challenge"], "challenge-test");
+        assert_eq!(params["code_challenge_method"], "S256");
+        assert_eq!(params["state"], "state-test");
+        assert_eq!(params["id_token_add_organizations"], "true");
+        assert_eq!(params["codex_cli_simplified_flow"], "true");
+        assert_eq!(params["originator"], "codex_cli_rs");
     }
 
     #[test]
