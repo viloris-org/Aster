@@ -1,0 +1,5 @@
+/goal 不要新建分支，使用当前已有分支继续工作。先不要急着改代码，也不要写空泛规划；先完整阅读 docs/ai-native-engine-loop-target/、docs/quest-real-execution-hardening-target/，并只把 docs/strong-commander-keypool-branch/ 当作长期架构参考。你必须先自己理解这个项目现在到底在做什么：Aster 的 AI-native Quest/Editor 主链路、现有代码已经完成了什么、还缺什么、当前分支和另一个 Commander/KeyPool 方向的边界在哪里。
+理解规则：如果文档和代码冲突，以当前代码和最新 main 为准；如果别人已经做了某块，不重复造轮子，而是接上、补强、修边界问题。两个方向必须分清：当前 AI-native Quest/Editor 分支负责真实代码推进；Commander/KeyPool 是另一条长期架构方向，除非当前就在那个分支，否则不要把它强塞进来。
+你接下来要自己判断最高价值工作，不要等我逐项指挥。范围包括 Quest real execution、任务分解、workspace/execution/diff/validation/review/apply/rollback/discard、stale check、失败证据、ECS/SceneCommand、物理/渲染/音频验证诊断、Quest/Editor 前端体验、测试和构建。不是全部乱改，而是读懂后按依赖关系和风险优先级推进。
+工作方式：先建立上下文，再选一小块真正重要的地方动手；改之前知道为什么改，改之后用测试、构建或代码检查确认。发现 bug 就修，发现缺测试就补，发现前端看不懂后端状态就改善展示，发现主链路不真实就补真实链路。不要只写建议，不要停在规划，不要为了显得忙而大改。每完成一块就重新审视当前状态，继续选择下一块。
+质量要求：最终这个已有分支要更接近可合并状态，主链路更真实、更稳、更少 bug。不要留下明显 broken 状态；验证失败要优先处理。只有遇到真实阻塞、环境权限问题，或者当前分支核心目标已经明显完成，才停下来说明。

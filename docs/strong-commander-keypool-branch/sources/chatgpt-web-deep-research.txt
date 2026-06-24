@@ -1,0 +1,973 @@
+用户想要纯文字形式的报告内容，方便直接复制。由于报告非常长（1820行HTML），我需要把所有核心内容整理成纯文本格式。我会按照报告的结构，把所有关键内容输出为纯文本，方便用户复制。
+
+由于内容量很大，我需要分段输出，但要确保结构清晰、内容完整。让我直接输出纯文本版本的报告。
+好的，我直接输出纯文字版报告，你可以全选复制：
+
+---
+
+# Strong Commander Agent + Lower-tier Subagents + Multi-channel KeyPool Router
+## AI Coding 产品架构深度研究报告
+### 面向国产模型生态的长时自主编程Agent架构设计
+
+📅 2026-06-23 | v2.0
+
+---
+
+## 目录
+
+1. 竞品深度研究
+2. Commander Agent设计
+3. Lower-tier Subagent设计
+4. Router/KeyPool/负载均衡
+5. 模型角色分配矩阵
+6. Goal Mode长任务设计
+7. Skills/Plugins/MCP产品化
+8. UI产品设计
+9. 数据模型与核心算法
+10. 路线图
+11. AI Coding Agent实施提示词
+
+---
+
+## 一、竞品深度研究
+
+调研对象：Claude Code、OpenAI Codex/Codex CLI、Cursor、Cline(Roo Code)、Devin(Cognition)、Qoder、OpenCode、Continue.dev、Aider
+
+### 1.1 竞品多Agent架构对比
+
+| 产品 | 多Agent架构 | 长任务(8h+) | 上下文压缩 | 模型策略 | MCP支持 |
+|------|-------------|-------------|-----------|---------|---------|
+| **Claude Code** | 三层Subagent(General/Plan/Explore)+Skills+Hooks，支持并行，自定义Agent通过.claude/agents/ | Headless+异步Subagent，Ctrl+B后台运行，SDK编程式调用 | Auto Compact 77.5%触发，SDK compaction_control，22.5% buffer | 仅Claude(Haiku/Sonnet/Opus)，Subagent可异模型 | 原生支持 |
+| **OpenAI Codex** | Manager-Subagent，Guardian安全审核Agent，最多6并行，沙箱隔离 | /goal模式，Codex-Max支持24h+自主轨迹，full-auto审批 | 一等公民compaction，180k触发，工具输出截断16k | 绑定GPT，CLI开源支持多Provider | 支持 |
+| **Cursor** | Tab+Composer+Background Agent，8并行，git worktree/云端VM隔离，BugBot审查 | Background Agents云端VM异步，Slack/GitHub远程启动 | **Self-Summarization(RL训练)**：100k→1k tokens，压缩错误降50% | 混合：自研Composer+Claude/GPT/Gemini | 支持 |
+| **Cline/Roo Code** | Orchestrator+Boomerang Tasks，模式委派(Code/Architect/Debug)，上下文隔离防污染 | 本地IDE为主，Auto-Approve减少干预，Checkpoints回滚 | 子任务隔离防污染为主，无自动压缩，Checkpoints快照 | 极开放：几乎所有Provider+本地Ollama | 一等公民，Marketplace 3000+ |
+| **Devin** | "Devin Manages Devins"多VM并行，完整VM沙箱隔离 | 原生云端沙箱，天生为长任务设计，无人监督运行 | **专用微调压缩模型**(核心差异化)，单Agent+高质量压缩 | 封闭：自研SWE-1.5+Claude，用户不可选 | 企业版支持 |
+| **Qoder** | Experts五类专家流水线(规划/调研/编码/审查/测试)+自定义专家，跨工程并行 | Quest Mode，Task Runtime独立执行环境，Spec驱动 | 三层知识引擎(用户记忆+Repo Wiki+知识卡片)，端到端评分↑25% | 通义为主，Auto Model Tier分层，支持多模型 | 支持+Marketplace |
+| **OpenCode→Crush** | coder/task/plan/general子Agent，支持多并行Agent(前后端各一个) | SQLite持久化，关闭终端可重连，断点续接 | Auto Compact 95%触发，SQLite持久化 | 75+模型含Copilot/本地，已归档迁移Crush | 原生stdio |
+| **Aider** | Architect-Editor双模型管线(强模型推理+快模型编辑) | 交互式为主，非交互脚本模式，git每次自动commit | **Repo Map(tree-sitter AST)**：数十万行代码库可扩展 | 最开放：几乎所有LLM，双模型分离 | 社区集成 |
+
+### 1.2 关键趋势洞察
+
+**🎯 多Agent成为标配**
+2025-2026所有主流产品均引入Subagent。架构深度差异大：从简单任务委派(Cline Boomerang)到完整VM隔离(Devin)，再到RL训练内建压缩的并行Agent(Cursor Background)。
+
+**⚡ 上下文压缩是核心战场**
+- Cursor Self-Summarization通过RL训练模型自己学会压缩（未来方向）
+- Devin专用微调小模型做压缩（质量最高但成本高）
+- Aider Repo Map从源头减少上下文（而非压缩历史）
+- Cline/Qoder通过任务隔离避免上下文膨胀
+- Claude Code/Codex CLI/OpenCode采用触发式摘要压缩
+
+**🔌 MCP成为通用标准**
+除Aider(社区支持)外，所有产品原生支持MCP。MCP生态(3000+ Server)正成为AI Coding工具的"USB端口"。
+
+**☁️ 长任务处理两极分化**
+- **云端派**（Devin/Cursor/Codex）：沙箱/VM持续运行，不依赖本地
+- **本地派**（Claude Code/OpenCode/Cline）：Headless+异步+持久化支持长任务，但需保持进程
+
+⚠️ **开源项目可持续性风险**：Continue.dev已于2026年停止维护(read-only)，OpenCode已归档迁移至Charmbracelet/Crush。
+
+---
+
+## 二、Commander Agent 设计
+
+强主脑是整个架构的核心——它做脑，Subagent做手。Commander始终保持全局视野和最终决策权。
+
+### 2.1 三层上下文架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 1: Ledger (不可变任务账本, 磁盘持久化, 崩溃不丢)       │
+│  ├── goal_id, goal_description, created_at                  │
+│  ├── phase_history (阶段转移历史, 追加-only)                 │
+│  ├── tasks[] (所有子任务记录+状态+结果)                      │
+│  ├── decisions[] (关键决策日志: 为什么选A不选B)              │
+│  ├── artifacts[] (产出物索引: 路径+hash+摘要)                │
+│  ├── blockers[], retry_count, token_budget, error_log        │
+│  存储格式: JSONL (每行一条记录, append-only)                 │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│  Layer 2: Working State (工作记忆, 内存中, 定期checkpoint)   │
+│  ├── active_subtasks[] (当前执行中子任务)                    │
+│  ├── recent_context (压缩后的对话窗口)                       │
+│  ├── plan_snapshot (当前执行计划快照)                        │
+│  └── environment_state (git分支/运行进程等快照)              │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│  Layer 3: Long-term Memory (长期记忆, 跨会话, 向量DB)        │
+│  ├── user_preferences (用户偏好)                             │
+│  ├── project_patterns (从历史学习的项目模式)                 │
+│  ├── skill_proficiency (各skill成功率)                       │
+│  ├── failure_patterns (常见失败模式)                         │
+│  └── codebase_map (代码库文件→用途索引)                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**持久化策略**：
+- Ledger：每完成一个subtask就append到磁盘(JSONL)，崩溃不丢
+- Working State：每N个turn做一次checkpoint(序列化到磁盘)，恢复时从最近checkpoint加载
+- Long-term Memory：会话结束时更新，向量数据库做语义检索
+
+### 2.2 亲自执行 vs 派发决策树
+
+🔴 **必须Commander亲自执行**：
+- 任务分解与规划——错误的分解导致后续全错
+- 战略决策——需要全局视野+不可逆副作用
+- 结果验证——不能由执行者自己验证自己
+- 跨子任务错误恢复——subagent失败后的重新规划
+- 用户关键交互——需求澄清、阻塞确认
+- Subagent协调——冲突仲裁、依赖管理
+- 共享状态修改——构建系统、全局配置
+- 安全审查——认证/授权/加密/输入验证相关代码
+
+🟢 **适合派发（GLM 5.1/mid模型）**：
+- 单文件/单模块功能实现（已有清晰设计）
+- 单元测试编写（给定函数签名+需求）
+- 机械性重构（重命名、提取函数）
+- 有明确错误信息的Bug修复
+- 文档生成（API文档、README）
+- 配置文件编写（Dockerfile、CI配置）
+- 中等复杂度代码审查
+
+🔵 **适合派发（Flash/便宜模型）**：
+- 文件搜索与发现（grep/glob后汇总）
+- 日志分类与初步筛选（提取stack trace）
+- 格式化任务（JSON/Markdown排版）
+- 简单分类与路由（任务类型判断）
+- 结构化数据提取（从HTML/表格）
+- 拼写/语法检查、简单正则
+- 测试结果解析（pytest/jest输出）
+- commit message生成、lint简单修复
+
+### 2.3 三层结果验证机制（防污染）
+
+Subagent的结果默认不可信，必须通过三层过滤才合并到Commander上下文：
+
+**L1: 自动静态检查（快/便宜）**
+- 文件完整性（声明产出的文件是否存在、非空）
+- 语法检查（TypeScript/Python AST解析）
+- 契约符合性（是否产出了要求的文件）
+- 只读路径保护（subagent是否修改了不应修改的文件）
+
+**L2: 功能性验证（需执行）**
+- 运行契约中指定的验证命令
+- 若subagent声称测试通过，Commander亲自跑测试
+- 类型检查、lint、build验证
+- 回归测试（确保不破坏已有功能）
+
+**L3: 语义验证（强模型）**
+- Commander（强模型）亲自读取相关文件
+- 逐个验证subagent的关键声明
+- 检测代码逻辑错误、安全漏洞
+- 只接受通过验证的claims进入主上下文
+
+🚨 **防污染核心原则**：
+1. Subagent工作在隔离上下文，中间结果默认**不进入**Commander上下文
+2. 只有通过三层验证的**摘要**才被合并
+3. 如果发现subagent修改了只读路径，**立即回滚**（git worktree机制）
+4. 验证失败→标记rejected→回滚→进入repair阶段，不污染主上下文
+
+### 2.4 上下文压缩与8小时长任务恢复
+
+**压缩触发条件**：
+- Token阈值：上下文使用率70%触发light压缩，80%触发medium，90%触发heavy
+- 阶段转换：planning→executing、executing→verifying时必触发
+- 批次完成：每完成N个subtask触发一次
+- 时间间隔：每30分钟定时压缩
+
+**三级压缩**：
+| 级别 | 目标压缩率 | 操作 |
+|------|-----------|------|
+| Light | 70% | 截断工具输出为前100字符+结果状态 |
+| Medium | 40% | 已完成subtask折叠为一句话，保留active/pending完整 |
+| Heavy | 15% | 整个已完成阶段折叠为PhaseSummary，仅保留当前阶段完整上下文 |
+
+**PhaseSummary格式（折叠后保留的关键信息）**：
+- phase, duration_ms, subtasks_completed/failed
+- key_outcomes（3-5条关键产出）
+- decisions_made（关键决策）
+- files_created_or_modified（文件+用途+大小）
+- unresolved_issues（未解决问题）
+- blockers_encountered（阻塞及解决方式）
+- lessons_learned（经验教训）
+- recovery_hint（恢复指引：接下来需要1.检查X 2.运行Y 3.继续Z）
+- next_step_ref（下一个要执行的task ID）
+
+### 2.5 模型选择策略
+
+不是始终用最强模型，而是按任务关键度和不确定性动态切换。但**Commander本身始终使用strong模型**——它是大脑，不能省。
+
+| 场景 | 推荐模型层级 | 理由 |
+|------|-------------|------|
+| 初始规划/任务分解 | reasoning | 规划错了后面全错，ROI极高 |
+| Commander常规循环 | strong | 全局决策，不能出错 |
+| 连续失败后重规划 | reasoning | 需要深度分析失败原因 |
+| 安全审查 | strong | 漏一个漏洞代价远高于模型成本 |
+| 代码实现(中等复杂度) | mid | 范围明确，mid性价比最高(成本1/5-1/10) |
+| 探索/搜索/日志分析 | flash | 模式匹配任务，flash成本是mid的1/10-1/50 |
+| 测试运行/结果解析 | flash | 确定性工作，无需创造力 |
+
+**模型降级链**：
+- reasoning → strong → mid
+- strong → mid → flash
+- mid → flash
+- flash → 报错（无法再降级）
+
+---
+
+## 三、Lower-tier Subagent 设计
+
+Subagent是工兵和执行者——在隔离环境中执行范围明确的任务，通过严格的Task Contract与Commander通信。
+
+### 3.1 Task Contract（任务契约）
+
+Commander与Subagent之间的硬性协议，类比函数签名：
+
+**输入部分**：
+- `objective`：一句话目标
+- `detailed_instructions`：详细步骤指引
+- `constraints[]`：约束条件列表
+- `context_files[]`：需预读的文件(可截断)
+- `context_snippets[]`：直接内联的代码片段
+- `permissions`：读写路径白名单、允许/禁止的工具、网络权限、max_turns、token预算
+
+**输出部分（强制JSON）**：
+- `status`: completed/failed/blocked/partial
+- `summary`: 一句话总结
+- `files_modified[]`: 修改/创建的文件列表+action+change_summary
+- `tests_run[]`: 运行的测试+结果+耗时
+- `claims[]`: 完成声明(用于验证)，每个claim含type/description/evidence
+- `issues_found[]`: 发现的问题(severity+description+location)
+- `next_steps_suggested[]`: 建议后续步骤
+
+**失败处理**：
+- `max_retries`: 最大重试次数(默认3)
+- `retry_strategy`: simplify/escalate_model/split_task/report_back
+
+### 3.2 并发文件冲突避免
+
+**✅ 推荐：Git Worktree隔离**
+- 每个写操作subagent在独立git worktree中工作，完成后merge
+- 代码文件修改：天然隔离，支持并行
+- merge时冲突检测，可回滚
+- 类似Cursor Background Agent方案
+
+**⚠️ 补充：操作队列**
+- 对不能并发写的资源用串行队列：package.json/pnpm-lock.yaml、数据库schema迁移、全局配置文件
+- 按资源分区，每个资源一个队列
+
+**🔧 辅助：文件锁**
+- 简单场景/无法用worktree时使用
+- 超时自动释放(5分钟)，锁过期强制抢占，队列等待+超时
+
+### 3.3 结果合并策略
+
+1. 先验证所有结果：并行subagent完成后，逐个执行三层验证
+2. 拒绝失败的结果：verification_status=rejected的立即回滚
+3. 冲突检测：检查是否有多个subagent修改同一文件
+4. 无冲突→按依赖顺序合并：拓扑排序后依次apply
+5. 有冲突→Commander决策：手动解决/派merge subagent/保留多版本
+6. 合并后全局测试：运行完整测试套件，失败则回滚整个merge
+
+---
+
+## 四、Router / KeyPool / 负载均衡
+
+四层路由模型解决国产模型高TTFT、频繁429、tool call不稳定、多渠道管理的核心痛点。Router的价值是**提高吞吐、减少429、降低首字延迟**，不是让弱模型替代强模型。
+
+### 4.1 四层路由架构
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    RouterDecision 层 (决策层)                            │
+│   输入: task_type + capabilities + session_id + budget + strategy       │
+│   输出: (ModelProfile, ProviderChannel, KeySlot, StreamRace策略)        │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────────────┐
+│                  ModelProfile 层 (逻辑模型)                              │
+│   "glm-4-plus" / "qwen-max" / "deepseek-chat" / "claude-sonnet"         │
+│   声明: 能力矩阵 / 成本基线 / 质量等级 / 支持的特性                       │
+│   一个ModelProfile → 挂载多个ProviderChannel                            │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────────────┐
+│                 ProviderChannel 层 (物理渠道)                            │
+│  ┌──────────┐  ┌────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │ 官方直连  │  │ OpenRouter │  │ SiliconFlow  │  │ 自建vLLM/One-API│  │
+│  │ quality:A │  │ quality:B  │  │ quality:B    │  │ quality:C        │  │
+│  │ cost:1.0x │  │ cost:1.1x  │  │ cost:0.7x    │  │ cost:0.1x        │  │
+│  │ TTFT:380ms│  │ TTFT:650ms │  │ TTFT:420ms   │  │ TTFT:150ms       │  │
+│  └─────┬────┘  └─────┬──────┘  └──────┬───────┘  └────────┬─────────┘  │
+│        └─────────────┴────────────────┴──────────────────┘            │
+│                         每个Channel挂载一个KeyPool                      │
+└──────────────────────────────┬──────────────────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────────────────┐
+│                    KeyPool + KeySlot 层 (密钥池)                        │
+│   KeyPool[channel]: {                                                   │
+│     slots: [KeySlot_1...KeySlot_N],     // 多key轮询池                 │
+│     rpm_bucket: CompositeTokenBucket,   // Σ RPM吞吐叠加                │
+│     affinity_map: LRU<session→slot>,    // 会话亲和(KV Cache保护)      │
+│     cooldown_queue: PriorityQueue,      // 429冷却堆                   │
+│   }                                                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 核心机制详解
+
+**🔗 Session Affinity（会话亲和/KV Cache保护）**
+
+问题：国产模型普遍支持Prefix Caching(KV Cache复用)，但请求路由到不同key/endpoint时KV Cache完全失效，TTFT从300ms飙升到2-5s。
+
+方案：
+- LRU缓存：session_id → slot_id，TTL=5分钟，容量10000
+- 连续3次429则强制解绑重新分配
+- GLM需传递conversation_id参数
+- DeepSeek需自动检测重复前缀填充prefix参数
+- Qwen同key自动复用KV Cache
+
+**⚡ RPM Pooling（吞吐叠加）**
+
+核心：N个key的RPM不是各自为战，而是Pool层面统一调度，吞吐线性叠加。
+- 双层令牌桶：Global(Σ所有key) + Per-Slot(单key限制)
+- 两层都有令牌才放行
+- slot进入cooldown时自动recalculate全局容量
+- 突发容量(burst) = RPM × 0.15
+
+**❄️ 429 Cooldown（自动冷却）**
+
+国产模型429特点：突发式、Retry-After经常不准。
+
+策略：
+- 指数退避：2s→4s→8s→60s(连续3次)→5min禁用(连续5次+告警)
+- Jitter(±500ms)防止羊群效应
+- 冷却结束后进入probation缓刑期(先放1个试探请求，成功则恢复)
+- 立即解绑session affinity
+- 国产模型兼容x-ratelimit-reset/retry-after-ms头
+
+**🏁 Stream Race（流式竞速/对冲请求）**
+
+痛点：国产模型TTFT波动大(p99可达5s+)，串行fallback的TTFT=所有失败尝试之和。
+
+两种模式：
+- **Warmup模式(默认，成本可控)**：T=0发首选，2s无首token则发次选，谁先用谁，立即cancel另一个。额外成本5-15%，TTFT p99从3500ms→1800ms。
+- **Aggressive模式(VIP)**：T=0同时发2-3路(跨channel)，成本翻倍，TTFT p99→800ms。
+
+Budget Guard：
+- 并行总成本超预算自动降级warmup
+- 单请求成本>预算70%禁止并行
+- cancel时确保TCP连接关闭(reader.cancel())防token泄漏
+- 国产模型TTFT超时阈值从2s放宽到2.5s
+
+**📊 Health Score（健康度动态评分）**
+
+5维0-100分，每10秒滑动窗口(5分钟/300样本)更新：
+- 可用性(30分)：非429/5xx率，429率×5直接扣分
+- 延迟(25分)：TTFT p95分段给分(<500ms=25, <2s=17, >4s=0)
+- 成功率(20分)：HTTP 200比例
+- 质量(15分)：基于verifier反馈
+- 稳定性(10分)：tool call/JSON格式正确率
+
+冷启动保护：新key给70分(中性)，前10请求金丝雀分配，连续3次成功提权，连续2次429立即降级。
+
+**🔒 API Key 安全隔离（5层防护）**
+- L1存储：AES-256-GCM加密，KMS密钥不落盘，日志脱敏fingerprint(sk-****abcd)
+- L2传输：TLS 1.3，Authorization header(不用query string)
+- L3权限：多租户key隔离，Free/Enterprise分级quota，IP白名单
+- L4审计：每次使用记录，异常检测，泄露立即rotate
+- L5零信任：Worker拿不到明文key，KeyProxy gRPC获取短期JWT(10min有效期)
+
+### 4.3 Fallback Chain（错误驱动降级树）
+
+| 错误类型 | 降级路径 |
+|---------|---------|
+| 429 RateLimit | 同channel换slot → 同model换channel → 同tier降级模型 → 跨tier降级 |
+| 401/403 Auth | 标记slot disabled → 换sibling slot重试 |
+| 5xx/Timeout | 指数退避重试同slot(最多2次) → 换slot → 换channel |
+| TTFT超时(>2s) | 不取消原请求，并行发起fallback(Stream Race) |
+| Tool Call格式错(国产模型高发) | 同模型重试1次(+格式修复提示) → 换tool_call_stability更高channel → 海外模型 |
+| Context Overflow | 换long_ctx能力更强模型 → 触发compactAndResume |
+
+### 4.4 路由权重（场景化）
+
+| 场景 | Health | Latency | Cost | Quality | Stream Race |
+|------|--------|---------|------|---------|-------------|
+| 用户实时对话 | 25% | **40%** | 10% | 25% | Warmup |
+| 代码生成 | 25% | 15% | 10% | **40%** | Warmup |
+| 后台研究任务 | 20% | 10% | **35%** | 25% | Off |
+| VIP模式 | 20% | **50%** | 5% | 25% | **Aggressive** |
+
+---
+
+## 五、模型角色分配矩阵
+
+按角色的错误成本和能力需求分配模型层级。经济学原则：决策成本越高的角色，用越强的模型。
+
+| 角色 | 推荐模型 | Fallback | 最大回合 | 隔离级别 | 并行 | 理由 |
+|------|---------|---------|---------|---------|------|------|
+| **Commander** | strong | mid | ∞ | none(主上下文) | ❌ | 全局决策、结果验证，决策错了成本最高 |
+| **Planner** | reasoning | strong | 15 | context | ❌ | 任务分解需要深度推理，错误分解代价极大 |
+| **Executor** | mid | flash/strong | 30 | worktree | ✅ | 范围已限定的实现任务，mid性价比最高(成本1/5-1/10) |
+| **Scout/Explorer** | flash | mid | 10 | context | ✅ | 文件搜索/代码导航是模式匹配，flash足够快且便宜 |
+| **Test Runner** | flash | — | 5 | context | ✅ | 运行测试、解析结果是确定性工作 |
+| **Log Analyst** | flash | mid | 8 | context | ✅ | 日志分类/提取/统计是模式匹配；复杂根因需mid |
+| **Frontend Reviewer** | mid | strong | 15 | context | ❌ | 需要UX判断、组件最佳实践知识 |
+| **Security Reviewer** | strong | — | 20 | context | ❌ | 漏一个安全漏洞的代价远高于模型成本 |
+| **Doc Summarizer** | flash | mid | 5 | context | ✅ | 摘要生成本质是压缩，flash胜任；技术文档需mid |
+| **Router/Classifier** | flash | mid | 1 | none(内联) | ❌ | 意图识别/任务分类是简单分类，单次推理不单独起subagent |
+
+💡 **角色经济学原则**：
+1. Commander用strong：它做决策，决策错了成本最高
+2. Planner用reasoning：规划错了后面全错，一次规划的ROI极高
+3. Executor用mid：任务范围明确，mid代码能力足够，成本是strong的1/5-1/10
+4. Scout/Test用flash：确定性工作，flash成本是mid的1/10-1/50
+5. Security用strong：漏报代价远大于模型成本
+6. Router用flash：分类错误可以被Commander纠正，代价低
+
+---
+
+## 六、Goal Mode 长任务设计
+
+让AI coding工具能连续跑8小时甚至更久，而不是写完规划就停。核心是状态机驱动+反拖延机制+容错恢复。
+
+### 6.1 八状态机
+
+```
+                    ┌─────────────┐
+                    │  SCOUTING   │ (了解环境/代码库/现有状态, 5min超时)
+                    └──────┬──────┘
+                           │ 环境了解充分
+                           ▼
+                    ┌─────────────┐
+              ┌────▶│  PLANNING   │ (任务分解/DAG/生成TaskContract, 10min超时)
+              │     └──────┬──────┘
+              │            │ 计划确定
+              │            ▼
+              │     ┌─────────────┐
+              │     │  EXECUTING  │ (按DAG派发subagent, 并行执行)
+              │     └──────┬──────┘
+              │            │ 批次完成
+              │            ▼
+              │     ┌─────────────┐
+              │     │  VERIFYING  │ (全局测试+三层验证+lint/typecheck)
+              │     └──┬───────┬──┘
+              │        │       │
+              │   通过 │       │ 发现问题
+              │        ▼       ▼
+              │  ┌─────────┐ ┌────────────┐
+              │  │COMPLETED│ │ REPAIRING  │ (分析失败/修复/二次修复升级模型)
+              │  └─────────┘ └──────┬─────┘
+              │                     │ 修复失败
+              │                     ▼
+              │               ┌────────────┐
+              │ 信息不足      │  RETRYING  │ (重试/升级模型/拆分任务, 最多3次)
+              │               └──────┬─────┘
+              │     重新规划          │ 重试耗尽
+              └──────────────────────┼────────┐
+                                     ▼        │
+                              ┌────────────┐   │
+                              │  BLOCKED   │◀──┘ (保存checkpoint/释放资源/通知用户)
+                              └──────┬─────┘
+                                     │ 用户输入
+                                     └──▶ scouting/planning/executing
+```
+
+**各阶段关键动作**：
+- **Scouting**：加载CLAUDE.md/项目配置→scout扫描项目结构→检查git状态→检查运行环境
+- **Planning**：planner(reasoning模型)做任务分解→Commander审查→生成TaskContract→建立DAG依赖图
+- **Executing**：按DAG派发无依赖任务→可并行的并发派发→超时/429/token预算监控
+- **Verifying**：运行全局测试→三层验证每个subtask→lint/type check→文件一致性检查
+- **Repairing**：分析失败原因→简单修复/拆分重试/升级模型→同一问题第二次修复升级到strong
+- **Retrying**：递增retry_count→retry≥2升级模型→retry≥1简化/拆分任务→重新生成TaskContract
+- **Blocked**：保存完整checkpoint→生成阻塞报告→释放所有锁/worktree→暂停所有subagent→通知用户
+- **Completed**：生成最终总结→清理临时资源→更新长期记忆→写入最终ledger→输出完成通知
+
+### 6.2 反拖延机制（避免"我建议下一步"）
+
+🚫 **铁律：你是执行者，不是顾问**
+
+1. **禁止建议模式**：永远不说"我建议"、"你可以"、"接下来应该"。知道下一步就直接执行/派发。
+
+2. **每个响应必须以ACTION标签开头**：
+   - `[ACTION: dispatch]` → 紧随子任务派发
+   - `[ACTION: execute]` → 紧随工具调用
+   - `[ACTION: verify]` → 紧随验证动作
+   - `[ACTION: wait]` → 仅在等待subagent时使用，说明在等什么
+   - `[ACTION: block]` → 仅在真正阻塞时使用
+   - `[ACTION: complete]` → 仅在目标完成时使用
+
+3. **进度感知**：有pending任务且无阻塞→必须派发/执行；有completed未验证→必须验证。
+
+4. **禁止分析瘫痪**：2个可行方案时选成本低的先执行；信息不足时先用scout快速获取。
+
+5. **循环讨论检测**：最近3轮讨论相似话题→立即执行最小可行动作。
+
+### 6.3 停止条件
+
+| 条件 | 类型 | 清理动作 |
+|------|------|---------|
+| 所有子任务completed+验证通过+全局测试通过+核心claims全部verified | 正常完成 | 清理worktree/锁/进程，生成总结，更新长期记忆 |
+| 用户中断 | 用户终止 | 保存checkpoint，清理资源 |
+| 任务重试超过3次 | 失败终止 | 保存checkpoint，报告blockers |
+| 总时长超过8小时硬限制 | 超时 | 保存checkpoint，生成进度报告 |
+| Token预算耗尽 | 预算耗尽 | 保存checkpoint，报告进度 |
+| Blocked超过30分钟无用户输入 | 阻塞超时 | 保存最终checkpoint，发送通知 |
+
+### 6.4 故障恢复机制
+
+**429恢复**：
+- 模型降级(strong→mid→flash)
+- 等待后重试(Retry-After+指数退避)
+- 冷却>2min时保存checkpoint延迟恢复
+
+**上下文溢出恢复**：
+- <120%: Light压缩(截断工具输出)
+- <150%: Medium压缩(折叠已完成subtask)
+- >150%: Heavy压缩(折叠已完成phase+阶段摘要)
+
+**测试失败恢复**：
+- 编译/类型错误→直接repair
+- 新测试失败→repair(≤2次)→升级模型retry
+- **回归失败(破坏已有功能)**→立即回滚最近修改(3个subtask)
+- 不稳定测试→重跑1次
+- 基础设施错误→blocked
+
+### 6.5 Ledger/Progress记录
+
+Ledger以JSONL格式(每行一条记录)append-only写入磁盘，崩溃不丢：
+
+```
+type LedgerEntry =
+  | { type: "goal_created"; description; at }
+  | { type: "phase_transition"; from; to; reason; at }
+  | { type: "task_created"; task; at }
+  | { type: "task_dispatched"; task_id; agent; model; at }
+  | { type: "task_completed"; task_id; result_summary; duration; token_cost; at }
+  | { type: "task_failed"; task_id; error; retry_count; at }
+  | { type: "verification_result"; task_id; status; issues; at }
+  | { type: "decision_made"; context; chosen; rationale; at }
+  | { type: "file_modified"; path; by_task; action; hash; at }
+  | { type: "checkpoint"; checkpoint_id; phase; at }
+  | { type: "context_compressed"; level; ratio; token_before; token_after; at }
+  | { type: "blocker"; description; attempted_solutions; at }
+  | { type: "error_recovery"; error_type; action; success; at }
+  | { type: "goal_completed"; total_duration; total_cost; tasks_completed; at }
+```
+
+---
+
+## 七、Skills / Plugins / MCP 产品化
+
+统一的能力扩展体系：Rules给约定，MCP给工具，Skills给方法论，Hooks给自动化，Memory给经验，Plugin给分发。
+
+### 7.1 概念区别矩阵
+
+| 维度 | Skill | Plugin | MCP Server | Hook | Rule(CLAUDE.md) | Memory |
+|------|-------|--------|------------|------|-----------------|--------|
+| **本质** | 可复用prompt+脚本包 | skills+hooks+配置的分发包 | 外部工具/数据源连接器 | 生命周期事件处理器 | 目录级静态指令 | 持久化知识 |
+| **运行方式** | 注入Agent上下文 | 安装后提供全套能力 | 独立进程JSON-RPC | 事件触发时执行 | 每次对话加载 | 按需检索 |
+| **消耗上下文** | 是(被加载时) | 取决于包含的skills | 否(工具schema延迟加载) | 否(除非prompt类型) | 是 | 是(检索到的部分) |
+| **副作用** | 可以有(脚本) | 可以有 | 有(外部系统) | 有 | 无 | 无 |
+| **分发方式** | 文件夹(SKILL.md) | 插件包(npm/手动) | npm包/远程服务 | settings.json | Markdown文件 | 自动积累 |
+| **类比** | 技能书 | 装备包 | USB-C外设 | 条件触发技能 | 被动buff | 经验值 |
+
+### 7.2 Skills给谁用？
+
+- **Commander级Skills**：task-decomposition(任务分解)、progress-tracking(进度追踪)、risk-assessment(风险评估)、context-management(上下文管理)
+- **Executor级Skills**：typescript-patterns(TS/React最佳实践)、testing-patterns(测试模式)、error-handling(错误处理)、refactoring(重构)
+- **Reviewer级Skills**：security-checklist(安全审查清单)、accessibility-audit(可访问性审计)、performance-audit(性能审计)
+
+### 7.3 Skill三层加载（防上下文污染）
+
+100个Skills ≠ 100×2000 tokens全注入。三层渐进加载，总预算控制在8k tokens以内：
+
+1. **L1 Index Card(始终加载，~2k tokens)**：每个skill一行(`- name: one-liner description`)，类似目录索引
+2. **L2 Summaries(按需匹配，~500-1000 tokens)**：基于paths硬匹配+flash模型语义匹配，加载5-10个相关skill的100字summary
+3. **L3 Full Content(明确使用时加载，~1000-4000 tokens)**：Agent通过`use_skill`工具加载1-3个实际使用的skill完整prompt
+
+### 7.4 自动Skill选择流程
+
+1. 硬匹配(最快)：基于文件paths的glob匹配(如*.tsx自动加载react skill)
+2. 语义匹配(flash模型)：基于task description匹配skill descriptions，选≤5个
+3. 依赖解析：自动包含依赖的skills
+4. 优先级排序：按skill priority(0-100)排序
+5. 预算控制：总tokens超预算则减少summaries数量
+
+### 7.5 调用可解释性
+
+每个自动决策记录可解释信息到ledger：
+```json
+{
+  "type": "decision_made",
+  "decision_type": "skill_selected",
+  "input_signals": {
+    "task_type": "implementation",
+    "files_touched": ["src/components/Button.tsx"],
+    "matching_path_skills": ["react-component-design"],
+    "semantic_scores": { "react-component-design": 0.95, "testing-patterns": 0.3 }
+  },
+  "alternatives_considered": ["react-component-design", "typescript-patterns", "testing-patterns"],
+  "chosen": "react-component-design",
+  "rationale": "任务是实现React组件，提供组件设计模式和最佳实践",
+  "confidence": 0.95
+}
+```
+
+---
+
+## 八、UI 产品设计
+
+五层信息架构：L0输入框常驻→L1右侧面板→L2 Tab/Modal→L3设置页→L4高级调试。高频状态零点击可见，调试信息按需展开。
+
+### 8.1 信息层级总览
+
+| 层级 | 位置 | 可见性 | 内容 |
+|------|------|--------|------|
+| L0 | 输入框附近 | 始终可见/零点击 | 目标模式状态条、Commander状态、模型/渠道快速切换 |
+| L1 | 右侧面板 | 点击展开/半屏 | Subagent活动流、429/Fallback事件流、Task Ledger时间线 |
+| L2 | Tab页/Modal | 主动导航进入 | Router/KeyPool面板、健康度仪表盘、Verification面板、Statistics |
+| L3 | 设置页(齿轮) | 配置入口 | Skills/Plugins管理、API Key管理、路由策略配置 |
+| L4 | 高级调试页 | Ctrl+Shift+D/?debug=1 | KeySlot实时状态、Token Bucket可视化、请求Tracing瀑布图、SSE流日志 |
+
+### 8.2 L0: 输入框状态条
+
+```
+◉ Commander: Planning  [●●○] Coder:running Researcher:idle Writer:done
+───────────────────────────────────────────────────────────────────────
+[⚡qwen-max → official] [🔧3 Skills] [🔒Safe Mode]      [≋ Streaming]
+│⏳首字加载中...│  ← TTFT超过1.5s时显示
+┌─────────────────────────────────────────────────────────────────────┐
+│ 帮我写一个Python异步爬虫...                           [发送 ▶]      │
+└─────────────────────────────────────────────────────────────────────┘
+[快速模式] [深度模式] [VIP竞速] [代码模式] [研究模式]   ← 模式切换Chip
+```
+
+**国产模型特殊提示**：
+- TTFT超过1.5s时，模型Chip显示"⏳首字加载中..."，同时触发Stream Race指示
+- 发生429时，模型Chip短暂闪红，显示"↻ 切换中..."，自动切到备用渠道
+- Tool call失败时，显示"🔄 重试工具调用..."，并标注重试次数
+
+### 8.3 L1: 右侧活动流面板
+
+活动流Tab实时显示：
+```
+10:23:45  ● Commander
+    任务分析完成: 需要3个子任务
+
+10:23:46  ◐ Coder [qwen-max]
+    ▶ 开始执行代码编写
+    │ 路由到 official·slot-2 (会话亲和: KV Cache命中)
+
+10:23:48  ⚠ 429 Rate Limited
+    │ qwen-max::official slot-2 触发429, 冷却8s
+    │ → 切换到 siliconflow·slot-1
+
+10:23:49  🏁 Stream Race启动 (Warmup)
+    │ A: siliconflow (active)  B: official·slot-1 (备用)
+
+10:23:51  ✓ 首token到达
+    │ 赢家: siliconflow TTFT=1.8s, 浪费成本: $0.0000
+
+10:24:03  ✓ Coder完成
+    │ tokens: 2.3K in / 890 out, 耗时: 17s, 成本: $0.002
+```
+
+Task Ledger Tab(甘特图时间线)：
+```
+Planning     ████████████████|                                    2s
+Coder               ████ 429! ████████████████████████████        17s
+Researcher          ─────────████████████████████████████         22s
+Writer                                 ─────────████████████      12s
+Verify                                           ─██              3s
+总计: 34s (并行节省: 22s) | Token: 12.4K | 成本: $0.018
+```
+
+### 8.4 L2: Router/KeyPool管理面板
+
+模型健康度总览：
+```
+模型           渠道数  健康分  TTFT p95  成本/1K   状态
+qwen-max       4      87/100  420ms    $0.004    ● 正常
+  ├ official          92      380ms    $0.004    ● 3 keys
+  ├ siliconflow       78      450ms    $0.003    ● 2 keys
+  ├ openrouter        71      680ms    $0.004    ◐ 1 key (cool)
+  └ self-hosted       65      150ms    $0.0004   ● 1 key
+gpt-4o         2      91/100  520ms    $0.025    ● 正常
+deepseek-chat  3      74/100  890ms    $0.002    ⚠ 高TTFT
+glm-4-plus     2      52/100  1200ms   $0.001    ⚠ 频繁429
+```
+
+KeySlot详情(点击展开)：
+```
+Key: sk-****a3b2  [qwen-max::official]
+状态: ● Active | Tier: Paid | RPM: 300 | 并发: 3/10
+今日: 1,247 req / 45.2K tokens / $0.18
+健康分: 92 | TTFT avg: 380ms p95: 720ms
+429率: 1.2% | 成功率: 98.7% | 最后429: 3分钟前
+
+RPM令牌桶实时:
+  全局: ████████████░░░░░░ 73%  (219/300 rpm)
+  本slot: ██████░░░░░░░░░░ 47%  (141/300 rpm)
+  并发: ███░░░░░░░░░░░░░░░ 3/10
+```
+
+### 8.5 L4: 高级调试页(Ctrl+Shift+D)
+
+- 实时请求Tracing瀑布图(点击每个段查看请求体/响应头/TTFT/token usage/成本)
+- KeySlot状态矩阵(Slot/状态/RPM桶/并发/冷却/亲和数/健康分)
+- 原始SSE流日志(最近请求的完整HTTP交互)
+- Stream Race效果统计：竞速请求数/触发率/成本增加/TTFT改善/浪费token率
+
+---
+
+## 九、数据模型与核心算法
+
+### 9.1 核心数据模型索引
+
+| 模型 | 核心字段 |
+|------|---------|
+| **GoalState** | goal_id, session_id, user_input, intent(task_type/complexity/capabilities/estimated_tokens), budget(max_cost/max_latency/strategy/allow_stream_race), context(total_tokens/compact_threshold/recent_messages/history_summary/facts), phase |
+| **CommanderState** | commander_id, goal_id, iteration, phase(analyzing/planning/dispatching/monitoring/synthesizing), plan(analysis/subtasks/DAG/is_complex), dispatched_tasks, completed_tasks, failed_tasks, routing_preferences, replanning_count |
+| **SubagentTask** | task_id, assigned_role, task_type, dependencies[], priority, status, assigned_model/channel/slot, result, attempts, route_events[], metrics(duration/ttft/tokens/cost) |
+| **AgentRole** | role_id, capabilities, model_preferences(primary/secondary/forbidden), execution(temperature/max_tokens/timeout/max_retries), quality_requirements(min_health/tool_stability/verification_required), available_tools, system_prompt |
+| **ModelProfile** | model_id, provider_family, capabilities(tools/vision/json/long_ctx/reasoning/max_tokens/max_ctx), quality(tier/code_score/tool_stability), cost(input/output/cache), channels[] |
+| **ProviderChannel** | channel_id, channel_type(official/openrouter/siliconflow/self_hosted), base_url, model_id_override, region, quality_tier, cost_multiplier, baseline_TTFT, tool_call_stability, key_pool |
+| **KeyPool** | pool_id, slots[], aggregate_rpm/tpm, affinity_lru(lru_capacity/ttl), cooldown_heap, selection_strategy |
+| **KeySlot** | slot_id, api_key_encrypted, tier, status(active/cooldown/disabled/exhausted/probation), rate_limit(rpm/tpm/concurrent/daily_quota), usage, cooldown(until/reason/consecutive_429s), stats(EWMA_ttft/health_score/p95_latency) |
+| **RouterDecision** | requirements(task_type/capabilities/estimated_tokens/strategy), selected(model/channel/slot/used_affinity), candidates[](total_score/breakdown), fallback_chain[], stream_race(mode/participants/ttft_timeout/budget) |
+| **RateLimitState** | global_rpm/tpm TokenBucket, slot_buckets Map, cooldown_queue(按until排序最小堆) |
+| **ExecutionLedger** | entries[] (JSONL append-only), summary(total_tasks/completed/failed/duration/parallel_saved/tokens/cost/429s/fallbacks/stream_races/ttft_stats) |
+| **VerificationResult** | status(pending/passed/failed/needs_human_review), score(0-100), automated_checks[], critic_review(model/score/feedback/suggestions/safety_issues), retry_recommended, retry_with_model |
+
+### 9.2 核心算法概览
+
+| 算法 | 核心逻辑 | 关键特性 |
+|------|---------|---------|
+| **commanderLoop** | OODA环: Observe→Orient→Decide→Act。L1理解(flash)→L2规划(mid)→L3调度(DAG)→L4监控→L5聚合(strong) | 反拖延检测、上下文自动压缩、阶段转移、停止条件检查 |
+| **assignSubagent** | matchTaskTypeToRole→构建requirements(国产模型:tool_stability≥0.85/long_ctx)→selectModelForRole→spawnSubagent(worktree隔离) | 国产模型JSON任务优先官方渠道、长上下文任务1.2x窗口余量 |
+| **selectModelForRole** | 收集候选模型→展开(model,channel,slot)三元组→过滤(blocked/cooldown/无容量)→session affinity检查→多维加权评分→选top1→构建fallback链→Stream Race配置 | 国产模型TTFT>2s额外扣分、probation slot-0.3惩罚、affinity+0.2奖励 |
+| **selectKeySlot** | 处理冷却堆→过滤可用slot→affinity优先→按策略(EWMA_latency/least_concurrent/RR)排序→Token Bucket双桶预检→获取并发槽→更新affinity | CompositeTokenBucket(全局+per-slot双层)、冷启动probation机制 |
+| **handle429** | 解析Retry-After→指数退避(2s→4s→8s→60s→5min禁用)→jitter防羊群→加入冷却堆→解绑affinity→释放令牌→决定fallback策略(同channel换slot→换channel→降级模型) | 国产模型Retry-After兼容x-ratelimit-reset、连续5次429禁用告警 |
+| **buildFallbackChain** | 按错误类型决策树:429→同slot→同channel换slot→同质量channel→降级channel→同provider家族降级→跨provider; tool_call_error→高stability channel→海外模型; timeout→重试2次→换slot→换channel; context_overflow→长ctx模型→compact | 错误驱动动态链，最多8步，熔断保护 |
+| **streamRace** | 预算预检→warmup先发1个/aggressive同时发N个→TTFT Guard超时追加→Promise.any等待赢家→cancel输家(AbortController+reader.cancel防token泄漏)→产出winner流 | Budget Guard自动降级、国产模型TTFT阈值2.5s、浪费成本计量 |
+| **mergeSubagentResults** | 并行三层验证→拒绝失败结果→文件冲突检测→拓扑排序按序apply→全局测试→失败回滚 | git worktree隔离、回归测试失败立即回滚3个subtask |
+| **compactAndResume** | 分离保留/压缩消息→提取关键信息(facts/decisions/commitments/errors/code)→用flash模型生成结构化摘要→合并摘要→重建消息列表(摘要+最近6条)→更新fact库 | 三级压缩(light/medium/heavy)、国产模型用flash做压缩省成本、关键数字/路径/代码签名必须保留 |
+
+---
+
+## 十、路线图：MVP → V1 → V2
+
+### 🚀 Phase 0: MVP (2-3周) — 能用
+
+**目标**：核心KeyPool+基础路由+429处理，跑通现有Worker
+
+包含：
+- KeyPool基础：多KeySlot、同channel轮询、基础RPM限流
+- 429处理：指数退避cooldown、自动换slot、Retry-After解析
+- Fallback链L1-L3：重试→同channel换key→同model换channel
+- 基础UI：输入框状态条(模型/健康)、右侧活动流
+- 国产模型适配：Qwen/DeepSeek/GLM官方API接入、tool call重试
+
+不做：Session Affinity、Stream Race、Health Score动态评分、Verification面板
+
+### ⚡ Phase 1: V1 (4-6周) — 好用
+
+**目标**：生产可用，TTFT优化，完整UI，可观测
+
+新增：
+- Session Affinity(LRU+KV Cache保护)，同session命中率>80%，TTFT降低30%+
+- RPM Pooling(CompositeTokenBucket双层桶)
+- Stream Race(Warmup模式)，p99 TTFT<2s，额外成本<8%
+- Health Score(5维EWMA评分+probation机制)
+- 完整Fallback(5层+tool call错误专项处理+context overflow压缩)
+- UI完整版：L0+L1+L2 KeyPool管理面板+健康度仪表盘
+- Event可视化：429/Fallback/Stream Race实时事件流+Task Ledger时间线
+- Key安全(AES加密+fingerprint脱敏+key rotation)
+- 上下文压缩compactAndResume完整实现
+- Verification(自动检查+Critic复审)
+- 统计面板：请求量/成本/TTFT/429率基础报表
+
+国产模型专项优化：
+- Qwen: Prefix Caching检测、enable_search参数正确传递
+- GLM: conversation_id会话缓存、tool call格式修复重试
+- DeepSeek: prefix参数利用
+- 所有国产模型: TTFT超时从2s放宽到2.5s，tool call稳定性评分纳入路由
+
+### 🧠 Phase 2: V2 (8-12周) — 智能
+
+**目标**：在线学习、预测性路由、企业级特性
+
+新增：
+- Stream Race Aggressive(VIP并行3路)，VIP用户p99 TTFT<800ms
+- 预测性路由：基于历史数据的性能预测、时段性RPM建模、故障预警(429发生前30s预测并切换)
+- **Thompson Sampling Bandit**在线学习路由权重，平均成本降低20%
+- 自建网关集成(One-API/vLLM)，内网模型TTFT<200ms
+- Health Score v2(质量分基于verifier反馈自动迭代+异常检测+自动告警)
+- UI V2：实时Tracing瀑布图、Debug模式、KeySlot实时矩阵、SSE流日志
+- 多租户：KeyPool per-tenant隔离+quota管理+usage计量计费
+- Plugin生态：Skills市场、MCP Server自动发现、一键安装
+- Tool Call增强：国产模型tool call自动修复(JSON mode fallback、regex提取、格式校正)，GLM/DeepSeek tool call成功率从80%→95%+
+- 长上下文专项：Qwen-Long/GLM-4-Long专门路由、分段加载、RAG集成，100K+上下文稳定处理
+- 企业安全：SSO集成、审计日志、IP白名单、DLP数据防泄漏
+- OpenTelemetry全链路：Trace/Metrics/Logging三支柱、Langfuse集成
+
+智能路由策略进化：
+- V0(MVP): 静态规则 + 健康分排序
+- V1(V1): EWMA延迟 + 多维加权评分
+- V2(V2): Thompson Sampling Bandit（每个model/channel/slot是一个arm，reward=f(latency,cost,quality,error_rate)，epsilon-greedy 10%流量探索，冷启动用规则，积累50样本后切换到Bandit，Contextual Bandit根据task_type/time_of_day/user_tier感知）
+
+### 国产模型特性适配速查表
+
+| 特性 | Qwen(通义) | GLM(智谱) | DeepSeek | 适配策略 |
+|------|-----------|-----------|----------|---------|
+| TTFT | 官方300-600ms,高峰2s+ | 波动大,p99达5s | 较慢,p95约800ms | TTFT Guard 2.5s; 竞速优先官方渠道 |
+| 429频率 | 中(付费RPM较高) | 高 | 中 | 多key叠加; GLM配多账号; 自动切聚合商 |
+| Tool Call | 较稳定(官方) | 格式不稳定,易漏参数 | V3版本稳定 | tool_stability评分;格式修复重试;JSON fallback |
+| KV Cache | 同key自动复用 | 需要conversation_id | 支持prefix参数 | Session Affinity; GLM传conversation_id; DeepSeek传prefix |
+| Stream Usage | 官方支持 | 不支持(需估算) | 不支持(需估算) | 不支持时tiktoken估算;自建网关补充usage |
+| 长上下文 | qwen-long支持1000K | glm-4-long支持1M | 128K | 长文任务路由到专门long模型;压缩策略 |
+| 推荐用途 | 通用/中文/工具 | 简单问答/低成本 | 代码/推理 | Worker模型选择参考此表 |
+
+---
+
+## 十一、AI Coding Agent 实施提示词
+
+（以下可直接复制给Claude Code/Cursor/Cline执行）
+
+---
+
+你是一个高级AI系统架构师和TypeScript/Python全栈工程师。请基于现有代码，实现生产级 Multi-channel KeyPool Router 系统。
+
+## 现有代码基础
+- src/core/types.py: 核心类型(Task/Message/ModelEndpoint/WorkerResult等)
+- src/router/gateway.py: LLMGateway(chat/chat_simple)，当前是单ModelEndpoint
+- src/router/capability_matrix.py: CapabilityMatrix模型能力矩阵
+- src/router/fallback.py: FallbackHandler基础fallback
+- src/core/config.py: 配置管理
+- src/workers/base.py: BaseWorker基类
+- src/orchestrator/planner.py: TaskPlanner
+
+## 实施要求
+
+### Phase 0: 核心KeyPool重构（优先级最高）
+
+1. **新增 src/router/keypool.py**:
+   - KeySlot类: slot_id, api_key加密存储, status(active/cooldown/disabled/exhausted/probation), rate_limit(rpm/tpm/concurrent/daily_quota), cooldown状态, EWMA延迟统计
+   - KeyPool类: slots管理, CompositeTokenBucket(全局+per-slot双层), session affinity LRU缓存(TTL 5min,容量10000), cooldown最小堆, 健康分更新
+   - TokenBucket类: 令牌桶算法(capacity/refill_rate/burst_ratio=0.15)
+
+2. **新增 src/router/cooldown.py**:
+   - CooldownManager: 指数退避(2s→4s→8s→60s→5min禁用), jitter防羊群, Retry-After解析, probation缓刑机制, 后台tick恢复冷却slot
+
+3. **新增 src/router/health.py**:
+   - HealthScorer: 5维评分(可用性30/延迟25/成功率20/质量15/稳定性10), EWMA滑动窗口(5分钟/300样本), 冷启动保护(新key70分/金丝雀)
+
+4. **重构 src/router/gateway.py**:
+   - 引入四层路由: ModelProfile → ProviderChannel → KeyPool → KeySlot
+   - 替换原ModelEndpoint为ModelProfile+ProviderChannel双层
+   - 实现selectModelForRole算法(多维加权评分,国产模型TTFT>2s额外扣分,affinity+0.2,probation-0.3)
+   - 实现selectKeySlot(affinity优先→策略排序→TokenBucket双桶预检)
+   - 多层Fallback链(同slot重试→同channel换slot→同model换channel→降级模型)
+   - 国产模型特殊处理: tool_call_stability≥0.85, JSON任务优先官方, 长上下文1.2x余量
+
+5. **新增 src/router/session_affinity.py**:
+   - LRUSessionCache: session_id→slot_id映射, TTL过期, 连续429解绑, GLM conversation_id支持, DeepSeek prefix检测
+
+### Phase 1: Stream Race + 高级路由
+
+6. **新增 src/router/stream_race.py**:
+   - StreamRace类: Warmup模式(T=0发1个,2s超时追加)和Aggressive模式(同时发2-3路)
+   - Budget Guard: 并行成本预检/自动降级/cancel时reader.cancel()防token泄漏
+   - 国产模型TTFT阈值2500ms,浪费成本计量
+
+7. **重构 src/router/fallback.py**:
+   - 错误驱动FallbackChain: 429/401/5xx/timeout/tool_call_error/context_overflow各自决策树
+   - 熔断保护(最多8步)
+
+8. **新增 src/router/security.py**:
+   - Key加密(AES-256-GCM), fingerprint日志脱敏, Key rotation支持
+
+### Phase 2: 上下文压缩 + Verification
+
+9. **新增 src/orchestrator/compaction.py**:
+   - compactAndResume: 三级压缩(light/medium/heavy), facts/decisions/errors保留, 结构化摘要生成
+   - 用flash模型做压缩省成本
+
+10. **新增 src/orchestrator/verification.py**:
+    - 三层验证: L1静态检查(文件/语法/契约) → L2功能验证(测试/lint/typecheck) → L3语义验证(强模型审查claims)
+    - 回归测试失败自动回滚
+
+11. **新增 src/orchestrator/goal_mode.py**:
+    - GoalState八状态机: scouting→planning→executing→verifying→repairing→retrying→blocked→completed
+    - 反拖延机制: ACTION标签强制, 建议模式检测, 循环讨论检测
+    - Ledger JSONL append-only持久化
+    - 停止条件检查(完成/用户中断/重试耗尽/8h超时/预算耗尽/阻塞超时)
+
+### 数据模型更新
+
+12. **更新 src/core/types.py**:
+    - 新增类型: ModelProfile, ProviderChannel, KeySlot, KeyPool, RouterDecision, RouterEvent, GoalState, CommanderState, SubagentTask, VerificationResult, ExecutionLedger, HealthBreakdown, EWMA
+    - 保持向后兼容: 原ModelEndpoint可平滑迁移
+
+### 配置更新
+
+13. **更新 src/core/config.py**:
+    - 支持多渠道配置(同一模型多个channel)
+    - 每个channel可配置多个key
+    - 路由策略presets: latency_first/quality_first/cost_first/balanced/vip_race
+    - Stream Race配置(模式/TTFT超时/最大并行/预算)
+
+## 代码质量要求
+- 完整类型注解(TypeScript风格的Python类型)
+- 结构化logging(每个路由决策/429/fallback/race winner记录)
+- 异常处理全覆盖(网络错误/超时/格式错误/限流)
+- 单元测试覆盖核心算法(TokenBucket/HealthScorer/selectKeySlot/buildFallbackChain)
+- 中文注释解释设计决策
+- 兼容现有代码:不破坏现有LLMGateway.chat()接口签名
+
+## 国产模型适配重点
+- Qwen(DashScope): Prefix Caching, enable_search参数, 官方API稳定
+- GLM(智谱): conversation_id会话缓存, tool call格式不稳定需重试修复
+- DeepSeek: prefix参数利用, V3 tool call稳定
+- 所有国产模型: Retry-After兼容x-ratelimit-reset头, stream usage不支持时用tiktoken估算
+- TTFT超时阈值比国外模型放宽500ms(2.5s)
+
+## 架构核心原则（设计约束）
+
+1. **Commander做脑，Subagent做手**：Commander始终保持全局视野和最终决策权，Subagent在隔离环境中执行范围明确的任务。弱模型永远不能做平权决策者。
+
+2. **Ledger是唯一真相源**：所有状态变化记录到不可变JSONL ledger，崩溃可恢复，决策可追溯。
+
+3. **上下文是稀缺资源**：三层压缩(light/medium/heavy)+worktree隔离+subagent上下文隔离，确保Commander上下文永远聚焦当前决策。
+
+4. **验证不可省略**：Subagent结果默认不可信，必须通过静态检查+功能验证+语义验证三层过滤才合并到主上下文。验证失败→回滚→repair，不污染。
+
+5. **模型按任务分配，不按角色固定**：
+   - Commander用strong（决策成本最高）
+   - Planner用reasoning（规划错了全错）
+   - Executor用mid（范围明确，性价比最高，成本1/5-1/10）
+   - Scout/Test Runner/Log Analyst用flash（确定性工作，成本1/10-1/50）
+   - Security Reviewer用strong（漏报代价远高于模型成本）
+   - Router/Classifier用flash（分类错误可被Commander纠正）
+
+6. **反拖延是工程问题**：[ACTION:dispatch/execute/verify/wait/block/complete]标签强制、建议模式检测、循环讨论检测，防止模型停在"我建议下一步"。
+
+7. **国产模型特殊对待**：
+   - TTFT波动大(p99可达5s)→Stream Race对冲
+   - 429频繁→多key RPM pooling+指数退避cooldown+自动切换聚合商
+   - Tool call不稳定→tool_call_stability评分+格式修复重试+JSON fallback
+   - KV Cache重要→Session Affinity+conversation_id/prefix参数传递
+   - 跨海延迟高→国内用户优先国产模型，海外模型走OpenRouter/SiliconFlow
+
+8. **并发必须隔离**：Git worktree是代码并发修改最佳方案，操作队列处理lockfile等串行资源，文件锁辅助简单场景。
+
+## 输出
+按文件顺序逐个实现，每个文件完成后运行基本验证。优先保证MVP功能(KeyPool+429处理+基础Fallback)跑通，再实现高级功能。
+
+---
+
+（报告完）
+
