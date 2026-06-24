@@ -10,10 +10,11 @@ use std::{
     time::Duration,
 };
 
+use engine_assets::{AssetDatabase, AssetRegistry, MaterialFormat, ModelResource};
+#[cfg(feature = "asset-import")]
 use engine_assets::{
-    AssetDatabase, AssetGuid, AssetRegistry, DecodedCubemapResource, DecodedTextureResource,
-    GpuResource, HotReloadTracker, ImportTask, MaterialFormat, ModelResource, ResourceKind,
-    import_builtin_asset, scan_project_assets,
+    AssetGuid, DecodedCubemapResource, DecodedTextureResource, GpuResource, HotReloadTracker,
+    ImportTask, ResourceKind, import_builtin_asset, scan_project_assets,
 };
 #[cfg(feature = "audio")]
 use engine_audio::{
@@ -27,10 +28,9 @@ use engine_core::math::{Transform, Vec3};
 use engine_core::{EngineConfig, EngineError, EngineResult, FrameCounter, TimeState, logging};
 #[cfg(feature = "audio")]
 use engine_ecs::AudioSourceComponentData;
-use engine_ecs::{
-    BuildConfiguration, BuoyancyProbeSetComponentData, ComponentData, FluidVolumeComponentData,
-    ProjectManifest, Scene,
-};
+use engine_ecs::{BuildConfiguration, ComponentData, ProjectManifest, Scene};
+#[cfg(feature = "physics")]
+use engine_ecs::{BuoyancyProbeSetComponentData, FluidVolumeComponentData};
 #[cfg(feature = "physics")]
 use engine_physics::{
     BodyHandle, BodyKind, CharacterControllerDesc, ColliderDesc, ColliderShape, ColliderShapeRef,
@@ -41,12 +41,13 @@ use engine_physics::{
 use engine_platform::GamepadProvider;
 use engine_platform::{ActionMap, InputState};
 use engine_render::{
-    AntiAliasingMode, BatteryPolicy, FrameGenerationKind, HeadlessRenderDevice, ImageDesc,
-    ImageFormat, ImageHandle, ImageUsage, PresentStrategy, RenderApi, RenderDevice, RenderFrame,
-    RenderGraph, RenderGraphBuilder, RenderMaterialTextures, RenderPerformanceConfig,
-    RenderPlatformClass, RenderQualityMode, RenderScalingContext, RenderScalingSettings,
-    RenderWorld, ThermalState, UiCompositionPolicy, UpscalerKind,
+    AntiAliasingMode, BatteryPolicy, FrameGenerationKind, HeadlessRenderDevice, ImageHandle,
+    PresentStrategy, RenderApi, RenderDevice, RenderFrame, RenderGraph, RenderGraphBuilder,
+    RenderPerformanceConfig, RenderPlatformClass, RenderQualityMode, RenderScalingContext,
+    RenderScalingSettings, RenderWorld, ThermalState, UiCompositionPolicy, UpscalerKind,
 };
+#[cfg(feature = "asset-import")]
+use engine_render::{ImageDesc, ImageFormat, ImageUsage, RenderMaterialTextures};
 #[cfg(feature = "wgpu")]
 pub use engine_render_wgpu::WgpuRenderDevice;
 use engine_script_varg::{VargRuntimeContext, VargScript, compile_script_source};
@@ -104,6 +105,7 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     /// Material resources resolved from project asset GUIDs.
     pub material_resources: HashMap<engine_core::AssetId, MaterialFormat>,
     frame_counter: FrameCounter,
+    #[cfg(feature = "asset-import")]
     hot_reload: HotReloadTracker,
     varg_script_cache: HashMap<PathBuf, VargScript>,
     #[cfg(feature = "audio")]
@@ -230,6 +232,7 @@ pub fn headless_services_from_scene(
     Ok(services)
 }
 
+#[cfg(feature = "asset-import")]
 fn modified_time(path: &Path) -> EngineResult<std::time::SystemTime> {
     fs::metadata(path)
         .and_then(|metadata| metadata.modified())
@@ -277,6 +280,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             mesh_resources: HashMap::new(),
             material_resources: HashMap::new(),
             frame_counter: FrameCounter::default(),
+            #[cfg(feature = "asset-import")]
             hot_reload: HotReloadTracker::default(),
             varg_script_cache: HashMap::new(),
             #[cfg(feature = "audio")]
@@ -767,6 +771,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
     }
 
     /// Scans, imports, and binds all supported project assets for runtime use.
+    #[cfg(feature = "asset-import")]
     pub fn load_project_assets(&mut self, asset_root: impl Into<PathBuf>) -> EngineResult<()> {
         let asset_root = asset_root.into();
         self.asset_database = AssetDatabase::new(&asset_root, "builtin");
@@ -789,6 +794,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
     }
 
     /// Reimports files whose modification stamp changed and refreshes runtime handles.
+    #[cfg(feature = "asset-import")]
     pub fn reload_changed_project_assets(&mut self) -> EngineResult<Vec<engine_core::AssetId>> {
         let asset_root = self
             .asset_root
@@ -816,6 +822,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         Ok(changed)
     }
 
+    #[cfg(feature = "asset-import")]
     fn import_runtime_asset(
         &mut self,
         asset_root: &Path,
@@ -948,6 +955,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         Ok(())
     }
 
+    #[cfg(feature = "asset-import")]
     fn material_textures_from_refs(
         &self,
         model_source_path: &Path,
@@ -971,6 +979,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         }
     }
 
+    #[cfg(feature = "asset-import")]
     fn texture_handle_for_material_ref(
         &self,
         model_source_path: &Path,
@@ -981,6 +990,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         self.texture_resources.get(&guid.as_asset_id()).copied()
     }
 
+    #[cfg(feature = "asset-import")]
     fn register_loaded_model_materials(&mut self) {
         let models: Vec<(engine_core::AssetId, PathBuf, ModelResource)> = self
             .mesh_resources
@@ -2175,6 +2185,7 @@ fn model_material_index_for_mesh(mesh_name: &str, model: &ModelResource) -> Opti
     model.meshes.get(mesh_index)?.material_index
 }
 
+#[cfg(feature = "asset-import")]
 fn resolve_model_texture_ref(model_source_path: &Path, texture_ref: &str) -> PathBuf {
     let texture_path = Path::new(texture_ref);
     let joined = if texture_path.is_absolute() {
@@ -2188,6 +2199,7 @@ fn resolve_model_texture_ref(model_source_path: &Path, texture_ref: &str) -> Pat
     normalize_relative_path(&joined)
 }
 
+#[cfg(feature = "asset-import")]
 fn normalize_relative_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {

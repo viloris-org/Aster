@@ -1,0 +1,20 @@
+[package]
+name = "engine-quest"
+description = "Aster Quest workspace validation and review primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+engine-ai.workspace = true
+engine-core.workspace = true
+engine-ecs.workspace = true
+engine-editor = { workspace = true, features = ["editor"] }
+runtime-min = { workspace = true, features = ["asset-import"] }
+serde.workspace = true
+serde_json.workspace = true

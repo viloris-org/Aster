@@ -45,6 +45,7 @@ engine-editor.workspace = true
 engine-script-varg.workspace = true
 engine-i18n.workspace = true
 engine-packager.workspace = true
+engine-quest.workspace = true
 engine-render.workspace = true
 engine-render-wgpu.workspace = true
 engine-assets.workspace = true

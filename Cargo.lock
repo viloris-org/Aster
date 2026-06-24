@@ -1411,6 +1411,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine-quest"
+version = "0.1.0"
+dependencies = [
+ "engine-ai",
+ "engine-core",
+ "engine-ecs",
+ "engine-editor",
+ "runtime-min",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "engine-render"
 version = "0.1.0"
 dependencies = [
@@ -6315,6 +6328,7 @@ dependencies = [
  "engine-editor",
  "engine-i18n",
  "engine-packager",
+ "engine-quest",
  "engine-render",
  "engine-render-wgpu",
  "engine-script-varg",

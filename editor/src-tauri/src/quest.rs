@@ -7,6 +7,7 @@ use std::{
 };
 
 use engine_core::{EngineError, EngineResult};
+pub use engine_quest::{ChangedFile, ValidationResult};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -197,16 +198,6 @@ impl Default for QuestAutonomyPolicy {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ChangedFile {
-    pub path: String,
-    pub additions: u32,
-    pub deletions: u32,
-    pub status: String,
-    #[serde(default)]
-    pub diff: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct QuestTransactionGroup {
     pub id: String,
     pub label: String,
@@ -237,52 +228,6 @@ pub struct QuestReviewFinding {
     pub artifact_path: Option<String>,
     #[serde(default)]
     pub source: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ValidationResult {
-    pub name: String,
-    pub status: String,
-    pub summary: String,
-    #[serde(default)]
-    pub command_id: Option<String>,
-    #[serde(default)]
-    pub command: Option<String>,
-    #[serde(default)]
-    pub policy_approved: bool,
-    #[serde(default)]
-    pub log: String,
-}
-
-impl ValidationResult {
-    pub fn new(
-        name: impl Into<String>,
-        status: impl Into<String>,
-        summary: impl Into<String>,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            status: status.into(),
-            summary: summary.into(),
-            command_id: None,
-            command: None,
-            policy_approved: false,
-            log: String::new(),
-        }
-    }
-
-    pub fn with_policy_command(
-        mut self,
-        command_id: impl Into<String>,
-        command: impl Into<String>,
-        log: impl Into<String>,
-    ) -> Self {
-        self.command_id = Some(command_id.into());
-        self.command = Some(command.into());
-        self.policy_approved = true;
-        self.log = log.into();
-        self
-    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
