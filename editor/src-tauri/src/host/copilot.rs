@@ -1,4 +1,96 @@
+use std::collections::BTreeSet;
+
 use crate::*;
+
+fn copilot_continuation_reason(
+    operations: &[engine_ai::PlannedOperation],
+    applied_read_only: bool,
+) -> Option<String> {
+    if applied_read_only {
+        return None;
+    }
+
+    let mut written_scripts = BTreeSet::new();
+    let mut attached_scripts = BTreeSet::new();
+    let mut checked_scripts = BTreeSet::new();
+
+    for planned in operations {
+        match &planned.operation {
+            engine_ai::AgentOperation::WriteScript { path, .. } => {
+                written_scripts.insert(path.clone());
+            }
+            engine_ai::AgentOperation::CheckScript { paths } => {
+                checked_scripts.extend(paths.iter().cloned());
+            }
+            engine_ai::AgentOperation::CreateObject { components, .. } => {
+                for component in components {
+                    if component.component_type == "Script" {
+                        if let Some(path) =
+                            component.properties.get("path").and_then(|v| v.as_str())
+                        {
+                            attached_scripts.insert(path.to_owned());
+                        }
+                    }
+                }
+            }
+            engine_ai::AgentOperation::SetProperty {
+                component,
+                field,
+                value,
+                ..
+            } if component == "Script" && (field == "path" || field == "source") => {
+                if let Some(path) = value.as_str() {
+                    attached_scripts.insert(path.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if written_scripts.is_empty() {
+        return None;
+    }
+
+    let unattached = written_scripts
+        .difference(&attached_scripts)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unattached.is_empty() {
+        return Some(format!(
+            "new scripts need scene entities with Script components: {}",
+            unattached.join(", ")
+        ));
+    }
+
+    let unchecked = written_scripts
+        .difference(&checked_scripts)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unchecked.is_empty() {
+        return Some(format!(
+            "changed scripts need final check_script validation: {}",
+            unchecked.join(", ")
+        ));
+    }
+
+    None
+}
+
+fn copilot_task_update(operation: &engine_ai::AgentOperation) -> Option<serde_json::Value> {
+    match operation {
+        engine_ai::AgentOperation::CreateTask { id, title } => Some(serde_json::json!({
+            "id": id,
+            "title": title,
+            "done": false,
+        })),
+        engine_ai::AgentOperation::UpdateTask { id, title, done } => Some(serde_json::json!({
+            "id": id,
+            "title": title,
+            "done": done,
+        })),
+        _ => None,
+    }
+}
 
 impl EditorHost {
     pub(crate) fn build_agent_context(
@@ -478,12 +570,15 @@ impl EditorHost {
         } else {
             None
         };
+        let mut request = session.prepare_request(
+            &enriched_prompt,
+            &self.copilot_conversation,
+            thinking_effort,
+        );
+        request.tools = engine_ai::copilot_tool_definitions();
+
         Ok(PreparedCopilotRequest {
-            request: session.prepare_request(
-                &enriched_prompt,
-                &self.copilot_conversation,
-                thinking_effort,
-            ),
+            request,
             original_prompt: prompt.to_string(),
             provider: provider_str.to_owned(),
             model: self.copilot_settings.model.clone(),
@@ -560,19 +655,29 @@ impl EditorHost {
             session.plan_from_response(response, planning_policy)?
         };
 
-        let assistant_message = plan
-            .operations
-            .iter()
-            .find_map(|planned| match &planned.operation {
-                engine_ai::AgentOperation::Complete { summary } => summary.clone(),
-                _ => None,
-            })
-            .unwrap_or_default();
+        let completion_summary =
+            plan.operations
+                .iter()
+                .find_map(|planned| match &planned.operation {
+                    engine_ai::AgentOperation::Complete { summary } => summary.clone(),
+                    _ => None,
+                });
+        let model_completed = completion_summary.is_some();
+        let assistant_message = completion_summary.clone().unwrap_or_default();
         plan.operations.retain(|planned| {
             !matches!(
                 &planned.operation,
                 engine_ai::AgentOperation::Complete { .. }
             )
+        });
+        let mut task_updates = Vec::new();
+        plan.operations.retain(|planned| {
+            if let Some(update) = copilot_task_update(&planned.operation) {
+                task_updates.push(update);
+                false
+            } else {
+                true
+            }
         });
         plan.read_only = plan.operations.iter().all(|op| !op.requires_write);
         plan.requires_write = plan.operations.iter().any(|op| op.requires_write);
@@ -645,7 +750,13 @@ impl EditorHost {
             self.copilot_conversation.remove(0);
         }
 
-        self.last_copilot_plan = Some(plan);
+        let needs_continuation = plan.operations.is_empty() && !model_completed;
+
+        self.last_copilot_plan = Some(PendingCopilotPlan {
+            plan,
+            model_completed,
+            completion_summary: completion_summary.clone(),
+        });
 
         Ok(serde_json::json!({
             "message": assistant_message,
@@ -653,6 +764,14 @@ impl EditorHost {
             "read_only": operations.iter().all(|o| !o["requires_write"].as_bool().unwrap_or(true)),
             "requires_write": operations.iter().any(|o| o["requires_write"].as_bool().unwrap_or(false)),
             "knowledge_entries_used": knowledge_entries_used,
+            "completed": model_completed,
+            "needs_continuation": needs_continuation,
+            "task_updates": task_updates,
+            "continuation_reason": if needs_continuation {
+                Some("the model did not emit a complete operation and proposed no executable operations")
+            } else {
+                None
+            },
         }))
     }
 
@@ -669,12 +788,15 @@ impl EditorHost {
             })
             .ok_or_else(|| EngineError::config("missing 'approved_indices' array"))?;
 
-        let plan = self.last_copilot_plan.take().ok_or_else(|| {
+        let pending_plan = self.last_copilot_plan.take().ok_or_else(|| {
             EngineError::config("no pending copilot plan — call copilot/plan first")
         })?;
+        let model_completed = pending_plan.model_completed;
+        let model_completion_summary = pending_plan.completion_summary.clone();
 
         // Filter the plan to only approved operations
-        let filtered_ops: Vec<_> = plan
+        let filtered_ops: Vec<_> = pending_plan
+            .plan
             .operations
             .into_iter()
             .enumerate()
@@ -682,14 +804,27 @@ impl EditorHost {
             .map(|(_, op)| op)
             .collect();
         let applied_read_only = filtered_ops.iter().all(|op| !op.requires_write);
+        let continuation_reason = copilot_continuation_reason(&filtered_ops, applied_read_only);
+        let task_updates: Vec<serde_json::Value> = filtered_ops
+            .iter()
+            .filter_map(|planned| copilot_task_update(&planned.operation))
+            .collect();
 
         if filtered_ops.is_empty() {
+            let needs_continuation = !model_completed;
             return Ok(serde_json::json!({
                 "operations_performed": 0,
-                "completed": false,
+                "completed": model_completed,
                 "trace_entries": [],
                 "console_entries": [],
-                "summary": null
+                "summary": model_completion_summary,
+                "needs_continuation": needs_continuation,
+                "task_updates": task_updates,
+                "continuation_reason": if needs_continuation {
+                    Some("the model did not emit a complete operation and no operations were applied")
+                } else {
+                    None
+                },
             }));
         }
 
@@ -711,6 +846,9 @@ impl EditorHost {
         // Write the modified scene back to the real project
         if let Some(project) = self.shell.project_mut() {
             project.scene = session.context.scene;
+            project.database = session.context.database;
+            project.registry = session.context.registry;
+            project.assets = session.context.assets;
             project.scene_dirty = true;
             project.asset_imports.extend(session.context.asset_imports);
             for entry in session.console.entries().iter() {
@@ -795,13 +933,20 @@ impl EditorHost {
 
         Ok(serde_json::json!({
             "operations_performed": outcome.operations_performed,
-            "completed": outcome.completed,
+            "completed": outcome.completed && model_completed,
             "summary": outcome.summary,
             "trace_entries": trace_entries,
             "console_entries": console_entries,
             "undo_available": undo_available,
             "undo_label": if undo_available { Some("AI scoped edit") } else { None::<&str> },
-            "needs_continuation": should_continue_copilot(applied_read_only, outcome.completed),
+            "task_updates": task_updates,
+            "needs_continuation": continuation_reason.is_some()
+                || should_continue_copilot(applied_read_only, outcome.completed, model_completed),
+            "continuation_reason": continuation_reason.or_else(|| {
+                (!model_completed).then_some(
+                    "the model has not emitted a complete operation yet".to_owned()
+                )
+            }),
         }))
     }
 
@@ -840,5 +985,96 @@ impl EditorHost {
         // Return the number of turns (pairs) in the conversation
         let turns = self.copilot_conversation.len() / 2;
         Ok(serde_json::json!({ "turns": turns, "messages": self.copilot_conversation.len() }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn planned(
+        operation: engine_ai::AgentOperation,
+        requires_write: bool,
+    ) -> engine_ai::PlannedOperation {
+        engine_ai::PlannedOperation {
+            operation,
+            preview: String::new(),
+            requires_write,
+        }
+    }
+
+    #[test]
+    fn continuation_detects_orphan_script_writes() {
+        let operations = vec![planned(
+            engine_ai::AgentOperation::WriteScript {
+                path: "scripts/ocean.varg".to_owned(),
+                source: "script Ocean {}".to_owned(),
+            },
+            true,
+        )];
+
+        let reason = copilot_continuation_reason(&operations, false).unwrap();
+        assert!(reason.contains("Script components"));
+        assert!(reason.contains("scripts/ocean.varg"));
+    }
+
+    #[test]
+    fn continuation_detects_unchecked_attached_scripts() {
+        let operations = vec![
+            planned(
+                engine_ai::AgentOperation::WriteScript {
+                    path: "scripts/ocean.varg".to_owned(),
+                    source: "script Ocean {}".to_owned(),
+                },
+                true,
+            ),
+            planned(
+                engine_ai::AgentOperation::CreateObject {
+                    name: "Ocean".to_owned(),
+                    components: vec![engine_ai::ComponentSpec {
+                        component_type: "Script".to_owned(),
+                        properties: serde_json::json!({ "path": "scripts/ocean.varg" }),
+                    }],
+                    position: None,
+                },
+                true,
+            ),
+        ];
+
+        let reason = copilot_continuation_reason(&operations, false).unwrap();
+        assert!(reason.contains("check_script"));
+        assert!(reason.contains("scripts/ocean.varg"));
+    }
+
+    #[test]
+    fn continuation_accepts_attached_and_checked_scripts() {
+        let operations = vec![
+            planned(
+                engine_ai::AgentOperation::WriteScript {
+                    path: "scripts/ocean.varg".to_owned(),
+                    source: "script Ocean {}".to_owned(),
+                },
+                true,
+            ),
+            planned(
+                engine_ai::AgentOperation::CreateObject {
+                    name: "Ocean".to_owned(),
+                    components: vec![engine_ai::ComponentSpec {
+                        component_type: "Script".to_owned(),
+                        properties: serde_json::json!({ "path": "scripts/ocean.varg" }),
+                    }],
+                    position: None,
+                },
+                true,
+            ),
+            planned(
+                engine_ai::AgentOperation::CheckScript {
+                    paths: vec!["scripts/ocean.varg".to_owned()],
+                },
+                false,
+            ),
+        ];
+
+        assert!(copilot_continuation_reason(&operations, false).is_none());
     }
 }

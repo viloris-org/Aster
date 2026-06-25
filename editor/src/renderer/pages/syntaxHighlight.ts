@@ -11,7 +11,7 @@ interface TokenRule {
 // ─── Varg ───────────────────────────────────────────────────────────────────
 
 const VARG_KEYWORDS = /\b(import|script|module|behavior|scene|prefab|network|model|material|audio|entity|camera|light|spawn|scatter|place|intent|layout|selector|sequence|when|action|let|var|func|if|else|for|in|while|return|break|continue|guard|true|false|nil)\b/g;
-const VARG_TYPES = /\b(Float|Int|String|Bool|Vec2|Vec3|Euler|Color|Entity|EventData|Asset|Scene|Prefab|Material)\??\b/g;
+const VARG_TYPES = /\b(Float|Int|String|Bool|Vec2|Vec3|Euler|Color|Entity|EventData|Asset|Scene|Prefab|Material|AudioEvent)\??\b/g;
 const VARG_ANNOTATION = /@[A-Za-z_][A-Za-z0-9_]*/g;
 const VARG_STRING = /"(?:[^"\\]|\\.)*"/g;
 const VARG_NUMBER = /-?\b\d+(?:\.\d+)?(?:[a-zA-Z_%]+)?\b/g;

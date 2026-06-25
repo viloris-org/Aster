@@ -92,6 +92,8 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     pub audio: AudioContext,
     /// Project root used to resolve script and asset paths.
     pub project_root: Option<PathBuf>,
+    /// Script workspace roots used to resolve relative script references.
+    pub script_roots: Vec<PathBuf>,
     /// Asset database used to resolve project GUIDs to runtime resources.
     pub asset_database: AssetDatabase,
     /// Runtime asset registry and cache state.
@@ -273,6 +275,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             #[cfg(feature = "audio")]
             audio: AudioContext::new(MemoryAudioBackend::new()),
             project_root: None,
+            script_roots: Vec::new(),
             asset_database: AssetDatabase::new("assets", "builtin"),
             asset_registry: AssetRegistry::default(),
             asset_root: None,
@@ -644,14 +647,30 @@ impl<R: RenderDevice> RuntimeServices<R> {
     }
 
     fn resolve_project_path(&self, path: &str) -> PathBuf {
+        let path = path.strip_prefix("project:/").unwrap_or(path);
         let path = PathBuf::from(path);
         if path.is_absolute() {
             path
         } else {
-            self.project_root
-                .as_ref()
-                .map(|root| root.join(&path))
-                .unwrap_or(path)
+            let Some(project_root) = self.project_root.as_ref() else {
+                return path;
+            };
+            let project_path = project_root.join(&path);
+            if project_path.is_file() {
+                return project_path;
+            }
+            for script_root in &self.script_roots {
+                let root = if script_root.is_absolute() {
+                    script_root.clone()
+                } else {
+                    project_root.join(script_root)
+                };
+                let candidate = root.join(&path);
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+            project_path
         }
     }
 
@@ -768,6 +787,15 @@ impl<R: RenderDevice> RuntimeServices<R> {
     /// Sets the project root used by runtime backends to resolve relative files.
     pub fn set_project_root(&mut self, root: impl Into<PathBuf>) {
         self.project_root = Some(root.into());
+    }
+
+    /// Sets the script workspace roots used to resolve relative script references.
+    pub fn set_script_roots<I, P>(&mut self, roots: I)
+    where
+        I: IntoIterator<Item = P>,
+        P: Into<PathBuf>,
+    {
+        self.script_roots = roots.into_iter().map(Into::into).collect();
     }
 
     /// Scans, imports, and binds all supported project assets for runtime use.
@@ -2505,6 +2533,13 @@ fn create_game_services(
     #[cfg(feature = "audio")]
     services.enable_default_audio_output();
     services.set_project_root(project.root.clone());
+    services.set_script_roots(
+        project
+            .manifest
+            .script_roots
+            .iter()
+            .map(|root| PathBuf::from(root.as_str())),
+    );
     let asset_root = project.root.join(&project.manifest.asset_root);
     services.load_project_assets(asset_root)?;
     services.scene = project.scene;
@@ -2523,6 +2558,13 @@ fn create_game_services(
     #[cfg(feature = "audio")]
     services.enable_default_audio_output();
     services.set_project_root(project.root.clone());
+    services.set_script_roots(
+        project
+            .manifest
+            .script_roots
+            .iter()
+            .map(|root| PathBuf::from(root.as_str())),
+    );
     let asset_root = project.root.join(&project.manifest.asset_root);
     services.load_project_assets(asset_root)?;
     services.scene = project.scene;
@@ -2904,6 +2946,42 @@ mod tests {
             script.state.get("ticks").and_then(|value| value.as_f64()),
             Some(1.0)
         );
+    }
+
+    #[test]
+    fn varg_script_references_can_resolve_from_configured_script_roots() {
+        let root = tempfile::tempdir().unwrap();
+        let gameplay = root.path().join("packages/gameplay/src");
+        std::fs::create_dir_all(&gameplay).unwrap();
+        std::fs::write(
+            gameplay.join("move.varg"),
+            r#"script Move {
+    func update(_ dt: Float) {
+        entity.translate(Vec3(0.0, 1.0, 0.0))
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services.set_project_root(root.path());
+        services.set_script_roots([PathBuf::from("packages/gameplay/src")]);
+        let entity = services.scene.create_object("Scripted").unwrap();
+        services
+            .scene
+            .upsert_component(
+                entity,
+                ComponentData::Script(engine_ecs::ScriptComponent::new("move.varg")),
+            )
+            .unwrap();
+
+        services
+            .tick_game_frame(Duration::from_millis(16), false)
+            .unwrap();
+
+        let transform = services.scene.transforms().local(entity).unwrap();
+        assert_eq!(transform.translation.y, 1.0);
     }
 
     #[test]

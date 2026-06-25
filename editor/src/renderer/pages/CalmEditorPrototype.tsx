@@ -47,6 +47,7 @@ import {
 } from '../api';
 import type { QuestEditorArtifact } from '../App';
 import { OrientationGizmo, ViewportGrid } from './ViewportOverlays';
+import ScriptEditor from './ScriptEditor';
 import {
   createOrthographicMatrix,
   createPerspectiveMatrix,
@@ -90,7 +91,8 @@ type NavSection = 'scene' | 'assets' | 'scripts' | 'build' | 'ai';
 type TransformTool = 'select' | 'move' | 'rotate' | 'scale';
 type BottomTab = 'console' | 'problems' | 'tasks' | 'assets';
 type InspectorSection = 'transform' | 'script' | 'input' | 'physics' | 'render' | 'tags';
-type ViewMode = '2d' | '3d';
+type SceneViewMode = '2d' | '3d';
+type ViewMode = SceneViewMode | 'scripts';
 type BuildTarget = 'windows-x64' | 'linux-x64' | 'macos-universal' | 'android-arm64' | 'ios-universal' | 'embedded-linux';
 type BuildFormat = 'folder' | 'exe' | 'msi' | 'nsis' | 'appimage' | 'deb' | 'rpm' | 'dmg' | 'apk' | 'aab' | 'ipa' | 'ipk';
 
@@ -142,6 +144,15 @@ interface ProjectAssetMeta {
   source_path: string;
   kind: string;
   importer: string;
+}
+
+interface ProjectFileEntry {
+  path: string;
+  name: string;
+  kind: 'directory' | 'file';
+  hidden: boolean;
+  text: boolean;
+  asset_path?: string | null;
 }
 
 interface EditorConsoleEntry {
@@ -586,7 +597,7 @@ function ViewportCanvas({
   sceneObjects: SceneObject[];
   sceneVersion: number;
   selectedEntityId: string | null;
-  viewMode: ViewMode;
+  viewMode: SceneViewMode;
   playMode: boolean;
   cameraRef: React.MutableRefObject<{
     yaw: number;
@@ -1147,6 +1158,7 @@ export default function CalmEditorPrototype({
   const [sceneVersion, setSceneVersion] = useState(0);
   const [sceneSearch, setSceneSearch] = useState('');
   const [assetSearch, setAssetSearch] = useState('');
+  const [projectFileSearch, setProjectFileSearch] = useState('');
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [showDrawer, setShowDrawer] = useState(true);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -1178,10 +1190,14 @@ export default function CalmEditorPrototype({
   const [nativeSceneError, setNativeSceneError] = useState<string | null>(null);
   const [nativeSceneOpenRevision, setNativeSceneOpenRevision] = useState(0);
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
+  const [selectedProjectFile, setSelectedProjectFile] = useState<ProjectFileEntry | null>(null);
   const [scriptContent, setScriptContent] = useState('');
   const [scriptSavedContent, setScriptSavedContent] = useState('');
   const [scriptDiagnostics, setScriptDiagnostics] = useState<TextAssetDiagnostic[]>([]);
   const [scriptSaving, setScriptSaving] = useState(false);
+  const [showHiddenFiles, setShowHiddenFiles] = useState(false);
+  const [projectFiles, setProjectFiles] = useState<ProjectFileEntry[]>([]);
+  const [collapsedProjectFolders, setCollapsedProjectFolders] = useState<Set<string>>(() => new Set());
   const [buildTarget, setBuildTarget] = useState<BuildTarget>('linux-x64');
   const [buildFormat, setBuildFormat] = useState<BuildFormat>('folder');
   const [buildChannel, setBuildChannel] = useState<'debug' | 'release'>('debug');
@@ -1223,6 +1239,7 @@ export default function CalmEditorPrototype({
     ? effectivePresentationAdapters.find((adapter) => adapter.mode === viewportPresentation)
     : undefined;
   const noCpuReadbackPresentation = isNoCpuReadbackAdapter(viewportPresentationAdapter);
+  const sceneViewMode = viewMode === 'scripts' ? '3d' : viewMode;
   const inspectorEntity = selectedEntityDetails
     ? {
       ...selectedEntity,
@@ -1255,6 +1272,33 @@ export default function CalmEditorPrototype({
       .filter((asset) => /script|model/i.test(asset.kind) || /\.(varg|vscene|vasset|amdl|js|ts|lua)$/i.test(asset.path))
       .map((asset) => asset.path)
   ), [projectAssets]);
+  const selectedEditorPath = selectedProjectFile?.path ?? selectedScript;
+  const selectedDiagnosticPath = selectedProjectFile?.asset_path ?? selectedScript;
+  const visibleProjectFiles = useMemo(() => (
+    [...projectFiles]
+      .sort((left, right) => left.path.localeCompare(right.path))
+      .filter((entry) => {
+        const query = projectFileSearch.trim().toLowerCase();
+        if (query) {
+          const parts = entry.path.split('/');
+          const ancestors = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'));
+          const selfMatches = `${entry.name} ${entry.path}`.toLowerCase().includes(query);
+          const ancestorOfMatch = projectFiles.some((candidate) => {
+            if (!`${candidate.name} ${candidate.path}`.toLowerCase().includes(query)) return false;
+            return candidate.path.startsWith(`${entry.path}/`);
+          });
+          const childOfMatch = ancestors.some((ancestor) => `${ancestor} ${entry.path}`.toLowerCase().includes(query));
+          if (!selfMatches && !ancestorOfMatch && !childOfMatch) return false;
+        }
+        const parents = entry.path.split('/').slice(0, -1);
+        let current = '';
+        for (const parent of parents) {
+          current = current ? `${current}/${parent}` : parent;
+          if (collapsedProjectFolders.has(current)) return false;
+        }
+        return true;
+      })
+  ), [collapsedProjectFolders, projectFileSearch, projectFiles]);
   const selectedBuildTarget = buildTargets.find((target) => target.id === buildTarget) ?? buildTargets[0];
   const problemRows = consoleEntries
     .filter((entry) => /error|warn/i.test(entry.level))
@@ -1306,10 +1350,15 @@ export default function CalmEditorPrototype({
 
   const refreshAssets = async () => {
     try {
-      const result = await rpc<{ entries: Array<{ path: string; kind: string }>; assets: ProjectAssetMeta[] }>('project/list_assets');
+      const [result, files] = await Promise.all([
+        rpc<{ entries: Array<{ path: string; kind: string }>; assets: ProjectAssetMeta[] }>('project/list_assets'),
+        rpc<{ files: ProjectFileEntry[] }>('project/list_files', { include_hidden: showHiddenFiles }),
+      ]);
       setProjectAssets(result.assets.map(mapAsset));
+      setProjectFiles(files.files);
     } catch {
       setProjectAssets(mockAssets);
+      setProjectFiles([]);
     }
   };
 
@@ -1398,7 +1447,8 @@ export default function CalmEditorPrototype({
 
   const zeroCopySceneActive = backendReady
     && noCpuReadbackPresentation
-    && viewMode === '3d'
+    && sceneViewMode === '3d'
+    && viewMode !== 'scripts'
     && !isPlaying
     && !nativeSceneError;
 
@@ -1489,15 +1539,30 @@ export default function CalmEditorPrototype({
 
   const openScript = (path: string) => {
     setSelectedScript(path);
+    setSelectedProjectFile(null);
     setActiveNav('scripts');
+    setViewMode('scripts');
   };
 
-  const saveScript = async () => {
-    if (!backendReady || !selectedScript) return;
+  const openProjectFile = (entry: ProjectFileEntry) => {
+    if (entry.kind !== 'file' || !entry.text) return;
+    setSelectedProjectFile(entry);
+    setSelectedScript(entry.asset_path ?? null);
+    setActiveNav('scripts');
+    setViewMode('scripts');
+  };
+
+  const saveScript = async (path = selectedEditorPath ?? '', content = scriptContent) => {
+    if (!backendReady || !path) return;
     setScriptSaving(true);
     try {
-      await rpc('project/write_file', { path: selectedScript, content: scriptContent });
-      setScriptSavedContent(scriptContent);
+      if (selectedProjectFile) {
+        await rpc('project/write_project_file', { path, content });
+      } else {
+        await rpc('project/write_file', { path, content });
+      }
+      setScriptSavedContent(content);
+      await refreshAssets();
       await refreshConsole();
     } finally {
       setScriptSaving(false);
@@ -1545,7 +1610,7 @@ export default function CalmEditorPrototype({
 
   const commands = [
     { title: 'Create Camera', detail: 'Add a camera object to Meadow.scene' },
-    { title: 'Open Selected Script', detail: selectedScript ?? 'No script selected' },
+    { title: 'Open Selected Script', detail: selectedEditorPath ?? 'No script selected' },
     { title: 'Run Scene Validation', detail: 'Check components, assets, and policy rules' },
     { title: 'Package Current Build', detail: `${selectedBuildTarget.label} / ${buildFormat} / ${buildChannel}` },
     { title: isPlaying ? 'Stop Play Mode' : 'Enter Play Mode', detail: 'Run Meadow.scene in editor' },
@@ -1626,7 +1691,7 @@ export default function CalmEditorPrototype({
     return () => {
       cancelled = true;
     };
-  }, [backendReady, isPlaying, noCpuReadbackPresentation, openNativeSceneViewport, sceneVersion, viewportPresentation, viewMode]);
+  }, [backendReady, isPlaying, noCpuReadbackPresentation, openNativeSceneViewport, sceneVersion, viewMode, viewportPresentation]);
 
   useEffect(() => {
     if (!zeroCopySceneActive || nativeSceneOpenRevision === 0) return;
@@ -1704,44 +1769,51 @@ export default function CalmEditorPrototype({
   useEffect(() => {
     if (
       noCpuReadbackPresentation
-      && viewMode === '3d'
+      && sceneViewMode === '3d'
+      && viewMode !== 'scripts'
       && !isPlaying
       && !nativeSceneError
     ) return;
     closeNativeSceneView().catch(() => {});
-  }, [isPlaying, nativeSceneError, noCpuReadbackPresentation, viewportPresentation, viewMode]);
+  }, [isPlaying, nativeSceneError, noCpuReadbackPresentation, viewportPresentation, sceneViewMode, viewMode]);
+
+  useEffect(() => {
+    refreshAssets();
+  }, [showHiddenFiles]);
 
   useEffect(() => {
     setSelectedScript((current) => {
+      if (selectedProjectFile) return current;
       if (current && scriptAssets.includes(current)) return current;
       return scriptAssets[0] ?? null;
     });
-  }, [scriptAssets]);
+  }, [scriptAssets, selectedProjectFile]);
 
   useEffect(() => {
-    if (!selectedScript || !backendReady) {
-      setScriptContent(selectedScript ? '// Script preview is available in the desktop editor.' : '');
+    if (!selectedEditorPath || !backendReady) {
+      setScriptContent(selectedEditorPath ? '// File preview is available in the desktop editor.' : '');
       setScriptSavedContent('');
       setScriptDiagnostics([]);
       return;
     }
-    rpc<{ content: string }>('project/read_file', { path: selectedScript })
+    const method = selectedProjectFile ? 'project/read_project_file' : 'project/read_file';
+    rpc<{ content: string }>(method, { path: selectedEditorPath })
       .then((result) => {
         setScriptContent(result.content);
         setScriptSavedContent(result.content);
       })
       .catch(() => {
-        setScriptContent('// Unable to load this script.');
+        setScriptContent('// Unable to load this file.');
         setScriptSavedContent('');
       });
-  }, [backendReady, selectedScript]);
+  }, [backendReady, selectedEditorPath, selectedProjectFile]);
 
   useEffect(() => {
-    if (!selectedScript || !backendReady) {
+    if (!selectedDiagnosticPath || !backendReady) {
       setScriptDiagnostics([]);
       return;
     }
-    const lowerPath = selectedScript.toLowerCase();
+    const lowerPath = selectedDiagnosticPath.toLowerCase();
     const checkMethod = lowerPath.endsWith('.varg') || lowerPath.endsWith('.vscene') || lowerPath.endsWith('.vasset')
       ? 'project/check_script'
       : lowerPath.endsWith('.amdl')
@@ -1753,14 +1825,14 @@ export default function CalmEditorPrototype({
     }
     const timer = window.setTimeout(() => {
       rpc<{ valid: boolean; diagnostics: TextAssetDiagnostic[] }>(checkMethod, {
-        path: selectedScript,
+        path: selectedDiagnosticPath,
         source: scriptContent,
       })
         .then((result) => setScriptDiagnostics(result.diagnostics))
         .catch(() => setScriptDiagnostics([]));
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [backendReady, scriptContent, selectedScript]);
+  }, [backendReady, scriptContent, selectedDiagnosticPath]);
 
   useEffect(() => {
     if (!selectedBuildTarget.formats.includes(buildFormat)) {
@@ -1829,7 +1901,7 @@ export default function CalmEditorPrototype({
 
   const runCommand = async (title: string) => {
     if (title === 'Create Camera') await createCameraObject();
-    else if (title === 'Open Selected Script' && selectedScript) openScript(selectedScript);
+    else if (title === 'Open Selected Script' && selectedEditorPath) setViewMode('scripts');
     else if (title === 'Run Scene Validation') setBottomTab('problems');
     else if (title === 'Package Current Build') await runBuild();
     else if (title.includes('Play') || title.includes('Stop')) await runGame();
@@ -1995,10 +2067,11 @@ export default function CalmEditorPrototype({
               <IconSearch size={13} />
               <input
                 className="min-w-0 flex-1 bg-transparent text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-                placeholder={activeNav === 'assets' ? 'Filter assets' : 'Filter entities'}
-                value={activeNav === 'assets' ? assetSearch : sceneSearch}
+                placeholder={activeNav === 'assets' ? 'Filter assets' : activeNav === 'scripts' ? 'Filter files' : 'Filter entities'}
+                value={activeNav === 'assets' ? assetSearch : activeNav === 'scripts' ? projectFileSearch : sceneSearch}
                 onChange={(event) => {
                   if (activeNav === 'assets') setAssetSearch(event.target.value);
+                  else if (activeNav === 'scripts') setProjectFileSearch(event.target.value);
                   else setSceneSearch(event.target.value);
                 }}
               />
@@ -2028,12 +2101,52 @@ export default function CalmEditorPrototype({
               ))
             ) : activeNav === 'scripts' ? (
               <div className="space-y-2 px-3 py-2">
-                {scriptAssets.length === 0 && (
+                <label className="flex h-8 items-center justify-between rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] px-2 text-[11px] text-[var(--text-secondary)]">
+                  <span>Show hidden files</span>
+                  <Toggle checked={showHiddenFiles} onChange={setShowHiddenFiles} label="Show hidden files" />
+                </label>
+                {visibleProjectFiles.length === 0 && scriptAssets.length === 0 && (
                   <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-base)] p-3 text-[12px] text-[var(--text-muted)]">
-                    No script-like assets found.
+                    No project files found.
                   </div>
                 )}
-                {scriptAssets.map((path) => (
+                {visibleProjectFiles.length > 0 ? visibleProjectFiles.map((entry) => {
+                  const depth = Math.max(0, entry.path.split('/').length - 1);
+                  const selected = selectedEditorPath === entry.path || (!selectedProjectFile && selectedScript === entry.asset_path);
+                  const collapsed = collapsedProjectFolders.has(entry.path);
+                  return (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      className={cx(
+                        'flex h-8 w-full items-center gap-1.5 rounded-[var(--radius-sm)] pr-2 text-left text-[12px]',
+                        selected ? 'bg-[rgba(34,197,94,0.10)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]',
+                        entry.kind === 'file' && !entry.text && 'opacity-55',
+                      )}
+                      style={{ paddingLeft: 8 + depth * 12 }}
+                      title={entry.path}
+                      onClick={() => {
+                        if (entry.kind === 'directory') {
+                          setCollapsedProjectFolders((current) => {
+                            const next = new Set(current);
+                            if (next.has(entry.path)) next.delete(entry.path);
+                            else next.add(entry.path);
+                            return next;
+                          });
+                        } else {
+                          openProjectFile(entry);
+                        }
+                      }}
+                    >
+                      {entry.kind === 'directory'
+                        ? collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />
+                        : <span className="w-3" />}
+                      {entry.kind === 'directory' ? <IconFolder size={13} /> : entry.asset_path ? <IconCode size={13} /> : <IconFile size={13} />}
+                      <span className={cx('min-w-0 flex-1 truncate', entry.hidden && 'text-[var(--text-muted)]')}>{entry.name}</span>
+                      {selected && <IconCheck size={12} className="text-[var(--brand)]" />}
+                    </button>
+                  );
+                }) : scriptAssets.map((path) => (
                   <button
                     key={path}
                     type="button"
@@ -2048,36 +2161,6 @@ export default function CalmEditorPrototype({
                     {selectedScript === path && <IconCheck size={12} className="text-[var(--brand)]" />}
                   </button>
                 ))}
-                {selectedScript && (
-                  <div className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-base)]">
-                    <div className="flex h-8 items-center justify-between border-b border-[var(--border)] px-2">
-                      <span className="truncate font-mono text-[10px] text-[var(--text-muted)]">{selectedScript}</span>
-                      <button
-                        type="button"
-                        className="rounded-[var(--radius-sm)] px-2 py-1 text-[11px] text-[var(--brand)] hover:bg-[var(--bg-hover)] disabled:opacity-40"
-                        onClick={saveScript}
-                        disabled={!backendReady || scriptSaving || scriptContent === scriptSavedContent}
-                      >
-                        {scriptSaving ? 'Saving' : 'Save'}
-                      </button>
-                    </div>
-                    <textarea
-                      className="h-52 w-full resize-none bg-transparent p-2 font-mono text-[11px] leading-5 text-[var(--text-secondary)] outline-none"
-                      value={scriptContent}
-                      spellCheck={false}
-                      onChange={(event) => setScriptContent(event.target.value)}
-                    />
-                    {scriptDiagnostics.length > 0 && (
-                      <div className="border-t border-[var(--border)] px-2 py-2">
-                        {scriptDiagnostics.slice(0, 3).map((diagnostic, index) => (
-                          <div key={`${diagnostic.message}-${index}`} className="mb-1 text-[11px] text-[var(--warning)]">
-                            {diagnostic.line ?? 0}:{diagnostic.column ?? 0} {diagnostic.message}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             ) : activeNav === 'build' ? (
               <div className="space-y-3 p-3">
@@ -2224,54 +2307,82 @@ export default function CalmEditorPrototype({
         >
           <div className="flex h-10 items-center justify-between border-b border-[var(--border)] bg-[rgba(15,16,18,0.82)] px-3">
             <div className="flex min-w-0 items-center gap-1">
-              {(['select', 'move', 'rotate', 'scale'] as TransformTool[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={cx(
-                    'flex h-7 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-[11px] capitalize transition-colors',
-                    tool === item ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
-                  )}
-                  onClick={() => setTool(item)}
-                >
-                  {iconForTool(item)}
-                  {item}
-                </button>
-              ))}
-              <div className="mx-1 h-4 w-px bg-[var(--border)]" />
-              <button
-                type="button"
-                className={cx(
-                  'h-7 rounded-[var(--radius-sm)] px-2 text-[11px] transition-colors',
-                  snapEnabled ? 'bg-[rgba(34,197,94,0.12)] text-[var(--brand)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]',
-                )}
-                onClick={() => setSnapEnabled((value) => !value)}
-              >
-                Snap 0.25m
-              </button>
-              <button type="button" className="h-7 rounded-[var(--radius-sm)] px-2 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                Lit
-              </button>
-              <div className="ml-1 flex rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] p-0.5">
-                {(['3d', '2d'] as ViewMode[]).map((mode) => (
+              {viewMode === 'scripts' ? (
+                <>
+                  <span className="flex min-w-0 items-center gap-2 font-mono text-[11px] text-[var(--text-secondary)]">
+                    <IconCode size={13} />
+                    <span className="min-w-0 truncate">{selectedEditorPath ?? 'No file selected'}</span>
+                  </span>
+                  <div className="mx-1 h-4 w-px bg-[var(--border)]" />
                   <button
-                    key={mode}
+                    type="button"
+                    className="h-7 rounded-[var(--radius-sm)] px-2 text-[11px] text-[var(--brand)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => saveScript()}
+                    disabled={!backendReady || !selectedEditorPath || scriptSaving || scriptContent === scriptSavedContent}
+                  >
+                    {scriptSaving ? 'Saving' : 'Save'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  {(['select', 'move', 'rotate', 'scale'] as TransformTool[]).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      className={cx(
+                        'flex h-7 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-[11px] capitalize transition-colors',
+                        tool === item ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
+                      )}
+                      onClick={() => setTool(item)}
+                    >
+                      {iconForTool(item)}
+                      {item}
+                    </button>
+                  ))}
+                  <div className="mx-1 h-4 w-px bg-[var(--border)]" />
+                  <button
                     type="button"
                     className={cx(
-                      'h-6 rounded-[3px] px-2 text-[10px] uppercase transition-colors',
-                      viewMode === mode ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+                      'h-7 rounded-[var(--radius-sm)] px-2 text-[11px] transition-colors',
+                      snapEnabled ? 'bg-[rgba(34,197,94,0.12)] text-[var(--brand)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]',
                     )}
-                    onClick={() => setViewMode(mode)}
+                    onClick={() => setSnapEnabled((value) => !value)}
                   >
-                    {mode}
+                    Snap 0.25m
+                  </button>
+                  <button type="button" className="h-7 rounded-[var(--radius-sm)] px-2 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                    Lit
+                  </button>
+                </>
+              )}
+              <div className="ml-1 flex rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] p-0.5">
+                {([
+                  { id: '3d', label: '3D' },
+                  { id: '2d', label: '2D' },
+                  { id: 'scripts', label: 'Scripts' },
+                ] as Array<{ id: ViewMode; label: string }>).map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={cx(
+                      'h-6 rounded-[3px] px-2 text-[10px] transition-colors',
+                      mode.id !== 'scripts' && 'uppercase',
+                      viewMode === mode.id ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+                    )}
+                    onClick={() => {
+                      setViewMode(mode.id);
+                      if (mode.id === 'scripts') setActiveNav('scripts');
+                    }}
+                  >
+                    {mode.label}
                   </button>
                 ))}
               </div>
             </div>
             <div className="flex items-center gap-2 font-mono text-[10px] text-[var(--text-muted)]">
-              <span className={cx('size-1.5 rounded-full', isPlaying ? 'bg-[var(--brand)]' : 'bg-[var(--text-muted)]')} />
-              <span>{isPlaying ? 'Play mode' : 'Editor mode'}</span>
-              <span>{viewportSize.width}x{viewportSize.height}</span>
+              <span className={cx('size-1.5 rounded-full', viewMode === 'scripts' ? scriptContent !== scriptSavedContent ? 'bg-[var(--warning)]' : 'bg-[var(--brand)]' : isPlaying ? 'bg-[var(--brand)]' : 'bg-[var(--text-muted)]')} />
+              <span>{viewMode === 'scripts' ? scriptContent !== scriptSavedContent ? 'Unsaved' : 'Text editor' : isPlaying ? 'Play mode' : 'Editor mode'}</span>
+              {viewMode !== 'scripts' && <span>{viewportSize.width}x{viewportSize.height}</span>}
             </div>
           </div>
 
@@ -2284,17 +2395,49 @@ export default function CalmEditorPrototype({
                 : 'bg-[radial-gradient(circle_at_50%_18%,rgba(96,165,250,0.10),transparent_32%),linear-gradient(180deg,#101721_0%,#081018_55%,#070A0F_100%)]',
             )}
           >
-            {zeroCopySceneActive ? (
+            {viewMode === 'scripts' ? (
+              selectedEditorPath ? (
+                <div className="absolute inset-0 flex min-h-0 flex-col bg-[var(--bg-base)]">
+                  <ScriptEditor
+                    filePath={selectedEditorPath}
+                    initialContent={scriptContent}
+                    onContentChange={setScriptContent}
+                    onSave={saveScript}
+                    onClose={() => setViewMode(sceneViewMode)}
+                  />
+                  {scriptDiagnostics.length > 0 && (
+                    <div className="max-h-32 shrink-0 overflow-auto border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
+                      {scriptDiagnostics.map((diagnostic, index) => (
+                        <div
+                          key={`${diagnostic.message}-${index}`}
+                          className={cx(
+                            'font-mono text-[11px] leading-5',
+                            /error/i.test(diagnostic.severity) ? 'text-[var(--danger)]' : 'text-[var(--warning)]',
+                          )}
+                        >
+                          {(diagnostic.line ?? 0) > 0 ? `${diagnostic.line}:${diagnostic.column ?? 0} ` : ''}
+                          {diagnostic.message}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="grid h-full place-items-center bg-[var(--bg-base)] text-[12px] text-[var(--text-muted)]">
+                  No script-like assets found.
+                </div>
+              )
+            ) : zeroCopySceneActive ? (
               <div className="pointer-events-none absolute inset-0 z-[1] bg-[linear-gradient(180deg,rgba(7,10,15,0.10),transparent_18%,transparent_78%,rgba(7,10,15,0.18))]" aria-hidden="true">
                 <ViewportGrid />
               </div>
             ) : !zeroCopySceneActive ? (
               <ViewportCanvas
-                key={`${viewMode}-${cameraRevision > -1}`}
+                key={`${sceneViewMode}-${cameraRevision > -1}`}
                 sceneObjects={sceneObjects}
                 sceneVersion={sceneVersion + cameraRevision}
                 selectedEntityId={inspectorEntity?.id ?? null}
-                viewMode={viewMode}
+                viewMode={sceneViewMode}
                 playMode={isPlaying}
                 cameraRef={cameraRef}
                 onCameraChange={handleCameraChange}
@@ -2305,11 +2448,11 @@ export default function CalmEditorPrototype({
 
             {zeroCopySceneActive && (
               <ViewportCanvas
-                key={`native-input-${viewMode}-${cameraRevision > -1}`}
+                key={`native-input-${sceneViewMode}-${cameraRevision > -1}`}
                 sceneObjects={sceneObjects}
                 sceneVersion={sceneVersion + cameraRevision}
                 selectedEntityId={inspectorEntity?.id ?? null}
-                viewMode={viewMode}
+                viewMode={sceneViewMode}
                 playMode={isPlaying}
                 cameraRef={cameraRef}
                 onCameraChange={handleCameraChange}
@@ -2319,21 +2462,21 @@ export default function CalmEditorPrototype({
               />
             )}
 
-            {nativeSceneError && (
+            {viewMode !== 'scripts' && nativeSceneError && (
               <div className="absolute left-4 top-4 z-[4] max-w-[420px] rounded-[var(--radius-md)] border border-[rgba(245,158,11,0.36)] bg-[rgba(24,18,10,0.88)] px-3 py-2 text-[11px] leading-5 text-[var(--text-secondary)] backdrop-blur-xl">
                 Native Scene View unavailable: {nativeSceneError}
               </div>
             )}
 
-            <div className="absolute bottom-4 left-4 z-[4] flex max-w-[min(520px,60%)] items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[rgba(13,14,16,0.72)] px-3 py-2 backdrop-blur-xl">
+            {viewMode !== 'scripts' && <div className="absolute bottom-4 left-4 z-[4] flex max-w-[min(520px,60%)] items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[rgba(13,14,16,0.72)] px-3 py-2 backdrop-blur-xl">
               <span className="font-mono text-[11px] text-[var(--text-muted)]">World &gt;</span>
               <span className="min-w-0 truncate text-[12px] font-semibold">{inspectorEntity.name}</span>
               <span className="font-mono text-[11px] text-[var(--text-muted)]">
                 x {inspectorEntity.position[0].toFixed(2)} y {inspectorEntity.position[1].toFixed(2)} z {inspectorEntity.position[2].toFixed(2)}
               </span>
-            </div>
+            </div>}
 
-            <form
+            {viewMode !== 'scripts' && <form
               className="absolute bottom-4 right-4 z-[4] flex w-[min(360px,42%)] items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[rgba(13,14,16,0.78)] p-2 backdrop-blur-xl"
               onSubmit={(event) => {
                 event.preventDefault();
@@ -2355,7 +2498,7 @@ export default function CalmEditorPrototype({
               <button type="submit" className="grid size-7 place-items-center rounded-[var(--radius-sm)] bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
                 <IconSend size={13} />
               </button>
-            </form>
+            </form>}
           </div>
 
           {showDrawer && (
@@ -2566,12 +2709,12 @@ export default function CalmEditorPrototype({
                         />
                       ))
                     )}
-                    {component.type.toLowerCase().includes('script') && selectedScript && (
+                    {component.type.toLowerCase().includes('script') && selectedEditorPath && (
                       <div className="px-3 pt-1">
                         <button
                           type="button"
                           className="flex h-8 w-full items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                          onClick={() => openScript(selectedScript)}
+                          onClick={() => setViewMode('scripts')}
                         >
                           <IconEdit size={13} /> Open script
                         </button>

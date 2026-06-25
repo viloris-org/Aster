@@ -65,6 +65,13 @@ impl EditorHost {
         );
         let mut runtime =
             headless_services_from_scene(config, project.root.clone(), &project.scene)?;
+        runtime.set_script_roots(
+            project
+                .manifest
+                .script_roots
+                .iter()
+                .map(|root| PathBuf::from(root.as_str())),
+        );
         runtime.load_project_assets(project.root.join(&project.manifest.asset_root))?;
         Ok(runtime)
     }
@@ -83,6 +90,12 @@ impl EditorHost {
         Ok(game_window::GameRuntimeSnapshot::new(
             config,
             project.root.clone(),
+            project
+                .manifest
+                .script_roots
+                .iter()
+                .map(|root| PathBuf::from(root.as_str()))
+                .collect(),
             project.root.join(&project.manifest.asset_root),
             project.scene.to_json(project.name())?,
         ))
@@ -102,6 +115,12 @@ impl EditorHost {
         Ok(scene_window::SceneRuntimeSnapshot::new(
             config,
             project.root.clone(),
+            project
+                .manifest
+                .script_roots
+                .iter()
+                .map(|root| PathBuf::from(root.as_str()))
+                .collect(),
             project.root.join(&project.manifest.asset_root),
             project.scene.to_json(project.name())?,
         ))

@@ -12,6 +12,20 @@ use std::io::{BufRead, BufReader, Read};
 
 type DeltaExtractor = for<'a> fn(&'a serde_json::Value) -> Option<&'a str>;
 
+fn responses_tools(tools: &[crate::ToolDefinition]) -> Vec<serde_json::Value> {
+    tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        })
+        .collect()
+}
+
 fn stream_json_lines(
     reader: impl Read,
     sse: bool,
@@ -70,6 +84,137 @@ fn stream_json_lines(
         content,
         thinking,
         tool_calls: Vec::new(),
+    })
+}
+
+fn stream_responses_api(
+    reader: impl Read,
+    provider: &str,
+    on_delta: &mut dyn FnMut(AiStreamDelta),
+) -> EngineResult<AiResponse> {
+    let mut content = String::new();
+    let mut thinking = String::new();
+    let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut active_tools: HashMap<usize, (String, String, String)> = HashMap::new();
+
+    for line in BufReader::new(reader).lines() {
+        let line = line.map_err(|error| {
+            EngineError::other(format!(
+                "{provider} streaming response read failed: {error}"
+            ))
+        })?;
+        let Some(payload) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let payload = payload.trim();
+
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+
+        let json: serde_json::Value = serde_json::from_str(payload).map_err(|error| {
+            EngineError::other(format!(
+                "{provider} streaming response parse failed: {error}; payload: {payload}"
+            ))
+        })?;
+        if let Some(message) = json["error"]["message"].as_str() {
+            return Err(EngineError::other(format!("{provider} API: {message}")));
+        }
+        if json["type"] == "response.failed" {
+            let message = json["response"]["error"]["message"]
+                .as_str()
+                .unwrap_or("streaming response failed");
+            return Err(EngineError::other(format!("{provider} API: {message}")));
+        }
+
+        match json["type"].as_str().unwrap_or_default() {
+            "response.reasoning_summary_text.delta" => {
+                if let Some(delta) = json["delta"].as_str() {
+                    thinking.push_str(delta);
+                    on_delta(AiStreamDelta::Thinking(delta.to_owned()));
+                }
+            }
+            "response.output_text.delta" => {
+                if let Some(delta) = json["delta"].as_str() {
+                    content.push_str(delta);
+                    on_delta(AiStreamDelta::Text(delta.to_owned()));
+                }
+            }
+            "response.output_item.added" => {
+                let item = &json["item"];
+                if item["type"] == "function_call" {
+                    let index = json["output_index"].as_u64().unwrap_or(0) as usize;
+                    let id = item["call_id"]
+                        .as_str()
+                        .or_else(|| item["id"].as_str())
+                        .unwrap_or_default()
+                        .to_owned();
+                    let name = item["name"].as_str().unwrap_or_default().to_owned();
+                    let arguments = item["arguments"].as_str().unwrap_or_default().to_owned();
+                    active_tools.insert(index, (id, name.clone(), arguments));
+                    on_delta(AiStreamDelta::ToolCallDelta(ToolCallDelta {
+                        id: String::new(),
+                        name,
+                        arguments_delta: String::new(),
+                    }));
+                }
+            }
+            "response.function_call_arguments.delta" => {
+                let index = json["output_index"].as_u64().unwrap_or(0) as usize;
+                if let Some(delta) = json["delta"].as_str() {
+                    if let Some((_, _, arguments)) = active_tools.get_mut(&index) {
+                        arguments.push_str(delta);
+                        on_delta(AiStreamDelta::ToolCallDelta(ToolCallDelta {
+                            id: String::new(),
+                            name: String::new(),
+                            arguments_delta: delta.to_owned(),
+                        }));
+                    }
+                }
+            }
+            "response.output_item.done" => {
+                let item = &json["item"];
+                if item["type"] == "function_call" {
+                    let index = json["output_index"].as_u64().unwrap_or(0) as usize;
+                    let id = item["call_id"]
+                        .as_str()
+                        .or_else(|| item["id"].as_str())
+                        .unwrap_or_default()
+                        .to_owned();
+                    let name = item["name"].as_str().unwrap_or_default().to_owned();
+                    let arguments_json = item["arguments"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .or_else(|| active_tools.get(&index).map(|(_, _, args)| args.clone()))
+                        .unwrap_or_default();
+                    active_tools.remove(&index);
+                    let arguments = serde_json::from_str(&arguments_json)
+                        .unwrap_or(serde_json::Value::Object(Default::default()));
+                    tool_calls.push(ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (_, (id, name, arguments_json)) in active_tools {
+        let arguments = serde_json::from_str(&arguments_json)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        tool_calls.push(ToolCall {
+            id,
+            name,
+            arguments,
+        });
+    }
+
+    Ok(AiResponse {
+        content,
+        thinking,
+        tool_calls,
     })
 }
 
@@ -426,6 +571,10 @@ impl AiModel for CodexOAuthProvider {
             });
         }
 
+        if !request.tools.is_empty() {
+            body["tools"] = serde_json::json!(responses_tools(&request.tools));
+        }
+
         let mut request_builder = ureq::post(&self.endpoint)
             .header(
                 "Authorization",
@@ -446,14 +595,7 @@ impl AiModel for CodexOAuthProvider {
             .send_json(&body)
             .map_err(|error| EngineError::other(format!("Codex API request failed: {error}")))?;
 
-        stream_json_lines(
-            response.body_mut().as_reader(),
-            true,
-            "Codex",
-            codex_delta,
-            Some(codex_thinking_delta),
-            on_delta,
-        )
+        stream_responses_api(response.body_mut().as_reader(), "Codex", on_delta)
     }
 }
 
@@ -833,6 +975,10 @@ impl AiModel for OpenAIProvider {
                 });
             }
 
+            if !request.tools.is_empty() {
+                body["tools"] = serde_json::json!(responses_tools(&request.tools));
+            }
+
             let mut response = ureq::post(&url)
                 .header("Authorization", &format!("Bearer {}", self.api_key))
                 .header("Content-Type", "application/json")
@@ -840,14 +986,7 @@ impl AiModel for OpenAIProvider {
                 .send_json(&body)
                 .map_err(|e| EngineError::other(format!("OpenAI API request failed: {e}")))?;
 
-            return stream_json_lines(
-                response.body_mut().as_reader(),
-                true,
-                "OpenAI",
-                codex_delta,
-                Some(codex_thinking_delta),
-                on_delta,
-            );
+            return stream_responses_api(response.body_mut().as_reader(), "OpenAI", on_delta);
         }
 
         let url = format!("{}/chat/completions", self.endpoint);
@@ -1162,6 +1301,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_responses_api_function_calls() {
+        let input = concat!(
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"create_object\",\"arguments\":\"\"}}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"name\\\":\\\"Ocean\\\"\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\",\\\"position\\\":[0,0,0]}\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"create_object\",\"arguments\":\"{\\\"name\\\":\\\"Ocean\\\",\\\"position\\\":[0,0,0]}\"}}\n\n"
+        );
+        let mut deltas = Vec::new();
+        let response = stream_responses_api(input.as_bytes(), "Codex", &mut |delta| {
+            deltas.push(delta);
+        })
+        .unwrap();
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].id, "call_1");
+        assert_eq!(response.tool_calls[0].name, "create_object");
+        assert_eq!(response.tool_calls[0].arguments["name"], "Ocean");
+        assert!(matches!(
+            deltas.first(),
+            Some(AiStreamDelta::ToolCallDelta(delta)) if delta.name == "create_object"
+        ));
+    }
+
+    #[test]
     fn codex_oauth_matches_opencode_request_shape() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
@@ -1234,6 +1401,70 @@ mod tests {
         assert_eq!(json["model"], "gpt-5.4");
         assert_eq!(json["stream"], true);
         assert!(json.get("max_output_tokens").is_none());
+    }
+
+    #[test]
+    fn codex_oauth_sends_responses_api_tools() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut content_length = 0usize;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = line.trim_end().split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        content_length = value.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut body = vec![0_u8; content_length];
+            reader.read_exact(&mut body).unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 0\r\n\r\n",
+                )
+                .unwrap();
+            String::from_utf8(body).unwrap()
+        });
+
+        let provider = CodexOAuthProvider::new(
+            "gpt-5.4",
+            CodexOAuthCredentials {
+                access_token: "access-token".to_owned(),
+                account_id: None,
+            },
+            Some(&endpoint),
+            128_000,
+        );
+        provider
+            .chat(AiRequest {
+                system: "system".to_owned(),
+                context: serde_json::Value::Null,
+                messages: vec![ChatMessage::user("create an ocean")],
+                tools: vec![crate::ToolDefinition {
+                    name: "create_object".to_owned(),
+                    description: "Create object".to_owned(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"]
+                    }),
+                }],
+                thinking_effort: None,
+            })
+            .unwrap();
+
+        let body = server.join().unwrap();
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["tools"][0]["type"], "function");
+        assert_eq!(json["tools"][0]["name"], "create_object");
+        assert_eq!(json["tools"][0]["parameters"]["required"][0], "name");
     }
 }
 

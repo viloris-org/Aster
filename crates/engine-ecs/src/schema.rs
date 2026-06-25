@@ -412,6 +412,11 @@ fn default_build_config() -> String {
     "build.runtime-min.toml".to_string()
 }
 
+/// Returns the default script workspace roots.
+fn default_script_roots() -> Vec<String> {
+    vec!["scripts".to_string()]
+}
+
 /// Project manifest format.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ProjectManifest {
@@ -422,6 +427,9 @@ pub struct ProjectManifest {
     /// Asset root relative to the project file.
     #[serde(default = "default_asset_root")]
     pub asset_root: String,
+    /// Script workspace roots relative to the project file.
+    #[serde(default = "default_script_roots")]
+    pub script_roots: Vec<String>,
     /// Default scene path.
     pub default_scene: String,
     /// Build configuration file path relative to project root.
@@ -443,6 +451,7 @@ impl ProjectManifest {
             format: FormatVersion::new(PROJECT_MANIFEST_VERSION),
             name: "Aster Example".to_string(),
             asset_root: "assets".to_string(),
+            script_roots: default_script_roots(),
             default_scene: "scenes/example.aster_scene.json".to_string(),
             build_config: "build.runtime-min.toml".to_string(),
             evolution: SchemaEvolution::default(),
@@ -496,7 +505,38 @@ impl ProjectManifest {
                 message: "default scene path cannot be empty".to_string(),
             });
         }
+        if self
+            .script_roots
+            .iter()
+            .any(|script_root| script_root.trim().is_empty())
+        {
+            diagnostics.push(FormatDiagnostic {
+                path: "script_roots".to_string(),
+                message: "script roots cannot contain empty paths".to_string(),
+            });
+        }
+        if self.script_roots.iter().any(|script_root| {
+            let path = Path::new(script_root);
+            path.is_absolute()
+                || path
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir))
+        }) {
+            diagnostics.push(FormatDiagnostic {
+                path: "script_roots".to_string(),
+                message: "script roots must be relative paths inside the project".to_string(),
+            });
+        }
         diagnostics
+    }
+
+    /// Returns the first configured script root, falling back to the default workspace root.
+    pub fn primary_script_root(&self) -> String {
+        self.script_roots
+            .iter()
+            .find(|script_root| !script_root.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| "scripts".to_string())
     }
 
     /// Serializes the manifest to TOML.
@@ -743,6 +783,7 @@ mod tests {
 
         assert_eq!(manifest.name, "Aster Example");
         assert_eq!(manifest.asset_root, "assets");
+        assert_eq!(manifest.script_roots, vec!["scripts".to_string()]);
         assert_eq!(manifest.build_config, "build.runtime-min.toml");
         assert!(manifest.diagnostics().is_empty());
     }
@@ -771,6 +812,7 @@ migration_framework = "none"
         let manifest = ProjectManifest::from_toml(minimal_toml).unwrap();
         assert_eq!(manifest.name, "Minimal");
         assert_eq!(manifest.asset_root, "assets");
+        assert_eq!(manifest.script_roots, vec!["scripts".to_string()]);
         assert_eq!(manifest.build_config, "build.runtime-min.toml");
     }
 

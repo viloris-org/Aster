@@ -16,7 +16,7 @@ import {
   IconSend, IconBot, IconCheck, IconX, IconAlertCircle,
   IconChevronDown, IconChevronRight, IconInfo, IconLoader,
   IconSave, IconUndo, IconPlay, IconStop, IconSettings, IconSparkles, IconRefresh,
-  IconBrain, IconFile, IconHand, IconShield, IconShieldCheck,
+  IconBrain, IconFile, IconHand, IconShield, IconShieldCheck, IconNewChat,
 } from '../icons';
 
 const cls = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
@@ -83,6 +83,10 @@ export interface CopilotPlan {
   read_only: boolean;
   requires_write: boolean;
   knowledge_entries_used?: number;
+  completed?: boolean;
+  needs_continuation?: boolean;
+  continuation_reason?: string | null;
+  task_updates?: CopilotTaskUpdate[];
 }
 
 export interface TraceEntry {
@@ -106,6 +110,20 @@ interface ApplyResult {
   undo_available?: boolean;
   undo_label?: string | null;
   needs_continuation?: boolean;
+  continuation_reason?: string | null;
+  task_updates?: CopilotTaskUpdate[];
+}
+
+interface CopilotTask {
+  id: string;
+  title: string;
+  done: boolean;
+}
+
+interface CopilotTaskUpdate {
+  id: string;
+  title?: string | null;
+  done?: boolean | null;
 }
 
 interface UndoResult {
@@ -635,7 +653,7 @@ function ContextBar({ projectName, selectedEntity, sceneObjectCount, onSettingsC
       )}
       <div className="ml-auto flex items-center gap-0.5">
         <button className={panelIconButtonClass} onClick={onNewChat} title={t('ai_new_chat')} aria-label={t('ai_new_chat')}>
-          <IconRefresh />
+          <IconNewChat />
         </button>
         <button className={panelIconButtonClass} onClick={onSettingsClick} title={t('ai_settings')} aria-label={t('ai_settings')}>
           <IconSettings />
@@ -741,7 +759,7 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
             >
               {thinkingExpanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
               <IconBrain size={12} />
-               <span>{t('ai_thinking_process')}</span>
+              <span>Thinking</span>
             </button>
             {thinkingExpanded && (
               <div className="whitespace-pre-wrap border-t border-[var(--border)] px-2.5 py-2 text-xs leading-normal text-[var(--text-secondary)]">{msg.thinking}</div>
@@ -984,6 +1002,49 @@ function PlanCard({ data }: { data: CopilotPlan }) {
   );
 }
 
+function CopilotTaskCard({
+  tasks,
+  collapsed,
+  onToggle,
+}: {
+  tasks: CopilotTask[];
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const doneCount = tasks.filter(task => task.done).length;
+  return (
+    <div className="mb-2 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--bg-base)] shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
+      <button
+        type="button"
+        className="flex min-h-[32px] w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent px-2.5 py-1.5 text-left font-[var(--font-sans)] text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        onClick={onToggle}
+      >
+        {collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
+        <IconBot size={12} />
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">Tasks</span>
+        <span className="rounded-full bg-[var(--accent-dim)] px-1.5 py-0.5 font-[var(--font-mono)] text-[10px] text-[var(--text-muted)]">{doneCount}/{tasks.length}</span>
+      </button>
+      {!collapsed && (
+        <div className="grid gap-px border-t border-[var(--border)] p-1.5">
+          {tasks.map(task => (
+            <div key={task.id} className="grid min-h-[26px] grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 rounded-md px-1.5 text-[11px] text-[var(--text-secondary)]">
+              <span className={cls(
+                'flex h-[13px] w-[13px] items-center justify-center rounded border',
+                task.done ? 'border-[#22c55e] bg-[rgba(34,197,94,0.14)] text-[#4ade80]' : 'border-[var(--border-light)] text-transparent',
+              )}>
+                {task.done && <IconCheck size={10} />}
+              </span>
+              <span className={cls('min-w-0 overflow-hidden text-ellipsis whitespace-nowrap', task.done && 'text-[var(--text-muted)] line-through')}>
+                {task.title}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TraceCard({ data }: { data: TraceEntry[] }) {
   return (
     <div className="">
@@ -1119,7 +1180,7 @@ export default function AiPanel({
   const [conversationTurns, setConversationTurns] = useState(0);
   const [workspaceView, setWorkspaceView] = useState<AiWorkspaceView>('chat');
   const [completedBundle, setCompletedBundle] = useState<CompletedChangeBundle | null>(null);
-  const [pendingContinuation, setPendingContinuation] = useState(false);
+  const [pendingContinuation, setPendingContinuation] = useState<string | null>(null);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [interruptRequested, setInterruptRequested] = useState(false);
   const [requestActive, setRequestActive] = useState(false);
@@ -1128,10 +1189,14 @@ export default function AiPanel({
   const [selectedKnowledgeIds, setSelectedKnowledgeIds] = useState<Set<string>>(new Set());
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const [promotingQuest, setPromotingQuest] = useState(false);
+  const [copilotTasks, setCopilotTasks] = useState<CopilotTask[]>([]);
+  const [taskCardVisible, setTaskCardVisible] = useState(false);
+  const [taskCardCollapsed, setTaskCardCollapsed] = useState(false);
   const continuationDepthRef = useRef(0);
   const activeRequestRef = useRef(false);
   const interruptRequestedRef = useRef(false);
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
+  const taskHideTimerRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const nextMsgIdRef = useRef(
@@ -1196,6 +1261,12 @@ export default function AiPanel({
       });
   }, []);
 
+  useEffect(() => {
+    rpc<{ turns: number }>('copilot/get_conversation_length')
+      .then(result => setConversationTurns(result.turns))
+      .catch(() => setConversationTurns(0));
+  }, []);
+
   // Fetch entity details when selection changes
   useEffect(() => {
     if (!selectedEntity) {
@@ -1225,7 +1296,6 @@ export default function AiPanel({
   // ── New Chat (clear conversation history) ──
 
   const handleNewChat = useCallback(async () => {
-    if (messages.length > 0 && !window.confirm(t('confirm_new_chat'))) return;
     try {
       await rpc('copilot/clear_conversation');
     } catch { /* ignore */ }
@@ -1235,8 +1305,12 @@ export default function AiPanel({
     setApproved(new Set());
     setDenied(new Set());
     setStatus('idle');
+    setInput('');
     setConversationTurns(0);
     setCompletedBundle(null);
+    setCopilotTasks([]);
+    setTaskCardVisible(false);
+    setTaskCardCollapsed(false);
     updateQueuedPrompts([]);
     activeRequestRef.current = false;
     interruptRequestedRef.current = false;
@@ -1244,7 +1318,7 @@ export default function AiPanel({
     setRequestActive(false);
     setWorkspaceView('chat');
     inputRef.current?.focus();
-  }, [updateQueuedPrompts, messages.length, t]);
+  }, [updateQueuedPrompts]);
 
   // ── Submit ──
 
@@ -1348,6 +1422,7 @@ export default function AiPanel({
         return;
       }
       setPlan(result.operations.length > 0 ? result : null);
+      applyTaskUpdates(result.task_updates);
 
       const autoApproved = new Set<number>();
       result.operations.forEach((op) => {
@@ -1382,6 +1457,11 @@ export default function AiPanel({
           })()
         : message));
       if (result.operations.length > 0) setWorkspaceView('changes');
+      if (result.needs_continuation && continuationDepthRef.current < 4) {
+        continuationDepthRef.current += 1;
+        setPendingContinuation(result.continuation_reason ?? 'Continue the original task.');
+        addMessage('system', t('ai_continuing'));
+      }
 
       // Reads, session-approved writes, and permanently-approved commands do not prompt.
       if (result.operations.length > 0 && autoApproved.size === result.operations.length) {
@@ -1416,7 +1496,7 @@ export default function AiPanel({
       setInterruptRequested(false);
       cancelRef.current = null;
     }
-  }, [entityDetails, addMessage, approvalMode, thinkingEffort, selectedKnowledgeIds]);
+  }, [entityDetails, addMessage, approvalMode, thinkingEffort, selectedKnowledgeIds, applyTaskUpdates]);
 
   const queueOrSubmitPrompt = useCallback((prompt: string) => {
     const trimmed = prompt.trim();
@@ -1436,14 +1516,14 @@ export default function AiPanel({
       queued: true,
     }]);
     updateQueuedPrompts([...queuedPromptsRef.current, { id, prompt: trimmed }]);
-    setPendingContinuation(false);
+    setPendingContinuation(null);
   }, [status, submitPrompt, updateQueuedPrompts]);
 
   const requestInterrupt = useCallback(() => {
     if (!activeRequestRef.current) return;
     interruptRequestedRef.current = true;
     setInterruptRequested(true);
-    setPendingContinuation(false);
+    setPendingContinuation(null);
     cancelRef.current?.();
     cancelRef.current = null;
   }, []);
@@ -1482,9 +1562,10 @@ export default function AiPanel({
         undoLabel: result.undo_label ?? null,
       });
       addMessage('assistant', summary);
+      applyTaskUpdates(result.task_updates);
       if (result.needs_continuation && continuationDepthRef.current < 4) {
         continuationDepthRef.current += 1;
-        setPendingContinuation(true);
+        setPendingContinuation(result.continuation_reason ?? 'Continue the original task.');
         addMessage('system', t('ai_continuing'));
       } else {
         setWorkspaceView('changes');
@@ -1584,9 +1665,10 @@ export default function AiPanel({
 
   useEffect(() => {
     if (!pendingContinuation || status !== 'complete' || queuedPromptsRef.current.length > 0) return;
-    setPendingContinuation(false);
+    const reason = pendingContinuation;
+    setPendingContinuation(null);
     submitPrompt(
-      'Continue the original task using the tool results now present in the conversation. Do not repeat completed inspection. Propose the concrete remaining operations, or explicitly state that the task is complete.',
+      `Continue the original task using the tool results now present in the conversation. Do not repeat completed inspection. Reason to continue: ${reason}. Propose the concrete remaining operations, or emit complete when the original task is genuinely complete.`,
       true,
     );
   }, [pendingContinuation, status, submitPrompt]);
@@ -1655,10 +1737,59 @@ export default function AiPanel({
     [knowledgeEntries, selectedKnowledgeIds],
   );
 
+  const applyTaskUpdates = useCallback((updates?: CopilotTaskUpdate[]) => {
+    if (!updates || updates.length === 0) return;
+    if (taskHideTimerRef.current !== null) {
+      window.clearTimeout(taskHideTimerRef.current);
+      taskHideTimerRef.current = null;
+    }
+    setTaskCardVisible(true);
+    setTaskCardCollapsed(false);
+    setCopilotTasks(current => {
+      let next = [...current];
+      for (const update of updates) {
+        const id = update.id?.trim();
+        if (!id) continue;
+        const existingIndex = next.findIndex(task => task.id === id);
+        if (existingIndex >= 0) {
+          const existing = next[existingIndex];
+          next[existingIndex] = {
+            ...existing,
+            title: update.title?.trim() || existing.title,
+            done: typeof update.done === 'boolean' ? update.done : existing.done,
+          };
+        } else {
+          next.push({
+            id,
+            title: update.title?.trim() || id,
+            done: Boolean(update.done),
+          });
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!taskCardVisible || copilotTasks.length === 0 || !copilotTasks.every(task => task.done)) return;
+    if (taskHideTimerRef.current !== null) window.clearTimeout(taskHideTimerRef.current);
+    taskHideTimerRef.current = window.setTimeout(() => {
+      setTaskCardVisible(false);
+      setCopilotTasks([]);
+      taskHideTimerRef.current = null;
+    }, 4000);
+    return () => {
+      if (taskHideTimerRef.current !== null) {
+        window.clearTimeout(taskHideTimerRef.current);
+        taskHideTimerRef.current = null;
+      }
+    };
+  }, [copilotTasks, taskCardVisible]);
+
   const buildQuestPromotionContext = useCallback(() => {
     const recentMessages = messages
       .slice(-8)
-      .map(message => `${message.role.toUpperCase()}: ${message.content || message.thinking || ''}`.trim())
+      .map(message => `${message.role.toUpperCase()}: ${message.content || ''}`.trim())
       .filter(Boolean)
       .join('\n\n');
     const selectedEntityContext = entityDetails
@@ -1845,7 +1976,7 @@ export default function AiPanel({
         <div className="flex h-11 shrink-0 items-center gap-2 px-2 text-[12px] text-[var(--text-muted)]">
           <span className="mr-auto">Tasks</span>
           <button className={panelIconButtonClass} onClick={handleNewChat} title={t('ai_new_chat')} aria-label={t('ai_new_chat')}>
-            <IconRefresh />
+            <IconNewChat />
           </button>
           <button className={panelIconButtonClass} onClick={onOpenSettings} title={t('ai_settings')} aria-label={t('ai_settings')}>
             <IconSettings />
@@ -2119,6 +2250,14 @@ export default function AiPanel({
         "relative border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 pt-2.5 pb-3 shadow-[0_-8px_24px_rgba(0,0,0,0.12)]",
         compact && "border-t-0 bg-transparent px-2 pb-2 pt-2 shadow-none",
       )}>
+        {taskCardVisible && copilotTasks.length > 0 && (
+          <CopilotTaskCard
+            tasks={copilotTasks}
+            collapsed={taskCardCollapsed}
+            onToggle={() => setTaskCardCollapsed(value => !value)}
+          />
+        )}
+
         {!compact && <QuickActions onAction={onQuickAction} />}
 
         {!compact && knowledgeEntries.length > 0 && (

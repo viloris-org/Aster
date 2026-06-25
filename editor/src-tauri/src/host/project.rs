@@ -296,6 +296,105 @@ impl EditorHost {
         }))
     }
 
+    pub(crate) fn project_list_files(&mut self, params: &Value) -> EngineResult<Value> {
+        let include_hidden = params
+            .get("include_hidden")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let max_entries = params
+            .get("max_entries")
+            .and_then(Value::as_u64)
+            .unwrap_or(2_000) as usize;
+
+        let Some(project) = self.shell.project() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        let root = project
+            .root
+            .canonicalize()
+            .map_err(|source| EngineError::Filesystem {
+                path: project.root.clone(),
+                source,
+            })?;
+        let asset_root = project
+            .root
+            .join(&project.manifest.asset_root)
+            .canonicalize()
+            .ok();
+        let mut stack = vec![root.clone()];
+        let mut files = Vec::new();
+
+        while let Some(dir) = stack.pop() {
+            if files.len() >= max_entries {
+                break;
+            }
+            let entries = std::fs::read_dir(&dir).map_err(|source| EngineError::Filesystem {
+                path: dir.clone(),
+                source,
+            })?;
+            let mut entries = entries.collect::<Result<Vec<_>, _>>().map_err(|source| {
+                EngineError::Filesystem {
+                    path: dir.clone(),
+                    source,
+                }
+            })?;
+            entries.sort_by_key(|entry| entry.path());
+
+            for entry in entries {
+                if files.len() >= max_entries {
+                    break;
+                }
+                let path = entry.path();
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                let hidden = file_name.starts_with('.');
+                if hidden && !include_hidden {
+                    continue;
+                }
+                let metadata = entry.metadata().map_err(|source| EngineError::Filesystem {
+                    path: path.clone(),
+                    source,
+                })?;
+                let is_dir = metadata.is_dir();
+                let relative = path
+                    .strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let extension = path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let asset_path = asset_root.as_ref().and_then(|asset_root| {
+                    path.strip_prefix(asset_root)
+                        .ok()
+                        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                });
+                let text = is_text_project_file(&extension, &file_name);
+
+                files.push(serde_json::json!({
+                    "path": relative,
+                    "name": file_name,
+                    "kind": if is_dir { "directory" } else { "file" },
+                    "hidden": hidden,
+                    "text": text,
+                    "asset_path": asset_path,
+                }));
+
+                if is_dir {
+                    stack.push(path);
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "root": root.to_string_lossy(),
+            "truncated": files.len() >= max_entries,
+            "files": files,
+        }))
+    }
+
     pub(crate) fn project_import_file(&mut self, params: &Value) -> EngineResult<Value> {
         let path = params
             .get("path")
@@ -331,15 +430,14 @@ impl EditorHost {
             return Err(EngineError::config("no project open"));
         };
 
-        // Use the asset root relative to project root
-        let asset_root = project.root.join(&project.manifest.asset_root);
-        std::fs::create_dir_all(&asset_root).map_err(|source| EngineError::Filesystem {
-            path: asset_root.clone(),
+        let script_root = project.root.join(project.manifest.primary_script_root());
+        std::fs::create_dir_all(&script_root).map_err(|source| EngineError::Filesystem {
+            path: script_root.clone(),
             source,
         })?;
 
-        let script_path = format!("scripts/{name}.varg");
-        let full_path = asset_root.join(&script_path);
+        let script_path = format!("{}/{name}.varg", project.manifest.primary_script_root());
+        let full_path = project.root.join(&script_path);
 
         let template = format!(
             r#"script {name} {{
@@ -740,6 +838,26 @@ impl EditorHost {
         Ok(serde_json::json!({ "content": content }))
     }
 
+    pub(crate) fn project_read_project_file(&mut self, params: &Value) -> EngineResult<Value> {
+        let path_str = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'path'"))?;
+
+        let Some(project) = self.shell.project() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        let full_path = resolve_existing_relative_path(&project.root, path_str)?;
+        let content =
+            std::fs::read_to_string(&full_path).map_err(|source| EngineError::Filesystem {
+                path: full_path.clone(),
+                source,
+            })?;
+
+        Ok(serde_json::json!({ "content": content }))
+    }
+
     pub(crate) fn project_write_file(&mut self, params: &Value) -> EngineResult<Value> {
         let path_str = params
             .get("path")
@@ -754,8 +872,7 @@ impl EditorHost {
             return Err(EngineError::config("no project open"));
         };
 
-        let asset_root = project.root.join(&project.manifest.asset_root);
-        let full_path = resolve_writable_relative_path(&asset_root, path_str)?;
+        let full_path = resolve_writable_project_source_path(project, path_str)?;
 
         let extension = full_path
             .extension()
@@ -786,6 +903,50 @@ impl EditorHost {
         Ok(serde_json::json!({ "saved": true }))
     }
 
+    pub(crate) fn project_write_project_file(&mut self, params: &Value) -> EngineResult<Value> {
+        let path_str = params
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'path'"))?;
+        let content = params
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'content'"))?;
+
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        let full_path = resolve_writable_project_source_path(project, path_str)?;
+        let extension = full_path
+            .extension()
+            .and_then(|extension| extension.to_str());
+        if matches!(extension, Some("varg" | "vscene" | "vasset")) {
+            let diagnostics = engine_script_varg::diagnose_source(&full_path, content);
+            if !diagnostics.is_empty() {
+                return Err(EngineError::config(format_varg_diagnostics(
+                    path_str,
+                    &diagnostics,
+                )));
+            }
+        }
+
+        if let Some(parent) = full_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| EngineError::Filesystem {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        std::fs::write(&full_path, content).map_err(|source| EngineError::Filesystem {
+            path: full_path.clone(),
+            source,
+        })?;
+
+        project.rescan_assets()?;
+
+        Ok(serde_json::json!({ "saved": true }))
+    }
+
     pub(crate) fn project_check_script(&mut self, params: &Value) -> EngineResult<Value> {
         let path_str = params
             .get("path")
@@ -799,8 +960,7 @@ impl EditorHost {
         let Some(project) = self.shell.project() else {
             return Err(EngineError::config("no project open"));
         };
-        let asset_root = project.root.join(&project.manifest.asset_root);
-        let full_path = resolve_writable_relative_path(&asset_root, path_str)?;
+        let full_path = resolve_writable_project_source_path(project, path_str)?;
         let extension = full_path
             .extension()
             .and_then(|extension| extension.to_str());
@@ -954,4 +1114,19 @@ impl EditorHost {
     }
 
     // ── Console handlers ──
+}
+
+fn resolve_writable_project_source_path(
+    project: &engine_editor::ProjectContext,
+    path: &str,
+) -> EngineResult<PathBuf> {
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str());
+    if matches!(extension, Some("varg")) {
+        resolve_writable_relative_path(&project.root, path)
+    } else {
+        let asset_root = project.root.join(&project.manifest.asset_root);
+        resolve_writable_relative_path(&asset_root, path)
+    }
 }

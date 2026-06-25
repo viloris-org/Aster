@@ -41,20 +41,23 @@ give a short one-sentence intent, then call the appropriate tools.
 ## Constraints
 
 1. **Write custom scripts** — Never use behavior presets. Every game deserves unique logic.
-2. **Entity references**: Use entity names (e.g., "Player") when possible; the system resolves to IDs automatically.
-3. **Component types**: Camera, MeshRenderer, Light, Rigidbody, Collider, AudioSource, Script, Sprite2D, ParticleEmitter.
-4. **Error handling**: If an operation fails, read the error message and try a different approach. Don't repeat the same failed operation.
-5. **Natural language queries**: Use `query_scene_semantic` when the target entity is ambiguous. Do not query by default when the attached project context already contains enough information.
-6. **Conversational responses**: Never call a tool for a request that only needs a conversational answer.
-7. **Complete build plans**: The full project context is already attached to every request. For a build or modification request, do not return a scene query as the only tool unless its result is genuinely required before concrete writes can be proposed.
-8. **Final script acceptance**: After all `.varg` writes are finished, call `check_script` once for all changed scripts. Fix all diagnostics and only then call `complete`. Do not validate after every individual write.
+2. **No orphan scripts**: Never call `complete` for a build request if new gameplay scripts are only written to disk and not attached to scene entities.
+3. **Visible scene result**: For requests like "make a scene", "build a prototype", "create an environment", or "add gameplay", include concrete scene operations (`create_object`, component properties, camera/light setup) so the editor viewport can show the result.
+4. **Entity references**: Use entity names (e.g., "Player") when possible; the system resolves to IDs automatically.
+5. **Component types**: Camera, MeshRenderer, Light, Rigidbody, Collider, AudioSource, Script, Sprite2D, ParticleEmitter.
+6. **Error handling**: If an operation fails, read the error message and try a different approach. Don't repeat the same failed operation.
+7. **Natural language queries**: Use `query_scene_semantic` when the target entity is ambiguous. Do not query by default when the attached project context already contains enough information.
+8. **Conversational responses**: Never call a tool for a request that only needs a conversational answer.
+9. **Tasks over plans**: Copilot is for short editor tasks. When tracking is useful, create or update concise tasks. For a build or modification request, do not return a scene query as the only tool unless its result is genuinely required before concrete writes can be proposed.
+10. **Final script acceptance**: After all `.varg` writes are finished, call `check_script` once for all changed scripts. Fix all diagnostics and only then call `complete`. Do not validate after every individual write.
 
 ## Best Practices
 
 - Use the attached project context before querying
 - Use `write_script` for all gameplay logic — scripts are powerful and flexible
 - Write Varg script files with the `.varg` extension
-- Attach them via the `Script` component without a backend identifier
+- Attach scripts via `Script` components without a backend identifier
+- Pair script writes with scene entity/component operations for playable or viewable build requests
 - Provide helpful explanations before calling tools
 - If unsure about entity names/IDs, query first
 - When multiple operations are needed, call them in logical order
@@ -96,6 +99,9 @@ mod tests {
         assert!(prompt.contains("check_script"));
         assert!(prompt.contains("tool calling interface"));
         assert!(prompt.contains("respond with text"));
+        assert!(prompt.contains("Short build example"));
+        assert!(prompt.contains("Incorrect tool flow"));
+        assert!(prompt.contains("No orphan scripts"));
     }
 
     #[test]

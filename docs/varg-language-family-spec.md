@@ -12,7 +12,7 @@ Varg should expose one coherent authoring family instead of several unrelated la
 
 The language family uses:
 
-- Swift-like syntax for readability, modern feel, and typed declarations.
+- Swift-inspired syntax for readability, modern feel, and typed declarations.
 - three.js-like scene concepts for familiar 3D object composition.
 - ECS as an internal runtime representation, not a user-facing scripting model.
 - declarative files for scenes, prefabs, materials, models, and behaviors.
@@ -27,6 +27,8 @@ Varg does not expose JavaScript or three.js as the scripting language. The scene
 Varg does not preserve the old Aster script API, Rhai file format, Python subprocess script model, or JSON behavior format.
 
 Varg scene files are not general-purpose programs. They should be parseable, diffable, visually editable, and deterministic.
+
+Varg does not optimize for terseness. The language should prefer clear authoring intent over clever inference, especially where AI agents will patch files.
 
 ## Design Principles
 
@@ -45,6 +47,21 @@ kind Name {
 ```
 
 The file role decides what top-level declarations are allowed. It should not introduce a new language style.
+
+### Explicit Authoring Intent
+
+Varg should be explicit at the authoring boundary and compact only in engine internals. Authors and AI agents should be able to tell what a line mutates, what resource it references, and what lifetime a value has without relying on hidden conventions.
+
+Explicit rules:
+
+- Script-scope `var` declares persistent script state.
+- Function-scope `let` and `var` declare local values only.
+- Editor-facing values must use `@export`.
+- Runtime side effects must use named engine APIs such as `entity.translate(...)`, `scene.spawn(...)`, `entity.destroy()`, `emit(...)`, or `Audio.play(...)`.
+- Code imports must use `import`; resources must use typed constructors such as `Scene(...)`, `Prefab(...)`, `Asset(...)`, `Material(...)`, or `AudioEvent(...)`.
+- Lifecycle hooks must use the reserved names and signatures exactly.
+
+Avoid implicit forms such as assigning undeclared names to create state, passing bare strings where a typed resource is expected, or allowing multiple hook aliases for the same engine event.
 
 ### Role-Specific Files
 
@@ -76,7 +93,7 @@ Use `.varg` only when the behavior needs computation, time, state, event handlin
 
 Audience: human-first, AI-assisted.
 
-`.varg` is a Swift-like gameplay logic language with a safe engine API. The first implementation may interpret or transpile to an existing backend, but the public language is Varg.
+`.varg` is a Swift-inspired gameplay logic DSL with a safe engine API. It borrows readable surface syntax from Swift, but it does not implement Swift's full type system, standard library, access control, protocols, extensions, generics, or async model. The first implementation may interpret or transpile to an existing backend, but the public language is Varg.
 
 `.varg` allows three top-level declarations:
 
@@ -102,10 +119,11 @@ script PlayerController {
     }
 
     func update(_ dt: Float) {
-        let move = Input.axis("move")
-        entity.translate(Vec3(move.x, 0, move.y) * speed * dt)
+        let moveX: Float = Input.value("MoveX")
+        let moveY: Float = Input.value("MoveY")
+        entity.translate(Vec3(moveX * speed * dt, 0, moveY * speed * dt))
 
-        if Input.pressed("jump") && entity.isGrounded {
+        if Input.pressed("Jump") && jumpsLeft > 0 {
             entity.velocity.y = jumpForce
             jumpsLeft -= 1
         }
@@ -176,8 +194,9 @@ The MVP language supports:
 - `module Name { ... }`
 - `behavior Name { ... }`
 - `import "path/to/module.varg"`
-- `let` immutable locals
-- `var` mutable locals and script state
+- script-scope `var` persistent state
+- function-scope `let` immutable locals
+- function-scope `var` mutable locals
 - `@export var` editor-exposed properties
 - `func name(...) { ... }`
 - `if`, `else`, `for in`, `while`
@@ -199,6 +218,29 @@ The MVP should not support:
 - macros
 - arbitrary file, network, or process access
 
+### Current Executable MVP
+
+The current runtime implements a smaller executable subset than the target language. Agent-facing prompts, templates, and examples should use this subset until the compiler grows.
+
+Currently executable statements and expressions:
+
+- `let name: Type = expression` and `var name: Type = expression` inside hooks
+- script-scope `var name: Type = literal` for persistent state defaults
+- `state.name = expression`, `state.name += expression`, and `state.name -= expression`
+- `name = expression`, `name += expression`, and `name -= expression` for declared locals or persistent script state
+- `position = Vec3(...)`, `position.x/y/z = expression`, and `position.x/y/z += expression`
+- `entity.translate(Vec3(...))`
+- `if` / `else` with input checks, simple boolean state names, numeric comparisons, `!`, `&&`, and `||`
+- `for i in 0..10`, `for i in 0..=10`, and `for i in count(n)`
+- `while` with supported conditions
+- `return`, `break`, `continue`
+- `wait(expression)`
+- `log("literal message")`
+- numeric expressions using `+`, `-`, `*`, `/`, `Vec3(...)`, `Time.time`, `Time.delta`, `Time.frame`, and math calls such as `sin`, `cos`, `clamp`, and `lerp`
+- input via `Input.down`, `Input.pressed`, `Input.released`, and `Input.value`
+
+Target APIs such as `scene.spawn(...)`, `entity.destroy()`, `emit(...)`, `Audio.play(...)`, component methods, arrays, dictionaries, optional binding, and module calls should produce diagnostics until they are wired into execution.
+
 ### Lifecycle Hooks
 
 Lifecycle hooks are ordinary functions with reserved names:
@@ -214,6 +256,30 @@ func event(_ name: String, _ data: EventData)
 
 Missing hooks are valid. Invalid hook signatures are diagnostics.
 
+### State and Export Rules
+
+Persistent state is explicit and must be declared at script scope:
+
+```varg
+script Weapon {
+    @export var fireRate: Float = 0.5
+
+    var ammo: Int = 30
+    var canFire: Bool = true
+
+    func update(_ dt: Float) {
+        if Input.pressed("Fire") && canFire && ammo > 0 {
+            ammo -= 1
+            canFire = false
+        }
+    }
+}
+```
+
+`@export var` values are editor-tunable configuration. Plain script-scope `var` values are internal persistent state. Function-scope `let` and `var` values are locals and do not persist after the hook returns.
+
+The MVP runtime may still accept `state.name` for explicit persistence and compatibility, but the preferred authoring style is declared script-scope state.
+
 ### Built-In Bindings
 
 Each script receives a small set of built-in bindings:
@@ -228,6 +294,17 @@ Each script receives a small set of built-in bindings:
 | `Assets` | Safe asset references |
 
 Scripts should not directly mutate engine internals. They use the safe API exposed by these bindings.
+
+Preferred input names are explicit:
+
+```varg
+Input.down("Jump")        // held this frame
+Input.pressed("Jump")     // pressed this frame
+Input.released("Jump")    // released this frame
+Input.value("MoveX")      // analog or synthesized axis value
+```
+
+Compatibility aliases may exist in the MVP runtime, but new code should use the preferred names above.
 
 ### Imports and Resource References
 

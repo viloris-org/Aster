@@ -288,6 +288,24 @@ pub enum AgentOperation {
         /// Path relative to the project root.
         path: String,
     },
+    /// Create a short-lived Copilot task shown in the editor task card.
+    CreateTask {
+        /// Stable task id chosen by the model.
+        id: String,
+        /// Short task title.
+        title: String,
+    },
+    /// Update a short-lived Copilot task shown in the editor task card.
+    UpdateTask {
+        /// Stable task id previously created by `create_task`.
+        id: String,
+        /// Optional replacement task title.
+        #[serde(default)]
+        title: Option<String>,
+        /// Whether the task is done.
+        #[serde(default)]
+        done: Option<bool>,
+    },
     /// Report completion with an optional summary message.
     Complete {
         /// Optional summary of what was accomplished.
@@ -415,6 +433,8 @@ impl AgentOperation {
             Self::RemoveComponent { .. } => "remove_component",
             Self::DestroyObject { .. } => "destroy_object",
             Self::ReadFile { .. } => "read_file",
+            Self::CreateTask { .. } => "create_task",
+            Self::UpdateTask { .. } => "update_task",
             Self::Complete { .. } => "complete",
             Self::UpdateProjectMemory { .. } => "update_project_memory",
             Self::UpdateUserMemory { .. } => "update_user_memory",
@@ -768,6 +788,7 @@ impl AgentSession {
             AgentOperation::WriteScript { path, source } => {
                 let relative = PathBuf::from(path);
                 let full_path = write_varg_script(&self.asset_root, &relative, source)?;
+                self.context.rescan_assets()?;
                 self.console.push(ConsoleEntry {
                     timestamp: "now".into(),
                     level: ConsoleLevel::Info,
@@ -1021,6 +1042,44 @@ impl AgentSession {
                         line: None,
                     },
                     message: content,
+                });
+                Ok(())
+            }
+            AgentOperation::CreateTask { id, title } => {
+                if id.trim().is_empty() || title.trim().is_empty() {
+                    return Err(EngineError::config(
+                        "create_task requires non-empty id and title",
+                    ));
+                }
+                self.console.push(ConsoleEntry {
+                    timestamp: "now".into(),
+                    level: ConsoleLevel::Info,
+                    source: ConsoleSource {
+                        subsystem: "ai-agent-task".into(),
+                        file: None,
+                        line: None,
+                    },
+                    message: format!("create_task:{id}:{title}"),
+                });
+                Ok(())
+            }
+            AgentOperation::UpdateTask { id, title, done } => {
+                if id.trim().is_empty() {
+                    return Err(EngineError::config("update_task requires non-empty id"));
+                }
+                self.console.push(ConsoleEntry {
+                    timestamp: "now".into(),
+                    level: ConsoleLevel::Info,
+                    source: ConsoleSource {
+                        subsystem: "ai-agent-task".into(),
+                        file: None,
+                        line: None,
+                    },
+                    message: format!(
+                        "update_task:{id}:{}:{}",
+                        title.as_deref().unwrap_or(""),
+                        done.map(|value| value.to_string()).unwrap_or_default()
+                    ),
                 });
                 Ok(())
             }
@@ -1906,6 +1965,8 @@ fn operation_access(operation: &AgentOperation) -> OperationAccess {
         AgentOperation::ReadFile { .. }
         | AgentOperation::CheckScript { .. }
         | AgentOperation::CheckAmdl { .. }
+        | AgentOperation::CreateTask { .. }
+        | AgentOperation::UpdateTask { .. }
         | AgentOperation::Complete { .. }
         | AgentOperation::QueryDependencyGraph { .. }
         | AgentOperation::QuerySceneSemantic { .. }
@@ -2031,6 +2092,25 @@ fn preview_operation(operation: &AgentOperation) -> String {
         }
         AgentOperation::DestroyObject { entity } => format!("Destroy object `{entity}`"),
         AgentOperation::ReadFile { path } => format!("Read project file `{path}`"),
+        AgentOperation::CreateTask { title, .. } => format!("Create task `{title}`"),
+        AgentOperation::UpdateTask { id, title, done } => {
+            let mut parts = Vec::new();
+            if let Some(title) = title {
+                parts.push(format!("title `{title}`"));
+            }
+            if let Some(done) = done {
+                parts.push(if *done {
+                    "mark done".to_owned()
+                } else {
+                    "mark open".to_owned()
+                });
+            }
+            if parts.is_empty() {
+                format!("Update task `{id}`")
+            } else {
+                format!("Update task `{id}`: {}", parts.join(", "))
+            }
+        }
         AgentOperation::Complete { summary } => summary
             .as_ref()
             .map(|summary| format!("Complete: {summary}"))
@@ -2135,6 +2215,9 @@ fn recovery_hint_for_success(operation: &AgentOperation) -> &'static str {
         AgentOperation::ReadFile { .. } | AgentOperation::QuerySceneSemantic { .. } => {
             "No recovery needed; this operation only read project data."
         }
+        AgentOperation::CreateTask { .. } | AgentOperation::UpdateTask { .. } => {
+            "No recovery needed; Copilot tasks only update transient editor UI."
+        }
         AgentOperation::Complete { .. } => {
             "No recovery needed; completion does not mutate the project."
         }
@@ -2175,6 +2258,9 @@ fn recovery_hint_for_failure(operation: &AgentOperation) -> &'static str {
             "Fix the file path or content, then regenerate or reapply the plan."
         }
         AgentOperation::ReadFile { .. } => "Check that the file path exists inside the project.",
+        AgentOperation::CreateTask { .. } | AgentOperation::UpdateTask { .. } => {
+            "Use a non-empty task id and title."
+        }
         AgentOperation::ExecuteCommand { .. } => {
             "Check that the command is registered and available."
         }
@@ -2330,6 +2416,20 @@ fn tool_call_to_operation(tc: &ToolCall) -> EngineResult<AgentOperation> {
         "read_file" => {
             let path = args["path"].as_str().unwrap_or("").to_owned();
             Ok(AgentOperation::ReadFile { path })
+        }
+        "create_task" => {
+            let id = args["id"].as_str().unwrap_or("").to_owned();
+            let title = args["title"].as_str().unwrap_or("").to_owned();
+            Ok(AgentOperation::CreateTask { id, title })
+        }
+        "update_task" => {
+            let id = args["id"].as_str().unwrap_or("").to_owned();
+            let title = args
+                .get("title")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+            let done = args.get("done").and_then(|value| value.as_bool());
+            Ok(AgentOperation::UpdateTask { id, title, done })
         }
         "execute_command" => {
             let command = args["command"].as_str().unwrap_or("").to_owned();
@@ -2589,6 +2689,33 @@ pub fn agent_tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "create_task".into(),
+            description: "Create a short-lived Copilot task for the editor task card. Use this for multi-step short tasks before concrete project operations.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "id": { "type": "string", "description": "Stable short id, e.g. inspect-scene or attach-scripts" },
+                    "title": { "type": "string", "description": "Short task title shown to the user" }
+                },
+                "required": ["id", "title"]
+            }),
+        },
+        ToolDefinition {
+            name: "update_task".into(),
+            description: "Update a Copilot task title or completion state in the editor task card.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "id": { "type": "string", "description": "Task id from create_task" },
+                    "title": { "type": "string", "description": "Optional replacement title" },
+                    "done": { "type": "boolean", "description": "Whether the task is complete" }
+                },
+                "required": ["id"]
+            }),
+        },
+        ToolDefinition {
             name: "execute_command".into(),
             description: "Execute a registered editor command.".into(),
             parameters: serde_json::json!({
@@ -2720,6 +2847,37 @@ pub fn agent_tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+/// Returns the lean native tool set used by short in-editor Copilot turns.
+///
+/// Copilot operates on the current editor scene and project files. It should not
+/// spend context on long-running planning or memory-management tools that do
+/// not directly advance the visible editor task.
+pub fn copilot_tool_definitions() -> Vec<ToolDefinition> {
+    let allowed = [
+        "create_object",
+        "write_script",
+        "check_script",
+        "check_amdl",
+        "write_file",
+        "set_property",
+        "remove_component",
+        "destroy_object",
+        "read_file",
+        "create_task",
+        "update_task",
+        "execute_command",
+        "query_scene_semantic",
+        "move_entity_to",
+        "show_in_viewport",
+        "run_command",
+        "complete",
+    ];
+    agent_tool_definitions()
+        .into_iter()
+        .filter(|tool| allowed.contains(&tool.name.as_str()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2766,6 +2924,30 @@ mod tests {
         }
     }
 
+    fn temp_project_context_at(root: PathBuf) -> ProjectContext {
+        use engine_ecs::ProjectManifest;
+
+        let manifest = ProjectManifest::example();
+        std::fs::create_dir_all(root.join(&manifest.asset_root)).unwrap();
+        let scene = engine_ecs::Scene::new();
+        let database = engine_assets::AssetDatabase::new(
+            root.join(&manifest.asset_root),
+            root.join("builtin"),
+        );
+
+        ProjectContext {
+            manifest,
+            scene,
+            database,
+            registry: engine_assets::AssetRegistry::default(),
+            assets: Vec::new(),
+            asset_imports: Vec::new(),
+            scene_dirty: false,
+            root: root.clone(),
+            scene_path: root.join("main.aster_scene.json"),
+        }
+    }
+
     #[test]
     fn agent_session_initializes_with_project() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -2809,6 +2991,88 @@ mod tests {
             AgentOperation::CheckScript { ref paths } if paths.len() == 2
         ));
         assert!(!operation_access(&operation).requires_write);
+    }
+
+    #[test]
+    fn copilot_tools_are_short_task_focused() {
+        let tools = copilot_tool_definitions()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(tools.contains("write_script"));
+        assert!(tools.contains("create_object"));
+        assert!(tools.contains("create_task"));
+        assert!(tools.contains("update_task"));
+        assert!(tools.contains("check_script"));
+        assert!(tools.contains("complete"));
+        assert!(!tools.contains("update_project_memory"));
+        assert!(!tools.contains("update_user_memory"));
+        assert!(!tools.contains("query_dependency_graph"));
+        assert!(!tools.contains("attach_behavior"));
+    }
+
+    #[test]
+    fn task_tools_are_read_only_copilot_ui_updates() {
+        let create = tool_call_to_operation(&ToolCall {
+            id: "task-1".into(),
+            name: "create_task".into(),
+            arguments: serde_json::json!({
+                "id": "write-ocean",
+                "title": "Write ocean scripts"
+            }),
+        })
+        .unwrap();
+        assert!(matches!(create, AgentOperation::CreateTask { .. }));
+        assert!(!operation_access(&create).requires_write);
+
+        let update = tool_call_to_operation(&ToolCall {
+            id: "task-2".into(),
+            name: "update_task".into(),
+            arguments: serde_json::json!({
+                "id": "write-ocean",
+                "done": true
+            }),
+        })
+        .unwrap();
+        assert!(matches!(
+            update,
+            AgentOperation::UpdateTask {
+                done: Some(true),
+                ..
+            }
+        ));
+        assert!(!operation_access(&update).requires_write);
+    }
+
+    #[test]
+    fn write_script_rescans_assets_after_file_creation() {
+        let root = std::env::temp_dir().join(format!(
+            "varg-ai-write-script-rescan-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let ctx = temp_project_context_at(root.clone());
+        let mut session = AgentSession::new(ctx).unwrap();
+
+        session
+            .execute_operation(&AgentOperation::WriteScript {
+                path: "scripts/ocean_surface.varg".to_owned(),
+                source: "script OceanSurface {\n    func update(_ dt: Float) {\n    }\n}\n"
+                    .to_owned(),
+            })
+            .unwrap();
+
+        assert!(root.join("assets/scripts/ocean_surface.varg").exists());
+        assert!(
+            session
+                .context
+                .assets
+                .iter()
+                .any(|asset| asset.source_path == PathBuf::from("scripts/ocean_surface.varg"))
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

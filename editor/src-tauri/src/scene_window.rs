@@ -123,6 +123,7 @@ pub enum SceneWindowKind {
 pub struct SceneRuntimeSnapshot {
     config: EngineConfig,
     project_root: PathBuf,
+    script_roots: Vec<PathBuf>,
     asset_root: PathBuf,
     scene_json: String,
 }
@@ -131,12 +132,14 @@ impl SceneRuntimeSnapshot {
     pub fn new(
         config: EngineConfig,
         project_root: PathBuf,
+        script_roots: Vec<PathBuf>,
         asset_root: PathBuf,
         scene_json: String,
     ) -> Self {
         Self {
             config,
             project_root,
+            script_roots,
             asset_root,
             scene_json,
         }
@@ -149,6 +152,7 @@ impl SceneRuntimeSnapshot {
         let scene = engine_ecs::Scene::from_json(&self.scene_json)?;
         let mut runtime = RuntimeServices::with_renderer(self.config, renderer);
         runtime.set_project_root(self.project_root);
+        runtime.set_script_roots(self.script_roots);
         runtime.load_project_assets(self.asset_root)?;
         runtime.scene = scene;
         runtime.render_world = runtime_min::extract_render_world(&runtime.scene);
@@ -1194,6 +1198,7 @@ mod tests {
             SceneRuntimeSnapshot::new(
                 EngineConfig::default(),
                 PathBuf::from("."),
+                vec![PathBuf::from("scripts")],
                 PathBuf::from("assets"),
                 scene.to_json("test").unwrap(),
             ),

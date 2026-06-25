@@ -10,53 +10,54 @@ script WaveSpawner {
     var waveTimer: Float = 0.0
     var enemiesSpawned: Int = 0
     var isSpawning: Bool = false
+    var enemiesInRange: Int = 0
 
     func start() {
-        state.currentWave = 0
-        state.waveTimer = timeBetweenWaves
-        state.enemiesSpawned = 0
-        state.isSpawning = 0
+        currentWave = 0
+        waveTimer = timeBetweenWaves
+        enemiesSpawned = 0
+        isSpawning = false
         log("Wave spawner initialized")
     }
 
     func update(_ dt: Float) {
         // Check if all waves completed
-        if state.currentWave >= maxWaves {
+        if currentWave >= maxWaves {
             log("All waves completed!")
             return
         }
 
-        state.waveTimer -= dt
+        waveTimer -= dt
 
         // Start new wave
-        if state.waveTimer <= 0 && state.isSpawning == 0 {
-            state.currentWave += 1
-            state.isSpawning = 1
-            state.enemiesSpawned = 0
+        if waveTimer <= 0 && !isSpawning {
+            currentWave += 1
+            isSpawning = true
+            enemiesSpawned = 0
             log("Starting wave")
         }
 
         // Spawn enemies in current wave
-        if state.isSpawning == 1 {
-            let enemiesToSpawn: Int = enemiesPerWave + state.currentWave
+        if isSpawning {
+            let enemiesToSpawn: Int = enemiesPerWave + currentWave
 
             // Spawn all enemies for this wave
             for i in 0..enemiesToSpawn {
-                if state.enemiesSpawned >= enemiesToSpawn {
+                if enemiesSpawned >= enemiesToSpawn {
                     break
                 }
 
                 // Calculate spawn position in a circle
-                let angle: Float = (state.enemiesSpawned * 360) / enemiesToSpawn
+                let angle: Float = (enemiesSpawned * 360) / enemiesToSpawn
                 let radians: Float = angle * 0.01745329
 
-                state.enemiesSpawned += 1
+                enemiesSpawned += 1
             }
 
             // Wave finished spawning
-            if state.enemiesSpawned >= enemiesToSpawn {
-                state.isSpawning = 0
-                state.waveTimer = timeBetweenWaves
+            if enemiesSpawned >= enemiesToSpawn {
+                isSpawning = false
+                waveTimer = timeBetweenWaves
             }
         }
 
@@ -67,26 +68,24 @@ script WaveSpawner {
 
     func fixedUpdate(_ dt: Float) {
         // Process enemy updates in batches
-        if state.isSpawning == 0 {
+        if !isSpawning {
             return
         }
 
         // Check for enemies in range (simplified)
-        var enemiesInRange: Int = 0
+        enemiesInRange = 0
         for i in 0..100 {
             // Early exit if we've checked enough
-            if i >= state.enemiesSpawned {
+            if i >= enemiesSpawned {
                 break
             }
 
-            // Skip dead enemies (simplified check)
-            if i % 7 == 0 {
+            // Skip one dead enemy placeholder in this MVP example.
+            if i == 7 {
                 continue
             }
 
             enemiesInRange += 1
         }
-
-        state.enemiesInRange = enemiesInRange
     }
 }

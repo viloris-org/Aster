@@ -8,29 +8,29 @@ script WeaponCooldown {
     var ammo: Int = 30
 
     func start() {
-        state.canFire = 1
-        state.ammo = ammo
+        canFire = true
+        ammo = 30
         log("Weapon ready")
     }
 
     func update(_ dt: Float) {
         // Check for fire input
-        if Input.down("Fire") && state.canFire == 1 && state.ammo > 0 {
+        if Input.pressed("Fire") && canFire && ammo > 0 {
             // Fire the weapon
-            state.ammo -= 1
-            state.canFire = 0
+            ammo -= 1
+            canFire = false
             log("Fire! Ammo remaining:")
 
             // Start cooldown
             wait(fireRate)
 
             // Cooldown finished, can fire again
-            state.canFire = 1
+            canFire = true
         }
 
         // Reload on R key
-        if Input.down("interact") && state.ammo < 30 {
-            state.ammo = 30
+        if Input.pressed("Interact") && ammo < 30 {
+            ammo = 30
             log("Reloaded")
         }
     }

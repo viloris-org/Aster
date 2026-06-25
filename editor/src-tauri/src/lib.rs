@@ -78,6 +78,12 @@ enum CopilotApprovalMode {
     FullAccess,
 }
 
+struct PendingCopilotPlan {
+    plan: AgentPlan,
+    model_completed: bool,
+    completion_summary: Option<String>,
+}
+
 impl CopilotApprovalMode {
     fn from_params(params: &Value) -> Self {
         match params.get("approval_mode").and_then(Value::as_str) {
@@ -333,19 +339,33 @@ fn format_varg_diagnostics(
     let details = diagnostics
         .iter()
         .map(|diagnostic| {
+            let severity = match diagnostic.severity {
+                engine_script_varg::VargDiagnosticSeverity::Error => "error",
+                engine_script_varg::VargDiagnosticSeverity::Warning => "warning",
+            };
             let location = match (diagnostic.line, diagnostic.column) {
                 (Some(line), Some(column)) => format!("{path}:{line}:{column}"),
                 (Some(line), None) => format!("{path}:{line}"),
                 _ => path.to_owned(),
             };
-            format!(
-                "{} {}: {} Expected: {} Suggestion: {}",
-                diagnostic.code,
-                location,
-                diagnostic.message,
-                diagnostic.expected,
-                diagnostic.suggestion
-            )
+            let mut rendered = format!(
+                "{severity}[{}]: {}\n  --> {location}",
+                diagnostic.code, diagnostic.message
+            );
+            if let (Some(line), Some(column), Some(source_line)) = (
+                diagnostic.line,
+                diagnostic.column,
+                diagnostic.source_line.as_ref(),
+            ) {
+                let gutter = line.to_string();
+                let marker = format!("{}^", " ".repeat(column.saturating_sub(1)));
+                rendered.push_str(&format!("\n   |\n{gutter} | {source_line}\n   | {marker}"));
+            }
+            rendered.push_str(&format!(
+                "\n   = expected: {}\n   = help: {}",
+                diagnostic.expected, diagnostic.suggestion
+            ));
+            rendered
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -432,6 +452,33 @@ fn resolve_writable_relative_path(root: &Path, path: &str) -> EngineResult<PathB
     }
 
     Ok(full_path)
+}
+
+fn is_text_project_file(extension: &str, file_name: &str) -> bool {
+    matches!(
+        extension,
+        "" | "amdl"
+            | "css"
+            | "html"
+            | "json"
+            | "js"
+            | "jsx"
+            | "lua"
+            | "md"
+            | "py"
+            | "ron"
+            | "rs"
+            | "toml"
+            | "ts"
+            | "tsx"
+            | "txt"
+            | "varg"
+            | "vasset"
+            | "vscene"
+            | "xml"
+            | "yaml"
+            | "yml"
+    ) || matches!(file_name, ".gitignore" | ".env" | ".env.example")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1194,7 +1241,7 @@ pub struct EditorHost {
     /// Monotonic version counter for simulated play frames.
     play_version: u64,
     /// Cached copilot plan awaiting user approval.
-    last_copilot_plan: Option<AgentPlan>,
+    last_copilot_plan: Option<PendingCopilotPlan>,
     /// Copilot provider configuration.
     copilot_settings: engine_editor::CopilotSettings,
     /// Persisted ChatGPT OAuth credentials for Codex.
@@ -1303,6 +1350,7 @@ impl EditorHost {
 
             // ── Project ──
             "project/list_assets" => self.project_list_assets(params),
+            "project/list_files" => self.project_list_files(params),
             "project/import_file" => self.project_import_file(params),
             "project/create_script" => self.project_create_script(params),
             "project/create_material" => self.project_create_material(params),
@@ -1313,9 +1361,11 @@ impl EditorHost {
             "project/delete_asset" => self.project_delete_asset(params),
             "project/reimport_asset" => self.project_reimport_asset(params),
             "project/read_file" => self.project_read_file(params),
+            "project/read_project_file" => self.project_read_project_file(params),
             "project/check_amdl" => self.project_check_amdl(params),
             "project/check_script" => self.project_check_script(params),
             "project/write_file" => self.project_write_file(params),
+            "project/write_project_file" => self.project_write_project_file(params),
             "project/package" => self.project_package(params),
 
             // ── Quests ──
@@ -2384,8 +2434,12 @@ fn model_detection_config(
     }
 }
 
-fn should_continue_copilot(applied_read_only: bool, completed: bool) -> bool {
-    applied_read_only && !completed
+fn should_continue_copilot(
+    applied_read_only: bool,
+    execution_completed: bool,
+    model_completed: bool,
+) -> bool {
+    !model_completed || (applied_read_only && !execution_completed)
 }
 
 fn copilot_execution_summary(
@@ -3031,9 +3085,10 @@ mod tests {
 
     #[test]
     fn read_only_inspection_requests_an_agent_continuation() {
-        assert!(should_continue_copilot(true, false));
-        assert!(!should_continue_copilot(false, false));
-        assert!(!should_continue_copilot(true, true));
+        assert!(should_continue_copilot(true, false, false));
+        assert!(should_continue_copilot(false, true, false));
+        assert!(!should_continue_copilot(false, true, true));
+        assert!(!should_continue_copilot(true, true, true));
     }
 
     #[test]

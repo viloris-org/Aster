@@ -4,6 +4,11 @@ script LoopDemo {
     @export var maxIterations: Int = 10
     @export var skipValue: Int = 5
     var initialized: Bool = false
+    var sum: Int = 0
+    var count: Int = 0
+    var loopCount: Int = 0
+    var filtered: Int = 0
+    var product: Int = 0
 
     func start() {
         log("Loop demo starting")
@@ -14,55 +19,50 @@ script LoopDemo {
         }
 
         // For loop with inclusive range
-        var sum: Int = 0
+        sum = 0
         for i in 1..=5 {
             sum += i
         }
-        state.sum = sum
 
         // For loop with count
-        var count: Int = 0
+        count = 0
         for i in count(3) {
             count += 1
         }
-        state.count = count
 
-        state.initialized = 1
+        initialized = true
     }
 
     func update(_ dt: Float) {
-        if !state.initialized {
+        if !initialized {
             return
         }
 
         // While loop with early exit
-        var counter: Int = 0
-        while counter < maxIterations {
-            if counter >= 5 {
+        loopCount = 0
+        while loopCount < maxIterations {
+            if loopCount >= 5 {
                 break
             }
-            counter += 1
+            loopCount += 1
         }
-        state.loopCount = counter
 
         // For loop with continue
-        var filtered: Int = 0
+        filtered = 0
         for i in 0..10 {
             if i == skipValue {
                 continue
             }
             filtered += 1
         }
-        state.filtered = filtered
 
         // Nested loops
-        var product: Int = 0
+        product = 0
         for i in 0..3 {
             for j in 0..2 {
                 product += i * j
             }
         }
-        state.product = product
 
         // Animation using loop
         position.y = 0

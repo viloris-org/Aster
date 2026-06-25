@@ -9,6 +9,7 @@ interface ScriptEditorProps {
   filePath: string;
   initialContent: string;
   onSave: (path: string, content: string) => Promise<void>;
+  onContentChange?: (content: string) => void;
   onClose: () => void;
 }
 
@@ -29,7 +30,7 @@ const textareaClass = 'absolute inset-0 h-full w-full resize-none overflow-auto 
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export default function ScriptEditor({ filePath, initialContent, onSave, onClose }: ScriptEditorProps) {
+export default function ScriptEditor({ filePath, initialContent, onSave, onContentChange, onClose }: ScriptEditorProps) {
   const { t } = useTranslation();
   const [content, setContent] = useState(initialContent);
   const [dirty, setDirty] = useState(false);
@@ -37,7 +38,21 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
   const [findText, setFindText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLPreElement>(null);
+  const dirtyRef = useRef(false);
+  const loadedFilePathRef = useRef(filePath);
   const language = detectLanguage(filePath) ?? 'varg';
+
+  useEffect(() => {
+    if (loadedFilePathRef.current !== filePath) {
+      loadedFilePathRef.current = filePath;
+      setContent(initialContent);
+      setDirty(false);
+      dirtyRef.current = false;
+      return;
+    }
+    if (dirtyRef.current) return;
+    setContent(initialContent);
+  }, [filePath, initialContent]);
 
   // Sync scroll between textarea and highlighted overlay
   const syncScroll = useCallback(() => {
@@ -59,6 +74,7 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
     try {
       await onSave(filePath, content);
       setDirty(false);
+      dirtyRef.current = false;
     } catch (e) {
       console.error('[script-editor] save error:', e);
     }
@@ -154,7 +170,9 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
             value={content}
             onChange={(e) => {
               setContent(e.target.value);
+              onContentChange?.(e.target.value);
               setDirty(true);
+              dirtyRef.current = true;
             }}
             onScroll={syncScroll}
             onKeyDown={(e) => {
@@ -165,7 +183,9 @@ export default function ScriptEditor({ filePath, initialContent, onSave, onClose
                 const end = ta.selectionEnd;
                 const newContent = content.slice(0, start) + '  ' + content.slice(end);
                 setContent(newContent);
+                onContentChange?.(newContent);
                 setDirty(true);
+                dirtyRef.current = true;
                 // Restore cursor position after React re-render
                 requestAnimationFrame(() => {
                   ta.selectionStart = ta.selectionEnd = start + 2;

@@ -80,6 +80,12 @@ export const IconMessageSquare = icon('0 0 24 24', <>
   <path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
 </>);
 
+export const IconNewChat = icon('0 0 24 24', <>
+  <path d="M21 15a4 4 0 0 1-4 4H8l-5 4V7a4 4 0 0 1 4-4h6" />
+  <line x1="19" y1="3" x2="19" y2="11" />
+  <line x1="15" y1="7" x2="23" y2="7" />
+</>);
+
 // ─── Navigation Icons ──────────────────────────────────────────────────────
 
 export const IconFolder = icon('0 0 24 24', <>

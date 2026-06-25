@@ -8,39 +8,39 @@ script ParticleSystem {
 
     var particlesActive: Int = 0
     var timeSinceEmit: Float = 0.0
+    var aliveCount: Int = 0
 
     func start() {
-        // Initialize particle arrays in state
-        state.particlesActive = 0
-        state.timeSinceEmit = 0
+        particlesActive = 0
+        timeSinceEmit = 0
     }
 
     func update(_ dt: Float) {
         // Update emit timer
-        state.timeSinceEmit += dt
+        timeSinceEmit += dt
 
         // Emit new particles
         let emitInterval: Float = 1.0 / emitRate
-        while state.timeSinceEmit >= emitInterval {
-            if state.particlesActive < particleCount {
-                state.particlesActive += 1
+        while timeSinceEmit >= emitInterval {
+            if particlesActive < particleCount {
+                particlesActive += 1
             }
-            state.timeSinceEmit -= emitInterval
+            timeSinceEmit -= emitInterval
         }
 
         // Simulate particles (simplified - just count alive)
         var alive: Int = 0
         for i in 0..particleCount {
-            if i < state.particlesActive {
+            if i < particlesActive {
                 alive += 1
             }
         }
-        state.aliveCount = alive
+        aliveCount = alive
 
         // Check for input to reset
         if Input.down("Space") {
-            state.particlesActive = 0
-            state.timeSinceEmit = 0
+            particlesActive = 0
+            timeSinceEmit = 0
             return
         }
     }

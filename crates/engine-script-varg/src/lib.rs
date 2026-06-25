@@ -293,7 +293,13 @@ pub fn diagnose_source(path: impl AsRef<Path>, source: &str) -> Vec<VargDiagnost
     let role = VargFileRole::from_path(path);
     let mut parser = Parser::new(source, role);
     parser.parse();
-    parser.diagnostics
+    let mut diagnostics = parser.diagnostics;
+    if matches!(role, Some(VargFileRole::Logic))
+        && !diagnostics.iter().any(|diagnostic| diagnostic.blocking)
+    {
+        diagnostics.extend(diagnose_runtime_blocks(source));
+    }
+    diagnostics
 }
 
 /// Parses Varg source and returns an AST summary plus diagnostics.
@@ -317,7 +323,12 @@ pub fn parse_source_lossy(
     let role = VargFileRole::from_path(path);
     let mut parser = Parser::new(source, role);
     let ast = parser.parse();
-    let diagnostics = parser.diagnostics;
+    let mut diagnostics = parser.diagnostics;
+    if matches!(role, Some(VargFileRole::Logic))
+        && !diagnostics.iter().any(|diagnostic| diagnostic.blocking)
+    {
+        diagnostics.extend(diagnose_runtime_blocks(source));
+    }
     (ast, diagnostics)
 }
 
@@ -1817,10 +1828,44 @@ fn compile_runtime_blocks(source: &str, script: &mut VargScript) {
     }
 }
 
-fn parse_runtime_statements(lines: &[String], index: &mut usize) -> Vec<RuntimeStatement> {
+fn diagnose_runtime_blocks(source: &str) -> Vec<VargDiagnostic> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut diagnostics = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let trimmed = strip_line_comment(lines[index]).trim();
+        if let Some(_signature) = parse_function_signature(trimmed) {
+            let (body, next) = collect_block(&lines, index);
+            let mut body_index = 0usize;
+            let _ = parse_runtime_statements_with_diagnostics(
+                &body,
+                &mut body_index,
+                &mut diagnostics,
+                source,
+            );
+            index = next;
+            continue;
+        }
+        index += 1;
+    }
+    diagnostics
+}
+
+fn parse_runtime_statements(lines: &[RuntimeLine], index: &mut usize) -> Vec<RuntimeStatement> {
+    let mut diagnostics = Vec::new();
+    parse_runtime_statements_with_diagnostics(lines, index, &mut diagnostics, "")
+}
+
+fn parse_runtime_statements_with_diagnostics(
+    lines: &[RuntimeLine],
+    index: &mut usize,
+    diagnostics: &mut Vec<VargDiagnostic>,
+    source: &str,
+) -> Vec<RuntimeStatement> {
     let mut statements = Vec::new();
     while *index < lines.len() {
-        let trimmed = strip_line_comment(&lines[*index]).trim();
+        let line = &lines[*index];
+        let trimmed = strip_line_comment(&line.text).trim();
         *index += 1;
         if trimmed.is_empty() || trimmed == "}" {
             continue;
@@ -1832,8 +1877,18 @@ fn parse_runtime_statements(lines: &[String], index: &mut usize) -> Vec<RuntimeS
             let mut else_index = 0usize;
             statements.push(RuntimeStatement::If {
                 condition,
-                statements: parse_runtime_statements(&nested, &mut nested_index),
-                else_statements: parse_runtime_statements(&else_nested, &mut else_index),
+                statements: parse_runtime_statements_with_diagnostics(
+                    &nested,
+                    &mut nested_index,
+                    diagnostics,
+                    source,
+                ),
+                else_statements: parse_runtime_statements_with_diagnostics(
+                    &else_nested,
+                    &mut else_index,
+                    diagnostics,
+                    source,
+                ),
             });
             continue;
         }
@@ -1843,7 +1898,12 @@ fn parse_runtime_statements(lines: &[String], index: &mut usize) -> Vec<RuntimeS
             statements.push(RuntimeStatement::ForLoop {
                 variable,
                 range,
-                body: parse_runtime_statements(&body, &mut body_index),
+                body: parse_runtime_statements_with_diagnostics(
+                    &body,
+                    &mut body_index,
+                    diagnostics,
+                    source,
+                ),
             });
             continue;
         }
@@ -1852,12 +1912,24 @@ fn parse_runtime_statements(lines: &[String], index: &mut usize) -> Vec<RuntimeS
             let mut body_index = 0usize;
             statements.push(RuntimeStatement::WhileLoop {
                 condition,
-                body: parse_runtime_statements(&body, &mut body_index),
+                body: parse_runtime_statements_with_diagnostics(
+                    &body,
+                    &mut body_index,
+                    diagnostics,
+                    source,
+                ),
             });
             continue;
         }
         if let Some(statement) = parse_runtime_statement(trimmed) {
             statements.push(statement);
+        } else {
+            diagnostics.push(unsupported_runtime_statement_diagnostic(
+                source,
+                line.line_no,
+                &line.text,
+                trimmed,
+            ));
         }
     }
     statements
@@ -1971,7 +2043,7 @@ fn parse_condition_expression(condition: &str) -> Option<ConditionExpression> {
         )));
     }
     if let Some(action) = function_args(condition, "Input.pressed") {
-        return parse_string_literal(action).map(ConditionExpression::InputDown);
+        return parse_string_literal(action).map(ConditionExpression::InputJustPressed);
     }
     if let Some(action) = function_args(condition, "Input.down") {
         return parse_string_literal(action).map(ConditionExpression::InputDown);
@@ -1979,7 +2051,13 @@ fn parse_condition_expression(condition: &str) -> Option<ConditionExpression> {
     if let Some(action) = function_args(condition, "Input.justPressed") {
         return parse_string_literal(action).map(ConditionExpression::InputJustPressed);
     }
+    if let Some(action) = function_args(condition, "Input.pressedThisFrame") {
+        return parse_string_literal(action).map(ConditionExpression::InputJustPressed);
+    }
     if let Some(action) = function_args(condition, "Input.justReleased") {
+        return parse_string_literal(action).map(ConditionExpression::InputJustReleased);
+    }
+    if let Some(action) = function_args(condition, "Input.released") {
         return parse_string_literal(action).map(ConditionExpression::InputJustReleased);
     }
     if let Some(action) = function_args(condition, "Input.actionDown") {
@@ -2001,6 +2079,14 @@ fn parse_condition_expression(condition: &str) -> Option<ConditionExpression> {
             rhs: parse_expression(rhs)?,
         });
     }
+    if is_truthy_condition_source(condition) {
+        return Some(ConditionExpression::Compare {
+            lhs: parse_expression(condition)?,
+            op: CompareOp::NotEqual,
+            rhs: Expression::Number(0.0),
+        });
+    }
+
     None
 }
 
@@ -2074,6 +2160,10 @@ fn parse_atom(source: &str) -> Option<Expression> {
         });
     }
     if let Some(action) = function_args(source, "Input.actionValue") {
+        return parse_string_literal(action)
+            .map(|action| Expression::Member("InputAction".to_string(), action));
+    }
+    if let Some(action) = function_args(source, "Input.value") {
         return parse_string_literal(action)
             .map(|action| Expression::Member("InputAction".to_string(), action));
     }
@@ -2231,13 +2321,133 @@ fn is_valid_runtime_binding_name(name: &str) -> bool {
         )
 }
 
-fn collect_inline_or_block(lines: &[String], index: &mut usize) -> Vec<String> {
+fn is_truthy_condition_source(source: &str) -> bool {
+    let source = source.trim();
+    if is_valid_runtime_binding_name(source) {
+        return true;
+    }
+    source
+        .strip_prefix("state.")
+        .is_some_and(is_valid_runtime_binding_name)
+}
+
+fn unsupported_runtime_statement_diagnostic(
+    source: &str,
+    line_no: usize,
+    raw_line: &str,
+    trimmed: &str,
+) -> VargDiagnostic {
+    let column = raw_line
+        .find(trimmed)
+        .map(|index| index + 1)
+        .unwrap_or_else(|| {
+            raw_line
+                .chars()
+                .position(|ch| !ch.is_whitespace())
+                .map(|index| index + 1)
+                .unwrap_or(1)
+        });
+    let (message, expected, suggestion) = unsupported_runtime_statement_help(trimmed);
+    VargDiagnostic {
+        code: "VARG4100".to_string(),
+        severity: VargDiagnosticSeverity::Error,
+        line: Some(line_no),
+        column: Some(column),
+        message,
+        expected,
+        suggestion,
+        blocking: true,
+        source_line: Some(
+            source
+                .lines()
+                .nth(line_no.saturating_sub(1))
+                .unwrap_or(raw_line)
+                .to_string(),
+        ),
+    }
+}
+
+fn unsupported_runtime_statement_help(trimmed: &str) -> (String, String, String) {
+    if trimmed.starts_with("emit(") || trimmed.starts_with("emit ") {
+        return (
+            "unsupported runtime API `emit`".to_string(),
+            "The MVP runtime supports local script state, transform position changes, Input, Time, Math, `log(...)`, and `wait(...)`."
+                .to_string(),
+            "`emit(...)` is in the target language direction but is not wired into this runtime yet. Store a value in `state.*` or use `log(...)` for now."
+                .to_string(),
+        );
+    }
+
+    if trimmed.contains("entity.velocity") {
+        return (
+            "unsupported entity API `entity.velocity`".to_string(),
+            "Use `entity.translate(Vec3(...))`, `position = Vec3(...)`, or `position.x/y/z` assignment in the MVP runtime."
+                .to_string(),
+            "For transform-only motion, replace velocity mutation with `position.y += jumpForce * dt` or `entity.translate(Vec3(0, jumpForce * dt, 0))`."
+                .to_string(),
+        );
+    }
+
+    if trimmed.contains(".destroy(") || trimmed.ends_with(".destroy()") {
+        return (
+            "unsupported entity API `destroy`".to_string(),
+            "The MVP runtime does not expose entity creation or destruction APIs yet.".to_string(),
+            "Mark intent in `state.*` for now, for example `state.shouldDestroy = 1`, and handle destruction outside the script runtime."
+                .to_string(),
+        );
+    }
+
+    if trimmed.starts_with("if ") {
+        return (
+            "unsupported or malformed `if` condition".to_string(),
+            "Supported conditions use Input checks, numeric comparisons, `!`, `&&`, and `||`."
+                .to_string(),
+            "Rewrite the condition with supported bindings such as `Input.down(\"jump\")`, `state.count > 0`, or `position.y <= 1.0`."
+                .to_string(),
+        );
+    }
+
+    if trimmed.starts_with("for ") {
+        return (
+            "unsupported or malformed `for` loop".to_string(),
+            "Supported loops are `for i in 0..10`, `for i in 0..=10`, and `for i in count(n)`."
+                .to_string(),
+            "Rewrite the loop range using one of the supported range forms.".to_string(),
+        );
+    }
+
+    if trimmed.starts_with("while ") {
+        return (
+            "unsupported or malformed `while` condition".to_string(),
+            "Supported conditions use Input checks, numeric comparisons, `!`, `&&`, and `||`."
+                .to_string(),
+            "Rewrite the condition with supported numeric state, local, Time, Input, or position bindings."
+                .to_string(),
+        );
+    }
+
+    (
+        "unsupported runtime statement".to_string(),
+        "Supported statements are `let`/`var` locals, state assignment, position assignment, `entity.translate(...)`, `if`, `for`, `while`, `return`, `break`, `continue`, `wait(...)`, and `log(...)`."
+            .to_string(),
+        "Rewrite this line using the supported MVP script API, or add runtime support before using this language construct."
+            .to_string(),
+    )
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RuntimeLine {
+    line_no: usize,
+    text: String,
+}
+
+fn collect_inline_or_block(lines: &[RuntimeLine], index: &mut usize) -> Vec<RuntimeLine> {
     let mut collected = Vec::new();
     let mut depth = 1isize;
     while *index < lines.len() {
         let line = lines[*index].clone();
         *index += 1;
-        let trimmed = strip_line_comment(&line).trim();
+        let trimmed = strip_line_comment(&line.text).trim();
         if depth == 1 && trimmed.starts_with("} else") {
             *index = (*index).saturating_sub(1);
             break;
@@ -2252,11 +2462,11 @@ fn collect_inline_or_block(lines: &[String], index: &mut usize) -> Vec<String> {
     collected
 }
 
-fn collect_else_block(lines: &[String], index: &mut usize) -> Vec<String> {
+fn collect_else_block(lines: &[RuntimeLine], index: &mut usize) -> Vec<RuntimeLine> {
     if *index >= lines.len() {
         return Vec::new();
     }
-    let trimmed = strip_line_comment(&lines[*index]).trim();
+    let trimmed = strip_line_comment(&lines[*index].text).trim();
     if trimmed == "else {" || trimmed == "} else {" {
         *index += 1;
         return collect_inline_or_block(lines, index);
@@ -2264,7 +2474,7 @@ fn collect_else_block(lines: &[String], index: &mut usize) -> Vec<String> {
     Vec::new()
 }
 
-fn collect_block(lines: &[&str], start: usize) -> (Vec<String>, usize) {
+fn collect_block(lines: &[&str], start: usize) -> (Vec<RuntimeLine>, usize) {
     let mut body = Vec::new();
     let mut depth =
         lines[start].matches('{').count() as isize - lines[start].matches('}').count() as isize;
@@ -2276,7 +2486,10 @@ fn collect_block(lines: &[&str], start: usize) -> (Vec<String>, usize) {
         if depth <= 0 {
             return (body, index + 1);
         }
-        body.push(line.to_string());
+        body.push(RuntimeLine {
+            line_no: index + 1,
+            text: line.to_string(),
+        });
         index += 1;
     }
     (body, index)
@@ -2450,7 +2663,10 @@ fn split_comparison(source: &str) -> Option<(&str, CompareOp, &str)> {
 }
 
 fn json_number(value: &serde_json::Value) -> Option<f32> {
-    value.as_f64().map(|number| number as f32)
+    if let Some(number) = value.as_f64() {
+        return Some(number as f32);
+    }
+    value.as_bool().map(|value| if value { 1.0 } else { 0.0 })
 }
 
 fn input_action_down(input: &engine_platform::InputState, action: &str) -> bool {
@@ -2699,6 +2915,96 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unsupported_runtime_statement_with_source_location() {
+        let diagnostics = diagnose_source(
+            "scripts/player.varg",
+            r#"script Player {
+    func update(_ dt: Float) {
+        emit("coin_collected")
+    }
+}
+"#,
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code, "VARG4100");
+        assert_eq!(diagnostic.line, Some(3));
+        assert_eq!(diagnostic.column, Some(9));
+        assert!(diagnostic.message.contains("emit"));
+        assert!(diagnostic.expected.contains("MVP runtime"));
+        assert!(diagnostic.suggestion.contains("not wired"));
+        assert_eq!(
+            diagnostic.source_line.as_deref(),
+            Some(r#"        emit("coin_collected")"#)
+        );
+    }
+
+    #[test]
+    fn rejects_spec_api_that_runtime_does_not_execute() {
+        let diagnostics = diagnose_source(
+            "scripts/player.varg",
+            r#"script Player {
+    @export var jumpForce: Float = 8.0
+
+    func update(_ dt: Float) {
+        entity.velocity.y = jumpForce
+    }
+}
+"#,
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code, "VARG4100");
+        assert_eq!(diagnostic.line, Some(5));
+        assert_eq!(diagnostic.column, Some(9));
+        assert!(diagnostic.message.contains("entity.velocity"));
+        assert!(diagnostic.suggestion.contains("position.y"));
+    }
+
+    #[test]
+    fn compile_rejects_unsupported_runtime_statement() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/player.varg",
+            r#"script Player {
+    func update(_ dt: Float) {
+        spawnEnemy()
+    }
+}
+"#,
+        );
+
+        assert!(script.is_none());
+        assert_eq!(diagnostics[0].code, "VARG4100");
+        assert!(diagnostics[0].blocking);
+        assert!(
+            diagnostics[0]
+                .suggestion
+                .contains("supported MVP script API")
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_condition_calls() {
+        let diagnostics = diagnose_source(
+            "scripts/player.varg",
+            r#"script Player {
+    func update(_ dt: Float) {
+        if target.has(Health) {
+            log("hit")
+        }
+    }
+}
+"#,
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "VARG4100");
+        assert!(diagnostics[0].message.contains("if"));
+    }
+
+    #[test]
     fn runtime_supports_else_and_comparisons() {
         let (script, diagnostics) = compile_script_source(
             "scripts/health.varg",
@@ -2883,6 +3189,136 @@ mod tests {
                 .and_then(|value| value.as_f64()),
             Some(1.0)
         );
+    }
+
+    #[test]
+    fn runtime_supports_preferred_explicit_input_and_bool_state() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/preferred_input.varg",
+            r#"script PreferredInput {
+    var canFire: Bool = true
+    var fired: Int = 0
+    var released: Int = 0
+
+    func update(_ dt: Float) {
+        let moveX: Float = Input.value("MoveX")
+        position.x = moveX
+
+        if Input.pressed("Fire") && canFire {
+            fired += 1
+            canFire = false
+        }
+
+        if Input.released("Fire") {
+            released += 1
+            canFire = true
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let mut input = engine_platform::InputState::default();
+        input.apply_event(engine_platform::InputEvent::KeyDown(
+            engine_platform::KeyCode::Character('f'),
+        ));
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input,
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+        assert_eq!(
+            output.state.get("fired").and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert_eq!(
+            output
+                .state
+                .get("canFire")
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+
+        let mut input = engine_platform::InputState::default();
+        input.apply_event(engine_platform::InputEvent::KeyDown(
+            engine_platform::KeyCode::Character('f'),
+        ));
+        input.end_frame();
+        input.apply_event(engine_platform::InputEvent::KeyUp(
+            engine_platform::KeyCode::Character('f'),
+        ));
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: output.transform,
+                input,
+                delta_time: 0.016,
+                total_time: 0.032,
+                frame_index: 2,
+                exported_values: HashMap::new(),
+                state: output.state,
+            },
+        );
+        assert_eq!(
+            output
+                .state
+                .get("released")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert_eq!(
+            output
+                .state
+                .get("canFire")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn checked_in_examples_compile() {
+        for (path, source) in [
+            (
+                "examples/scripts/loop_demo.varg",
+                include_str!("../../../examples/scripts/loop_demo.varg"),
+            ),
+            (
+                "examples/scripts/particle_system.varg",
+                include_str!("../../../examples/scripts/particle_system.varg"),
+            ),
+            (
+                "examples/scripts/timed_sequence.varg",
+                include_str!("../../../examples/scripts/timed_sequence.varg"),
+            ),
+            (
+                "examples/scripts/wave_spawner.varg",
+                include_str!("../../../examples/scripts/wave_spawner.varg"),
+            ),
+            (
+                "examples/scripts/weapon_cooldown.varg",
+                include_str!("../../../examples/scripts/weapon_cooldown.varg"),
+            ),
+            (
+                "examples/project/scripts/player_controller.varg",
+                include_str!("../../../examples/project/scripts/player_controller.varg"),
+            ),
+        ] {
+            let (script, diagnostics) = compile_script_source(path, source);
+            assert!(script.is_some(), "{path} did not compile: {diagnostics:#?}");
+            assert!(
+                diagnostics.is_empty(),
+                "{path} diagnostics: {diagnostics:#?}"
+            );
+        }
     }
 
     #[test]

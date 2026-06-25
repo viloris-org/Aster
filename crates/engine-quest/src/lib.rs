@@ -852,13 +852,22 @@ fn resolve_project_script_reference(
     project: &engine_editor::ProjectContext,
     script: &str,
 ) -> PathBuf {
+    let script = script.strip_prefix("project:/").unwrap_or(script);
     let script_path = Path::new(script);
-    if let Ok(stripped) = script_path.strip_prefix("project:/") {
-        project.root.join(stripped)
-    } else if script_path.is_absolute() {
+    if script_path.is_absolute() {
         script_path.to_path_buf()
     } else {
-        project.root.join(script_path)
+        let project_path = project.root.join(script_path);
+        if project_path.is_file() {
+            return project_path;
+        }
+        for script_root in &project.manifest.script_roots {
+            let candidate = project.root.join(script_root).join(script_path);
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+        project_path
     }
 }
 
@@ -872,6 +881,13 @@ fn validate_quest_play_preview(
         &project.scene,
     )
     .and_then(|mut services| {
+        services.set_script_roots(
+            project
+                .manifest
+                .script_roots
+                .iter()
+                .map(|root| PathBuf::from(root.as_str())),
+        );
         services.load_project_assets(project.root.join(&project.manifest.asset_root))?;
         services.tick_game_frame(Duration::from_millis(16), true)?;
         Ok(services.diagnostics)

@@ -9,9 +9,11 @@ script PlayerController {
     }
 
     func update(_ dt: Float) {
-        entity.translate(Vec3(Input.actionValue("MoveX") * speed * dt, 0, Input.actionValue("MoveY") * speed * dt))
+        let moveX: Float = Input.value("MoveX")
+        let moveY: Float = Input.value("MoveY")
+        entity.translate(Vec3(moveX * speed * dt, 0, moveY * speed * dt))
 
-        if Input.pressed("jump") {
+        if Input.pressed("Jump") && jumpsLeft > 0 {
             entity.position.y += jumpForce * dt
             jumpsLeft -= 1
         }

@@ -1,5 +1,6 @@
 name = "Aster Example"
 asset_root = "assets"
+script_roots = ["scripts"]
 default_scene = "scenes/example.aster_scene.json"
 
 [format]
