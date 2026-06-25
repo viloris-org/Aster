@@ -242,8 +242,16 @@ This branch added:
 - Quest apply: 3 tests covering policy classify, stale check, rollback
 - Quest discard: 3 tests covering prune, stale check, mark completed
 - Quest rollback: covered by apply test (line 9061)
+- **NEW**: SceneCommand execution tests: 2 tests added
+  - `scene_command_execution_in_workspace` - verifies SceneCommand works in workspace context
+  - `scene_command_validation_failure_produces_clear_error` - verifies validation errors are actionable
+
+### Commit History (2026-06-25)
+1. `8dbfd39` - feat(ai): wire SceneCommand into Quest execution, add deterministic StubProvider
+2. `2b0cc13` - test(ai): add SceneCommand execution tests
 
 ### Merge Risk Assessment
-- Branch is 3 commits ahead of main (docs only)
-- No code conflicts expected as changes are additive
-- Uncommitted changes: 451 insertions across 9 files (compilation fixes, doc updates)
+- Branch is 5 commits ahead of main
+- All tests pass (except 1 network test due to infrastructure)
+- Frontend builds successfully
+- No conflicts expected as changes are additive
