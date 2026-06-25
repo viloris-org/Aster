@@ -2630,10 +2630,8 @@ impl EditorHost {
     ) -> EngineResult<PreparedQuestModelRequest> {
         let provider = if config.provider == "inherit" {
             copilot_provider_str(&self.copilot_settings.provider)?.to_owned()
-        } else if config.provider == "stub" {
-            return Err(EngineError::config(
-                "Quest execution requires a configured AI provider.",
-            ));
+        } else if config.provider == "stub" || config.provider == "deterministic" {
+            "stub".to_owned()
         } else {
             config.provider.clone()
         };
@@ -6394,7 +6392,12 @@ fn collect_workspace_snapshot_inner(
     current: &Path,
     files: &mut BTreeMap<String, Vec<u8>>,
 ) -> EngineResult<()> {
-    const SKIPPED_DIRS: &[&str] = &[".git", "target", "dist", "node_modules"];
+    const SKIPPED_DIRS: &[&str] = &[".git", "target", "dist", "node_modules", "build"];
+    /// Maximum bytes to read for a single file in the snapshot.
+    /// Files larger than this are recorded as hash-only entries (see BINARY_HASH_PREFIX).
+    const MAX_FILE_BYTES: u64 = 1 * 1024 * 1024; // 1 MiB
+    /// Prefix stored in the value Vec<u8> to distinguish hash-only entries from full content.
+    const BINARY_HASH_PREFIX: &[u8] = b"__BINARY_HASH__";
     if !current.exists() {
         return Ok(());
     }
@@ -6426,11 +6429,29 @@ fn collect_workspace_snapshot_inner(
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            let bytes = std::fs::read(&path).map_err(|source| EngineError::Filesystem {
+            let metadata = std::fs::metadata(&path).map_err(|source| EngineError::Filesystem {
                 path: path.clone(),
                 source,
             })?;
-            files.insert(relative, bytes);
+            if metadata.len() > MAX_FILE_BYTES {
+                // Store hash-only for large binary files to avoid memory pressure
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                relative.hash(&mut hasher);
+                metadata.len().hash(&mut hasher);
+                metadata.modified().ok().hash(&mut hasher);
+                let hash = hasher.finish();
+                let mut hash_entry = BINARY_HASH_PREFIX.to_vec();
+                hash_entry.extend_from_slice(&hash.to_le_bytes());
+                files.insert(relative, hash_entry);
+            } else {
+                let bytes = std::fs::read(&path).map_err(|source| EngineError::Filesystem {
+                    path: path.clone(),
+                    source,
+                })?;
+                files.insert(relative, bytes);
+            }
         }
     }
     Ok(())
@@ -6547,6 +6568,9 @@ fn validate_quest_workspace(workspace_root: &Path) -> Vec<ValidationResult> {
     results.push(validate_quest_scene_round_trip(&project));
     results.push(validate_quest_asset_scan(&project));
     results.push(validate_quest_script_references(&project));
+    results.push(validate_quest_physics_smoke(&project));
+    results.push(validate_quest_audio_diagnostics(&project));
+    results.push(validate_quest_render_extraction(&project));
     results.push(validate_quest_play_preview(workspace_root, &project));
 
     let cargo_toml = workspace_root.join("Cargo.toml");
@@ -6712,6 +6736,166 @@ fn resolve_project_script_reference(
     }
 }
 
+fn validate_quest_physics_smoke(project: &engine_editor::ProjectContext) -> ValidationResult {
+    // Count physics-related components in the scene to decide if this check is relevant.
+    let physics_body_count: usize = project
+        .scene
+        .objects()
+        .into_iter()
+        .filter_map(|(_, obj)| {
+            obj.components
+                .iter()
+                .any(|c| matches!(c, engine_ecs::ComponentData::Rigidbody(_)))
+                .then_some(1)
+        })
+        .sum();
+
+    // If the scene has no physics bodies, skip the check gracefully.
+    if physics_body_count == 0 {
+        return ValidationResult::new(
+            "Physics smoke",
+            "skipped",
+            "No physics bodies found in scene; physics check skipped.",
+        );
+    }
+
+    // Build a minimal physics world with SimplePhysicsBackend.
+    let mut world = engine_physics::PhysicsWorld::new(engine_physics::SimplePhysicsBackend::new());
+
+    // Create a dynamic body with a default collider.
+    let body = match world
+        .backend_mut()
+        .create_body(&engine_physics::RigidbodyDesc {
+            kind: engine_physics::BodyKind::Dynamic,
+            transform: engine_core::math::Transform {
+                translation: engine_core::math::Vec3::new(0.0, 10.0, 0.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        }) {
+        Ok(b) => b,
+        Err(e) => return ValidationResult::new("Physics smoke", "failed", e.to_string()),
+    };
+    if let Err(e) = world.backend_mut().add_collider(
+        body,
+        &engine_physics::ColliderDesc {
+            shape: engine_physics::ColliderShape::Box {
+                half_extents: engine_core::math::Vec3::new(0.5, 0.5, 0.5),
+            },
+            ..Default::default()
+        },
+    ) {
+        return ValidationResult::new("Physics smoke", "failed", e.to_string());
+    }
+
+    // Step one physics frame (60 Hz).
+    world.fixed_update(1.0 / 60.0);
+
+    // After one step under gravity the body should have moved downward.
+    match world.backend().body_transform(body) {
+        Ok(t) => {
+            let fall = -t.translation.y;
+            if fall > 0.001 {
+                ValidationResult::new(
+                    "Physics smoke",
+                    "passed",
+                    format!(
+                        "Dynamic body fell {:.4} units after one 60 Hz gravity step ({} body/bodies in scene).",
+                        fall, physics_body_count
+                    ),
+                )
+            } else {
+                ValidationResult::new(
+                    "Physics smoke",
+                    "failed",
+                    format!(
+                        "Dynamic body did not move under gravity (translation.y = {:.4}).",
+                        t.translation.y
+                    ),
+                )
+            }
+        }
+        Err(e) => ValidationResult::new("Physics smoke", "failed", e.to_string()),
+    }
+}
+
+fn validate_quest_audio_diagnostics(_project: &engine_editor::ProjectContext) -> ValidationResult {
+    // Build a memory-backed audio context (no device needed).
+    let mut ctx = engine_audio::AudioContext::memory();
+
+    // Create a 1-second silent audio clip and spawn a source.
+    let sample_rate = 44100u32;
+    let samples: Vec<f32> = vec![0.0; sample_rate as usize]; // 1 second of silence
+    let clip = match ctx
+        .backend_mut()
+        .load_clip("validation-silence", &samples, 1, sample_rate)
+    {
+        Ok(c) => c,
+        Err(e) => return ValidationResult::new("Audio diagnostics", "failed", e.to_string()),
+    };
+    let _source = match ctx
+        .backend_mut()
+        .spawn_source(&engine_audio::AudioSourceDesc::simple(clip))
+    {
+        Ok(s) => s,
+        Err(e) => return ValidationResult::new("Audio diagnostics", "failed", e.to_string()),
+    };
+
+    // Step the audio system (one frame at 60 Hz).
+    ctx.update(1.0 / 60.0);
+
+    // Read diagnostics.
+    let diag = ctx.diagnostics();
+    if diag.loaded_clips >= 1 && diag.logical_sources >= 1 {
+        ValidationResult::new(
+            "Audio diagnostics",
+            "passed",
+            format!(
+                "Memory audio backend: {} clip(s) loaded, {} logical source(s), {} physical voice(s).",
+                diag.loaded_clips, diag.logical_sources, diag.physical_voices
+            ),
+        )
+    } else {
+        ValidationResult::new(
+            "Audio diagnostics",
+            "failed",
+            format!(
+                "Expected clips≥1 and sources≥1; got clips={}, sources={}.",
+                diag.loaded_clips, diag.logical_sources
+            ),
+        )
+    }
+}
+
+fn validate_quest_render_extraction(project: &engine_editor::ProjectContext) -> ValidationResult {
+    // CPU-only extraction — no GPU required.
+    let world = engine_render::RenderWorld::extract(&project.scene);
+
+    let camera_note = if world.camera.is_some() {
+        "camera present"
+    } else {
+        "no camera (2-D or headless scene)"
+    };
+
+    ValidationResult::new(
+        "Render extraction",
+        "passed",
+        format!(
+            "Extracted {} object(s), {} sprite(s), {} light(s), {} particle system(s), {} — {}.",
+            world.objects.len(),
+            world.sprites.len(),
+            world.lights.len(),
+            world.particle_emitters.len(),
+            camera_note,
+            if world.objects.is_empty() && world.sprites.is_empty() {
+                "empty scene, nothing to render"
+            } else {
+                "scene has visible geometry"
+            },
+        ),
+    )
+}
+
 fn validate_quest_play_preview(
     workspace_root: &Path,
     project: &engine_editor::ProjectContext,
@@ -6810,12 +6994,38 @@ impl QuestValidationCommand {
 }
 
 fn quest_validation_registry() -> Vec<QuestValidationCommand> {
-    vec![QuestValidationCommand {
-        id: "cargo_check_quiet",
-        label: "cargo check",
-        program: "cargo",
-        args: &["check", "--quiet"],
-    }]
+    vec![
+        QuestValidationCommand {
+            id: "cargo_check_quiet",
+            label: "cargo check",
+            program: "cargo",
+            args: &["check", "--quiet"],
+        },
+        QuestValidationCommand {
+            id: "cargo_fmt_check",
+            label: "cargo fmt --check",
+            program: "cargo",
+            args: &["fmt", "--check"],
+        },
+        QuestValidationCommand {
+            id: "cargo_clippy_quiet",
+            label: "cargo clippy --quiet",
+            program: "cargo",
+            args: &["clippy", "--quiet", "--", "-D", "warnings"],
+        },
+        QuestValidationCommand {
+            id: "cargo_test_quick",
+            label: "cargo test --lib",
+            program: "cargo",
+            args: &["test", "--lib", "--", "--test-threads=4"],
+        },
+        QuestValidationCommand {
+            id: "cargo_build",
+            label: "cargo build --quiet",
+            program: "cargo",
+            args: &["build", "--quiet"],
+        },
+    ]
 }
 
 fn parse_generated_quest_response(

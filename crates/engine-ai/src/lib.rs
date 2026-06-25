@@ -399,6 +399,14 @@ pub enum AgentOperation {
         #[serde(default = "default_true")]
         capture_stderr: bool,
     },
+    /// Apply a structured scene command to the isolated workspace scene.
+    /// Serialized as JSON matching the `SceneCommand` shape from `engine_ecs`.
+    /// Enables AI-driven scene editing: create/delete entity, add/remove/upsert
+    /// component, set transform, reparent, attach script.
+    SceneCommand {
+        /// Serialized `SceneCommand` JSON payload forwarded to the scene module.
+        payload: serde_json::Value,
+    },
 }
 
 impl AgentOperation {
@@ -426,6 +434,7 @@ impl AgentOperation {
             Self::AttachBehavior { .. } => "attach_behavior",
             Self::MoveEntityTo { .. } => "move_entity_to",
             Self::RunCommand { .. } => "run_command",
+            Self::SceneCommand { .. } => "scene_command",
         }
     }
 }
@@ -1195,6 +1204,7 @@ impl AgentSession {
                 *capture_stdout,
                 *capture_stderr,
             ),
+            AgentOperation::SceneCommand { payload } => self.execute_scene_command(payload),
         }
     }
 
@@ -1804,6 +1814,101 @@ impl AgentSession {
 
         Ok(())
     }
+
+    /// Applies a deserialized `SceneCommand` to the isolated workspace scene.
+    ///
+    /// Execution steps:
+    /// 1. Deserialize the JSON payload into an `engine_ecs::SceneCommand`.
+    /// 2. Validate the command against the current scene.
+    /// 3. Apply the resulting patches transactionally.
+    /// 4. Surface validation failures and apply results as console evidence
+    ///    instead of silently pretending success.
+    ///
+    /// This bridges the existing file-based Agent operation path with the
+    /// structured SceneCommand/ScenePatch pipeline so that Quest-driven AI
+    /// edits become auditable scene mutations rather than opaque black-box writes.
+    fn execute_scene_command(&mut self, payload: &serde_json::Value) -> EngineResult<()> {
+        use engine_ecs::patch::{SceneCommand, ScenePatch};
+
+        // Step 1: deserialize the command
+        let scene_command: SceneCommand = serde_json::from_value(payload.clone()).map_err(|e| {
+            EngineError::config(format!(
+                "scene_command deserialization failed: {e}; payload: {payload}"
+            ))
+        })?;
+
+        // Step 2: validate and resolve patches
+        let scene = &self.context.scene;
+        let (validation, patches) = scene_command.validate(scene)?;
+
+        if !validation.is_valid {
+            self.console.push(ConsoleEntry {
+                timestamp: "now".into(),
+                level: ConsoleLevel::Error,
+                source: ConsoleSource {
+                    subsystem: "ai-agent".into(),
+                    file: None,
+                    line: None,
+                },
+                message: format!(
+                    "SceneCommand validation failed [{}]: {}",
+                    validation.code, validation.message
+                ),
+            });
+            return Err(EngineError::config(format!(
+                "SceneCommand rejected: {} ({})",
+                validation.code, validation.message
+            )));
+        }
+
+        if patches.is_empty() {
+            self.console.push(ConsoleEntry {
+                timestamp: "now".into(),
+                level: ConsoleLevel::Warn,
+                source: ConsoleSource {
+                    subsystem: "ai-agent".into(),
+                    file: None,
+                    line: None,
+                },
+                message: "SceneCommand produced no patches — nothing to apply".into(),
+            });
+            return Ok(());
+        }
+
+        let warnings = if validation.warnings.is_empty() {
+            String::new()
+        } else {
+            format!(" (warnings: {})", validation.warnings.join("; "))
+        };
+
+        // Step 3: apply patches transactionally
+        let apply_results = ScenePatch::apply_batch(&mut self.context.scene, &patches)?;
+
+        // Step 4: report results through console for evidence trail
+        for result in &apply_results {
+            let desc = if result.applied {
+                result.description.clone()
+            } else {
+                format!("patch not applied: {}", result.description)
+            };
+            self.console.push(ConsoleEntry {
+                timestamp: "now".into(),
+                level: if result.applied {
+                    ConsoleLevel::Info
+                } else {
+                    ConsoleLevel::Warn
+                },
+                source: ConsoleSource {
+                    subsystem: "ai-agent".into(),
+                    file: None,
+                    line: None,
+                },
+                message: format!("ScenePatch applied: {}{}", desc, warnings),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 fn join_output_reader(
@@ -1848,6 +1953,7 @@ fn operation_is_transactional(operation: &AgentOperation) -> bool {
         | AgentOperation::GenerateAsset { .. }
         | AgentOperation::ShowInViewport { .. }
         | AgentOperation::RunCommand { .. } => false,
+        AgentOperation::SceneCommand { .. } => true,
         AgentOperation::BatchOperation {
             operations,
             rollback_on_failure: _,
@@ -1897,6 +2003,7 @@ fn operation_access(operation: &AgentOperation) -> OperationAccess {
         AgentOperation::ExecuteCommand { .. }
         | AgentOperation::CreateObject { .. }
         | AgentOperation::SetProperty { .. }
+        | AgentOperation::SceneCommand { .. }
         | AgentOperation::RemoveComponent { .. }
         | AgentOperation::DestroyObject { .. }
         | AgentOperation::AttachBehavior { .. }
@@ -2076,6 +2183,9 @@ fn preview_operation(operation: &AgentOperation) -> String {
                 .unwrap_or_default();
             format!("Run `{command}{args_str}`{dir_str}")
         }
+        AgentOperation::SceneCommand { payload: _ } => {
+            format!("SceneCommand: controlled scene mutation")
+        }
     }
 }
 
@@ -2087,7 +2197,8 @@ fn recovery_hint_for_success(operation: &AgentOperation) -> &'static str {
         | AgentOperation::RemoveComponent { .. }
         | AgentOperation::DestroyObject { .. }
         | AgentOperation::AttachBehavior { .. }
-        | AgentOperation::MoveEntityTo { .. } => "Use editor undo to revert this operation.",
+        | AgentOperation::MoveEntityTo { .. }
+        | AgentOperation::SceneCommand { .. } => "Use editor undo to revert this operation.",
         AgentOperation::WriteScript { .. } | AgentOperation::WriteFile { .. } => {
             "Review the generated script under the asset root and use version control or file history to revert it."
         }
@@ -2175,6 +2286,9 @@ fn recovery_hint_for_failure(operation: &AgentOperation) -> &'static str {
         }
         AgentOperation::RunCommand { .. } => {
             "Check that the command exists and is accessible. Verify working directory and arguments."
+        }
+        AgentOperation::SceneCommand { .. } => {
+            "Review the ScenePatch console output for validation failures. Check entity IDs and component types."
         }
     }
 }

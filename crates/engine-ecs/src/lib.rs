@@ -16,6 +16,7 @@ pub mod physics;
 pub mod audio;
 
 pub use particle::{ParticleInstance, ParticleSystem};
+pub mod patch;
 pub use scene::{
     AcousticGeometryComponentData, AcousticMaterialComponentData, AcousticPortalComponentData,
     AcousticRoomComponentData, AnimationPlayerComponentData, AudioListenerComponentData,

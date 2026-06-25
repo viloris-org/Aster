@@ -1157,6 +1157,57 @@ mod tests {
     }
 }
 
+// ─── Stub Provider ───────────────────────────────────────────────────────────
+
+/// Deterministic stub provider for testing without API keys.
+/// Returns a simple response that triggers a basic edit operation.
+pub struct StubProvider {
+    /// Model identifier (stored for compatibility, unused in stub).
+    #[allow(dead_code)]
+    model: String,
+}
+
+impl StubProvider {
+    /// Creates a new stub provider.
+    pub fn new(model: &str) -> Self {
+        Self {
+            model: model.to_owned(),
+        }
+    }
+}
+
+impl AiModel for StubProvider {
+    fn chat(&self, request: AiRequest) -> EngineResult<AiResponse> {
+        self.chat_stream(request, &mut |_| {})
+    }
+
+    fn chat_stream(
+        &self,
+        request: AiRequest,
+        on_delta: &mut dyn FnMut(AiStreamDelta),
+    ) -> EngineResult<AiResponse> {
+        // Generate a deterministic stub response based on the request
+        let user_message = request
+            .messages
+            .last()
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
+
+        let response_text = format!(
+            "I'll create a simple test file in the workspace.\n\n```json\n{{\"operations\": [{{\"operation\": \"create_file\", \"path\": \"test_stub.txt\", \"content\": \"Stub provider generated this file for Quest testing.\\nUser request: {}\\n\"}}}}```",
+            user_message.chars().take(100).collect::<String>()
+        );
+
+        on_delta(AiStreamDelta::Text(response_text.clone()));
+
+        Ok(AiResponse {
+            content: response_text,
+            thinking: String::new(),
+            tool_calls: Vec::new(),
+        })
+    }
+}
+
 // ─── Provider Factory ──────────────────────────────────────────────────────
 
 /// Creates the appropriate `AiModel` implementation from a provider string,
@@ -1211,6 +1262,10 @@ pub fn create_provider(
             )?))
         }
         "ollama" => Ok(Box::new(OllamaProvider::new(model, endpoint))),
+        "stub" | "deterministic" => {
+            // Stub provider for testing without API keys - returns deterministic responses
+            Ok(Box::new(StubProvider::new(model)))
+        }
         "custom" => {
             // Custom uses OpenAI-compatible protocol with user-specified endpoint.
             let ep = endpoint.ok_or_else(|| {

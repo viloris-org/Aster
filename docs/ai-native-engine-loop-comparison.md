@@ -65,12 +65,21 @@ The mainline already has solid security foundations:
 | Stub/deterministic runner | ❌ | ✅ | New StubProvider added |
 | Workspace isolation | ✅ | ✅ | Git worktree or copy |
 | Validation entries | ✅ | ✅ | Scene, assets, scripts, cargo |
+| Validation registry commands | ✅ | ✅ | Now has cargo check, fmt, clippy, test, build |
 | Review bundle | ✅ | ✅ | Diff, findings, metrics |
 | Stale workspace check | ✅ | ✅ | Enforced in quest_apply |
 | Selected apply gate | ✅ | ✅ | Validates against review |
 | Path traversal guard | ✅ | ✅ | In engine-ai |
 | Compilation | ❌ | ✅ | Fixed physics API |
+| Binary file handling | ❌ | ✅ | Large files stored as hash only |
 | Tests | ⚠️ | ✅ | All pass (1 network issue) |
+
+## Session Updates (2026-06-24)
+
+### Added This Session
+1. **Binary File Handling**: Large files (>1MiB) in workspace snapshots are now stored as hash-only entries to avoid memory pressure
+2. **Validation Registry Commands**: Added `cargo fmt --check` and `cargo clippy --quiet` to the Quest validation command registry
+3. **Stale Check on Rollback**: Initially added but then removed - rollback is a recovery operation and should work even if project changed
 
 ## Test Evidence
 

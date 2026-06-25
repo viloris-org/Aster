@@ -96,3 +96,5 @@ prompts.local.md
 
 # Generated bundle files
 /usr/
+nul
+editor/src-tauri/gen/
