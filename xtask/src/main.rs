@@ -30,6 +30,7 @@ fn run() -> EngineResult<()> {
             "--features",
             "agent-tools",
         ]),
+        Some("vscene") => vscene(args.collect()),
         Some("varg-lsp") => cargo(["run", "-p", "engine-script-varg", "--bin", "varg-lsp"]),
         Some("viewport-perf") => cargo([
             "run",
@@ -46,9 +47,93 @@ fn run() -> EngineResult<()> {
             "unknown xtask command `{command}`"
         ))),
         None => Err(EngineError::config(
-            "expected xtask command: runtime-min, build-editor, agent-smoke, varg-lsp, viewport-perf, package, test, or check",
+            "expected xtask command: runtime-min, build-editor, agent-smoke, vscene, varg-lsp, viewport-perf, package, test, or check",
         )),
     }
+}
+
+fn vscene(args: Vec<String>) -> EngineResult<()> {
+    let mut iter = args.into_iter();
+    match iter.next().as_deref() {
+        Some("compile") => vscene_compile(iter.collect()),
+        Some("--help") | Some("-h") | None => {
+            print_vscene_help();
+            Ok(())
+        }
+        Some(command) => Err(EngineError::config(format!(
+            "unknown vscene command `{command}`"
+        ))),
+    }
+}
+
+fn vscene_compile(args: Vec<String>) -> EngineResult<()> {
+    let mut input = None;
+    let mut output = None;
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--out" | "-o" => {
+                let Some(value) = iter.next() else {
+                    return Err(EngineError::config("--out requires a value"));
+                };
+                output = Some(std::path::PathBuf::from(value));
+            }
+            "--help" | "-h" => {
+                print_vscene_help();
+                return Ok(());
+            }
+            value if input.is_none() => input = Some(std::path::PathBuf::from(value)),
+            other => {
+                return Err(EngineError::config(format!(
+                    "unknown vscene compile argument `{other}`"
+                )));
+            }
+        }
+    }
+
+    let Some(input) = input else {
+        return Err(EngineError::config("vscene compile requires an input file"));
+    };
+    let source = std::fs::read_to_string(&input).map_err(|source| EngineError::Filesystem {
+        path: input.clone(),
+        source,
+    })?;
+    let (json, diagnostics) = engine_script_varg::compile_vscene_source_to_json(&input, &source);
+    for diagnostic in &diagnostics {
+        eprintln!(
+            "{}:{}:{}: {}: {}",
+            input.display(),
+            diagnostic.line.unwrap_or(1),
+            diagnostic.column.unwrap_or(1),
+            diagnostic.code,
+            diagnostic.message
+        );
+    }
+    let Some(json) = json else {
+        return Err(EngineError::config(".vscene compilation failed"));
+    };
+    engine_ecs::Scene::from_json(&json)?;
+
+    if let Some(output) = output {
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| EngineError::Filesystem {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        std::fs::write(&output, json).map_err(|source| EngineError::Filesystem {
+            path: output.clone(),
+            source,
+        })?;
+        println!("Compiled {} -> {}", input.display(), output.display());
+    } else {
+        println!("{json}");
+    }
+    Ok(())
+}
+
+fn print_vscene_help() {
+    println!("usage: cargo xtask vscene compile INPUT.vscene [--out OUTPUT.scene.json]");
 }
 
 fn package(args: Vec<String>) -> EngineResult<()> {

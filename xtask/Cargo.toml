@@ -11,4 +11,5 @@ rust-version.workspace = true
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-packager.workspace = true
+engine-script-varg.workspace = true
 toml.workspace = true
