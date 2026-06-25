@@ -1,0 +1,47 @@
+// Particle system using loops to update multiple particles
+
+script ParticleSystem {
+    @export var particleCount: Int = 20
+    @export var emitRate: Float = 10.0
+    @export var particleLifetime: Float = 2.0
+    @export var gravity: Float = -9.8
+
+    var particlesActive: Int = 0
+    var timeSinceEmit: Float = 0.0
+
+    func start() {
+        // Initialize particle arrays in state
+        state.particlesActive = 0
+        state.timeSinceEmit = 0
+    }
+
+    func update(_ dt: Float) {
+        // Update emit timer
+        state.timeSinceEmit += dt
+
+        // Emit new particles
+        let emitInterval: Float = 1.0 / emitRate
+        while state.timeSinceEmit >= emitInterval {
+            if state.particlesActive < particleCount {
+                state.particlesActive += 1
+            }
+            state.timeSinceEmit -= emitInterval
+        }
+
+        // Simulate particles (simplified - just count alive)
+        var alive: Int = 0
+        for i in 0..particleCount {
+            if i < state.particlesActive {
+                alive += 1
+            }
+        }
+        state.aliveCount = alive
+
+        // Check for input to reset
+        if Input.down("Space") {
+            state.particlesActive = 0
+            state.timeSinceEmit = 0
+            return
+        }
+    }
+}

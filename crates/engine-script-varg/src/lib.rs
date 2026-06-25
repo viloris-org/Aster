@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use engine_core::math::{Transform, Vec3};
+use engine_core::math::{Quat, Transform, Vec3};
 
 /// Varg source role inferred from extension.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -203,6 +203,18 @@ enum RuntimeStatement {
         statements: Vec<RuntimeStatement>,
         else_statements: Vec<RuntimeStatement>,
     },
+    ForLoop {
+        variable: String,
+        range: RangeExpression,
+        body: Vec<RuntimeStatement>,
+    },
+    WhileLoop {
+        condition: ConditionExpression,
+        body: Vec<RuntimeStatement>,
+    },
+    Return(Expression),
+    Break,
+    Continue,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -259,6 +271,13 @@ enum CompareOp {
     GreaterThanOrEqual,
     LessThan,
     LessThanOrEqual,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum RangeExpression {
+    Range(Expression, Expression),          // i in 0..10
+    RangeInclusive(Expression, Expression), // i in 0..=10
+    Count(Expression),                      // i in count(10)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -341,6 +360,52 @@ pub fn compile_script_source(
     (Some(script), diagnostics)
 }
 
+/// Compiles a `.vscene` world file into the existing scene JSON format.
+///
+/// This is the authoring bridge for agent-friendly scene source. Runtime and
+/// editor loading can continue to consume the stable scene JSON schema.
+pub fn compile_vscene_source_to_json(
+    path: impl AsRef<Path>,
+    source: &str,
+) -> (Option<String>, Vec<VargDiagnostic>) {
+    let path = path.as_ref();
+    let (ast, mut diagnostics) = parse_source(path, source);
+    if ast.is_none() {
+        return (None, diagnostics);
+    }
+    let document = match parse_vscene_document(source) {
+        Ok(document) => document,
+        Err(error) => {
+            diagnostics.push(error);
+            return (None, diagnostics);
+        }
+    };
+    let Some(scene_block) = document.children.iter().find(|block| block.kind == "scene") else {
+        diagnostics.push(vscene_error(
+            source,
+            1,
+            1,
+            "VSCENE1000",
+            ".vscene file does not contain a scene declaration",
+            "`scene Name { ... }`",
+            "Add a top-level scene declaration.",
+        ));
+        return (None, diagnostics);
+    };
+
+    match compile_vscene_scene(scene_block) {
+        Ok(json) => (Some(json), diagnostics),
+        Err(mut error) => {
+            error.source_line = source
+                .lines()
+                .nth(error.line.unwrap_or(1).saturating_sub(1))
+                .map(str::to_string);
+            diagnostics.push(error);
+            (None, diagnostics)
+        }
+    }
+}
+
 impl VargScript {
     /// Executes a lifecycle hook if the script defines it.
     pub fn run_hook(&self, hook: &str, mut context: VargRuntimeContext) -> VargRuntimeOutput {
@@ -370,9 +435,15 @@ impl VargScript {
             state: &mut output.state,
             locals: HashMap::new(),
             logs: &mut output.logs,
+            should_return: false,
+            should_break: false,
+            should_continue: false,
         };
         for statement in statements {
             env.execute(statement);
+            if env.should_return {
+                break;
+            }
         }
         output
     }
@@ -724,6 +795,555 @@ fn parse_quoted(value: &str) -> Option<String> {
     Some(value[..end].to_string())
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct VsceneDocument {
+    children: Vec<VsceneBlock>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct VsceneBlock {
+    kind: String,
+    name: Option<String>,
+    line: usize,
+    properties: HashMap<String, VsceneValue>,
+    children: Vec<VsceneBlock>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum VsceneValue {
+    Number(f32),
+    Bool(bool),
+    String(String),
+    Identifier(String),
+    Vec3(Vec3),
+    Color(Vec3),
+    Call {
+        function: String,
+        args: HashMap<String, VsceneValue>,
+    },
+}
+
+fn parse_vscene_document(source: &str) -> Result<VsceneDocument, VargDiagnostic> {
+    let mut stack: Vec<VsceneBlock> = Vec::new();
+    let mut document = VsceneDocument::default();
+
+    for (line_index, raw_line) in source.lines().enumerate() {
+        let line = line_index + 1;
+        let without_comment = strip_line_comment(raw_line);
+        let trimmed = without_comment.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed == "}" {
+            let Some(block) = stack.pop() else {
+                return Err(vscene_error(
+                    source,
+                    line,
+                    1,
+                    "VSCENE1001",
+                    "unexpected closing brace",
+                    "A closing brace must match an open block.",
+                    "Remove this brace or add the missing block header before it.",
+                ));
+            };
+            if let Some(parent) = stack.last_mut() {
+                parent.children.push(block);
+            } else {
+                document.children.push(block);
+            }
+            continue;
+        }
+
+        if let Some(header) = parse_header(trimmed) {
+            stack.push(VsceneBlock {
+                kind: header.kind,
+                name: header.name,
+                line,
+                properties: HashMap::new(),
+                children: Vec::new(),
+            });
+            continue;
+        }
+
+        if let Some((key, value)) = trimmed.split_once(':') {
+            let Some(block) = stack.last_mut() else {
+                return Err(vscene_error(
+                    source,
+                    line,
+                    1,
+                    "VSCENE1002",
+                    "property declared outside a block",
+                    "`property: value` inside a block",
+                    "Move this property inside a scene, entity, or component block.",
+                ));
+            };
+            let parsed = parse_vscene_value(value.trim()).ok_or_else(|| {
+                vscene_error(
+                    source,
+                    line,
+                    raw_line.find(':').map(|index| index + 2).unwrap_or(1),
+                    "VSCENE1003",
+                    "unsupported .vscene value syntax",
+                    "Use numbers, booleans, strings, identifiers, Vec3(...), Color(...), or Constructor(key: value).",
+                    "Simplify the value or add compiler support for this construct.",
+                )
+            })?;
+            block.properties.insert(key.trim().to_string(), parsed);
+            continue;
+        }
+
+        return Err(vscene_error(
+            source,
+            line,
+            1,
+            "VSCENE1004",
+            "unsupported .vscene statement",
+            "Use `block Name { ... }`, `property: value`, or `}`.",
+            "Rewrite this line using the declarative .vscene block syntax.",
+        ));
+    }
+
+    if let Some(block) = stack.last() {
+        return Err(vscene_error(
+            source,
+            block.line,
+            1,
+            "VSCENE1005",
+            "unclosed .vscene block",
+            "Every `{` must be paired with a closing `}`.",
+            "Add a closing brace for this block.",
+        ));
+    }
+
+    Ok(document)
+}
+
+fn compile_vscene_scene(scene_block: &VsceneBlock) -> Result<String, VargDiagnostic> {
+    let mut file = serde_json::json!({
+        "version": 1,
+        "name": scene_block.name.clone().unwrap_or_else(|| "Scene".to_string()),
+        "objects": [],
+    });
+    let objects = file
+        .get_mut("objects")
+        .and_then(serde_json::Value::as_array_mut)
+        .expect("objects array exists");
+    let mut next_id = 1_u64;
+
+    for child in &scene_block.children {
+        match child.kind.as_str() {
+            "camera" | "entity" => {
+                objects.push(compile_vscene_object(child, next_id)?);
+                next_id += 1;
+            }
+            "group" => {
+                for nested in &child.children {
+                    if matches!(nested.kind.as_str(), "camera" | "entity") {
+                        objects.push(compile_vscene_object(nested, next_id)?);
+                        next_id += 1;
+                    }
+                }
+            }
+            "intent" | "constraints" | "scatter" => {}
+            _ => {
+                return Err(vscene_compile_error(
+                    child,
+                    "VSCENE2000",
+                    &format!("unsupported scene child block `{}`", child.kind),
+                    "`camera`, `entity`, `group`, or future generator blocks",
+                    "Use an entity-like block supported by the compiler.",
+                ));
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&file).map_err(|error| VargDiagnostic {
+        code: "VSCENE9000".to_string(),
+        severity: VargDiagnosticSeverity::Error,
+        line: Some(scene_block.line),
+        column: Some(1),
+        message: format!("scene JSON serialization failed: {error}"),
+        expected: "serializable scene document".to_string(),
+        suggestion: "Report this compiler bug with the source file.".to_string(),
+        blocking: true,
+        source_line: None,
+    })
+}
+
+fn compile_vscene_object(
+    block: &VsceneBlock,
+    id: u64,
+) -> Result<serde_json::Value, VargDiagnostic> {
+    let name = block
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("{} {id}", block.kind));
+    let mut tag = string_property(block, "tag").unwrap_or_else(|| "Untagged".to_string());
+    let mut camera_role = serde_json::Value::Null;
+    let mut components = Vec::new();
+    let mut transform = Transform::IDENTITY;
+
+    if block.kind == "camera" {
+        tag = "MainCamera".to_string();
+        camera_role = serde_json::json!("Main");
+        components.push(compile_camera_component(block));
+    }
+
+    for child in &block.children {
+        match child.kind.as_str() {
+            "transform" => transform = compile_vscene_transform(child),
+            "perspective" => upsert_component(&mut components, compile_camera_component(child)),
+            "material" => upsert_component(
+                &mut components,
+                compile_mesh_renderer_component(Some(child)),
+            ),
+            "rigidbody" => components.push(compile_rigidbody_component(child)),
+            "collider" => components.push(compile_collider_component(child)),
+            "script" => components.push(compile_script_component(child)),
+            "light" => components.push(compile_light_component(child)),
+            _ => {
+                return Err(vscene_compile_error(
+                    child,
+                    "VSCENE2001",
+                    &format!("unsupported object child block `{}`", child.kind),
+                    "`transform`, `perspective`, `material`, `rigidbody`, `collider`, `script`, or `light`",
+                    "Use a supported component block or extend the .vscene compiler.",
+                ));
+            }
+        }
+    }
+
+    if block.properties.contains_key("mesh")
+        && !components.iter().any(|component| {
+            component.get("type").and_then(serde_json::Value::as_str) == Some("MeshRenderer")
+        })
+    {
+        components.push(compile_mesh_renderer_component(None));
+    }
+
+    Ok(serde_json::json!({
+        "object": {
+            "id": id,
+            "name": name,
+            "tag": tag,
+            "layer": 0,
+            "camera_role": camera_role,
+            "active": true,
+            "scripts": [],
+            "components": components,
+        },
+        "local_transform": transform_json(transform),
+        "parent": null,
+        "sibling_index": id - 1,
+    }))
+}
+
+fn compile_vscene_transform(block: &VsceneBlock) -> Transform {
+    let mut transform = Transform::IDENTITY;
+    if let Some(position) = vec3_property(block, "position") {
+        transform.translation = position;
+    }
+    if let Some(rotation) = vec3_property(block, "rotation") {
+        transform.rotation = Quat::from_euler_deg(rotation.y, rotation.x, rotation.z);
+    }
+    if let Some(scale) = vec3_property(block, "scale") {
+        transform.scale = scale;
+    }
+    transform
+}
+
+fn compile_camera_component(block: &VsceneBlock) -> serde_json::Value {
+    serde_json::json!({
+        "type": "Camera",
+        "data": {
+            "vertical_fov_degrees": number_property(block, "fov").unwrap_or(60.0),
+            "near": number_property(block, "near").unwrap_or(0.01),
+            "far": number_property(block, "far").unwrap_or(1000.0),
+            "aspect_ratio": null,
+            "primary": bool_property(block, "primary").unwrap_or(true),
+            "clear_color": vec3_json(Vec3::new(0.1, 0.1, 0.1)),
+        }
+    })
+}
+
+fn compile_mesh_renderer_component(material: Option<&VsceneBlock>) -> serde_json::Value {
+    let builtin = material
+        .and_then(|block| string_property(block, "builtin"))
+        .unwrap_or_else(|| "debug/default".to_string());
+    serde_json::json!({
+        "type": "MeshRenderer",
+        "data": {
+            "mesh": null,
+            "builtin_mesh": "debug/cube",
+            "material": {
+                "asset": null,
+                "builtin": builtin,
+            },
+            "casts_shadows": true,
+            "receive_shadows": true,
+        }
+    })
+}
+
+fn compile_rigidbody_component(block: &VsceneBlock) -> serde_json::Value {
+    serde_json::json!({
+        "type": "Rigidbody",
+        "data": {
+            "body_type": identifier_property(block, "mode").unwrap_or_else(|| "dynamic".to_string()),
+            "mass": number_property(block, "mass").unwrap_or(1.0),
+            "use_gravity": bool_property(block, "useGravity").unwrap_or(true),
+            "linear_damping": 0.0,
+            "angular_damping": 0.05,
+            "lock_position": [false, false, false],
+            "lock_rotation": [false, false, false],
+        }
+    })
+}
+
+fn compile_collider_component(block: &VsceneBlock) -> serde_json::Value {
+    serde_json::json!({
+        "type": "Collider",
+        "data": {
+            "shape": identifier_property(block, "shape").unwrap_or_else(|| "box".to_string()),
+            "size": vec3_json(vec3_property(block, "size").unwrap_or(Vec3::ONE)),
+            "is_trigger": bool_property(block, "isTrigger").unwrap_or(false),
+            "mask": u32::MAX,
+            "physics_material": "default",
+        }
+    })
+}
+
+fn compile_script_component(block: &VsceneBlock) -> serde_json::Value {
+    let mut exported = serde_json::Map::new();
+    for (key, value) in &block.properties {
+        if key == "source" {
+            continue;
+        }
+        exported.insert(key.clone(), vscene_value_to_json(value));
+    }
+    serde_json::json!({
+        "type": "Script",
+        "data": {
+            "source": string_property(block, "source").unwrap_or_default(),
+            "exported_values": exported,
+            "state": {},
+        }
+    })
+}
+
+fn compile_light_component(block: &VsceneBlock) -> serde_json::Value {
+    serde_json::json!({
+        "type": "Light",
+        "data": {
+            "color": vec3_json(vec3_property(block, "color").unwrap_or(Vec3::ONE)),
+            "intensity": number_property(block, "intensity").unwrap_or(1.0),
+            "kind": identifier_property(block, "type").unwrap_or_else(|| "point".to_string()),
+            "range": number_property(block, "range").unwrap_or(10.0),
+            "spot_angle": number_property(block, "spotAngle").unwrap_or(30.0),
+        }
+    })
+}
+
+fn upsert_component(components: &mut Vec<serde_json::Value>, component: serde_json::Value) {
+    let component_type = component.get("type").and_then(serde_json::Value::as_str);
+    if let Some(existing) = components.iter_mut().find(|candidate| {
+        candidate.get("type").and_then(serde_json::Value::as_str) == component_type
+    }) {
+        *existing = component;
+    } else {
+        components.push(component);
+    }
+}
+
+fn parse_vscene_value(source: &str) -> Option<VsceneValue> {
+    let source = source.trim();
+    if source == "true" {
+        return Some(VsceneValue::Bool(true));
+    }
+    if source == "false" {
+        return Some(VsceneValue::Bool(false));
+    }
+    if let Ok(number) = source.parse::<f32>() {
+        return Some(VsceneValue::Number(number));
+    }
+    if let Some(value) = parse_string_literal(source) {
+        return Some(VsceneValue::String(value));
+    }
+    if let Some(args) = source
+        .strip_prefix("Vec3(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let parts = split_top_level_commas(args);
+        if parts.len() == 3 {
+            return Some(VsceneValue::Vec3(Vec3::new(
+                parts[0].trim().parse().ok()?,
+                parts[1].trim().parse().ok()?,
+                parts[2].trim().parse().ok()?,
+            )));
+        }
+    }
+    if let Some(args) = source
+        .strip_prefix("Color(")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        let raw = parse_string_literal(args.trim())?;
+        return parse_hex_color(&raw).map(VsceneValue::Color);
+    }
+    if let Some((function, args)) = parse_expression_call(source) {
+        let mut parsed_args = HashMap::new();
+        for arg in split_top_level_commas(args) {
+            let (key, value) = arg.split_once(':')?;
+            parsed_args.insert(key.trim().to_string(), parse_vscene_value(value.trim())?);
+        }
+        return Some(VsceneValue::Call {
+            function: function.to_string(),
+            args: parsed_args,
+        });
+    }
+    is_vscene_identifier(source).then(|| VsceneValue::Identifier(source.to_string()))
+}
+
+fn is_vscene_identifier(source: &str) -> bool {
+    let mut chars = source.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| {
+            ch == '_' || ch == '-' || ch == '/' || ch == '.' || ch.is_ascii_alphanumeric()
+        })
+}
+
+fn parse_hex_color(source: &str) -> Option<Vec3> {
+    let hex = source.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32 / 255.0;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32 / 255.0;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32 / 255.0;
+    Some(Vec3::new(r, g, b))
+}
+
+fn number_property(block: &VsceneBlock, key: &str) -> Option<f32> {
+    match block.properties.get(key)? {
+        VsceneValue::Number(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn bool_property(block: &VsceneBlock, key: &str) -> Option<bool> {
+    match block.properties.get(key)? {
+        VsceneValue::Bool(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn string_property(block: &VsceneBlock, key: &str) -> Option<String> {
+    match block.properties.get(key)? {
+        VsceneValue::String(value) | VsceneValue::Identifier(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn identifier_property(block: &VsceneBlock, key: &str) -> Option<String> {
+    match block.properties.get(key)? {
+        VsceneValue::Identifier(value) | VsceneValue::String(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn vec3_property(block: &VsceneBlock, key: &str) -> Option<Vec3> {
+    match block.properties.get(key)? {
+        VsceneValue::Vec3(value) | VsceneValue::Color(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn vscene_value_to_json(value: &VsceneValue) -> serde_json::Value {
+    match value {
+        VsceneValue::Number(value) => serde_json::json!(value),
+        VsceneValue::Bool(value) => serde_json::json!(value),
+        VsceneValue::String(value) | VsceneValue::Identifier(value) => serde_json::json!(value),
+        VsceneValue::Vec3(value) | VsceneValue::Color(value) => vec3_json(*value),
+        VsceneValue::Call { function, args } => {
+            let mut object = serde_json::Map::new();
+            object.insert("type".to_string(), serde_json::json!(function));
+            for (key, value) in args {
+                object.insert(key.clone(), vscene_value_to_json(value));
+            }
+            serde_json::Value::Object(object)
+        }
+    }
+}
+
+fn transform_json(transform: Transform) -> serde_json::Value {
+    serde_json::json!({
+        "translation": vec3_json(transform.translation),
+        "rotation": {
+            "x": transform.rotation.x,
+            "y": transform.rotation.y,
+            "z": transform.rotation.z,
+            "w": transform.rotation.w,
+        },
+        "scale": vec3_json(transform.scale),
+    })
+}
+
+fn vec3_json(value: Vec3) -> serde_json::Value {
+    serde_json::json!({
+        "x": value.x,
+        "y": value.y,
+        "z": value.z,
+    })
+}
+
+fn vscene_compile_error(
+    block: &VsceneBlock,
+    code: &str,
+    message: &str,
+    expected: &str,
+    suggestion: &str,
+) -> VargDiagnostic {
+    VargDiagnostic {
+        code: code.to_string(),
+        severity: VargDiagnosticSeverity::Error,
+        line: Some(block.line),
+        column: Some(1),
+        message: message.to_string(),
+        expected: expected.to_string(),
+        suggestion: suggestion.to_string(),
+        blocking: true,
+        source_line: None,
+    }
+}
+
+fn vscene_error(
+    source: &str,
+    line: usize,
+    column: usize,
+    code: &str,
+    message: &str,
+    expected: &str,
+    suggestion: &str,
+) -> VargDiagnostic {
+    VargDiagnostic {
+        code: code.to_string(),
+        severity: VargDiagnosticSeverity::Error,
+        line: Some(line),
+        column: Some(column),
+        message: message.to_string(),
+        expected: expected.to_string(),
+        suggestion: suggestion.to_string(),
+        blocking: true,
+        source_line: source
+            .lines()
+            .nth(line.saturating_sub(1))
+            .map(str::to_string),
+    }
+}
+
 fn starts_imperative(line: &str) -> bool {
     matches!(
         line.split_whitespace().next(),
@@ -772,10 +1392,19 @@ struct RuntimeEnvironment<'a> {
     state: &'a mut HashMap<String, serde_json::Value>,
     locals: HashMap<String, serde_json::Value>,
     logs: &'a mut Vec<String>,
+    /// When true, the current function should return.
+    should_return: bool,
+    /// When true, the current loop should break.
+    should_break: bool,
+    /// When true, skip to the next loop iteration.
+    should_continue: bool,
 }
 
 impl RuntimeEnvironment<'_> {
     fn execute(&mut self, statement: &RuntimeStatement) {
+        if self.should_return {
+            return;
+        }
         match statement {
             RuntimeStatement::Log(message) => self.logs.push(message.clone()),
             RuntimeStatement::Translate(expression) => {
@@ -851,7 +1480,77 @@ impl RuntimeEnvironment<'_> {
                 };
                 for statement in branch {
                     self.execute(statement);
+                    if self.should_return || self.should_break || self.should_continue {
+                        break;
+                    }
                 }
+            }
+            RuntimeStatement::ForLoop {
+                variable,
+                range,
+                body,
+            } => {
+                let (start, end, inclusive) = match range {
+                    RangeExpression::Range(s, e) => (
+                        self.eval_number(s) as i32,
+                        self.eval_number(e) as i32,
+                        false,
+                    ),
+                    RangeExpression::RangeInclusive(s, e) => {
+                        (self.eval_number(s) as i32, self.eval_number(e) as i32, true)
+                    }
+                    RangeExpression::Count(n) => (0, self.eval_number(n) as i32, false),
+                };
+
+                let limit = if inclusive { end + 1 } else { end };
+                for i in start..limit {
+                    self.locals
+                        .insert(variable.clone(), serde_json::Value::from(i as f64));
+                    self.should_continue = false;
+
+                    for statement in body {
+                        self.execute(statement);
+                        if self.should_return || self.should_break || self.should_continue {
+                            break;
+                        }
+                    }
+
+                    if self.should_return || self.should_break {
+                        break;
+                    }
+                }
+                self.should_break = false;
+                self.locals.remove(variable);
+            }
+            RuntimeStatement::WhileLoop { condition, body } => {
+                const MAX_ITERATIONS: usize = 10000;
+                let mut iterations = 0;
+
+                while self.eval_condition(condition) && iterations < MAX_ITERATIONS {
+                    iterations += 1;
+                    self.should_continue = false;
+
+                    for statement in body {
+                        self.execute(statement);
+                        if self.should_return || self.should_break || self.should_continue {
+                            break;
+                        }
+                    }
+
+                    if self.should_return || self.should_break {
+                        break;
+                    }
+                }
+                self.should_break = false;
+            }
+            RuntimeStatement::Return(_) => {
+                self.should_return = true;
+            }
+            RuntimeStatement::Break => {
+                self.should_break = true;
+            }
+            RuntimeStatement::Continue => {
+                self.should_continue = true;
             }
         }
     }
@@ -1106,6 +1805,25 @@ fn parse_runtime_statements(lines: &[String], index: &mut usize) -> Vec<RuntimeS
             });
             continue;
         }
+        if let Some((variable, range)) = parse_for_loop(trimmed) {
+            let body = collect_inline_or_block(lines, index);
+            let mut body_index = 0usize;
+            statements.push(RuntimeStatement::ForLoop {
+                variable,
+                range,
+                body: parse_runtime_statements(&body, &mut body_index),
+            });
+            continue;
+        }
+        if let Some(condition) = parse_while_loop(trimmed) {
+            let body = collect_inline_or_block(lines, index);
+            let mut body_index = 0usize;
+            statements.push(RuntimeStatement::WhileLoop {
+                condition,
+                body: parse_runtime_statements(&body, &mut body_index),
+            });
+            continue;
+        }
         if let Some(statement) = parse_runtime_statement(trimmed) {
             statements.push(statement);
         }
@@ -1114,6 +1832,18 @@ fn parse_runtime_statements(lines: &[String], index: &mut usize) -> Vec<RuntimeS
 }
 
 fn parse_runtime_statement(line: &str) -> Option<RuntimeStatement> {
+    if line.trim() == "break" {
+        return Some(RuntimeStatement::Break);
+    }
+    if line.trim() == "continue" {
+        return Some(RuntimeStatement::Continue);
+    }
+    if let Some(expr) = line.strip_prefix("return ") {
+        return Some(RuntimeStatement::Return(parse_expression(expr.trim())?));
+    }
+    if line.trim() == "return" {
+        return Some(RuntimeStatement::Return(Expression::Number(0.0)));
+    }
     if let Some(content) = function_args(line, "log") {
         return parse_string_literal(content).map(RuntimeStatement::Log);
     }
@@ -1727,6 +2457,43 @@ fn default_action_keys(action: &str) -> Option<&'static [engine_platform::KeyCod
     }
 }
 
+fn parse_for_loop(line: &str) -> Option<(String, RangeExpression)> {
+    let rest = line.strip_prefix("for ")?.trim();
+    let (loop_part, _) = rest.split_once('{').unwrap_or((rest, ""));
+    let loop_part = loop_part.trim();
+
+    let (variable, range_part) = loop_part.split_once(" in ")?;
+    let variable = variable.trim().to_string();
+    let range_part = range_part.trim();
+
+    // Parse count(n) syntax
+    if let Some(count_expr) = function_args(range_part, "count") {
+        let expr = parse_expression(count_expr)?;
+        return Some((variable, RangeExpression::Count(expr)));
+    }
+
+    // Parse range expressions: a..b or a..=b
+    if let Some((start_str, end_str)) = range_part.split_once("..=") {
+        let start = parse_expression(start_str.trim())?;
+        let end = parse_expression(end_str.trim())?;
+        return Some((variable, RangeExpression::RangeInclusive(start, end)));
+    }
+
+    if let Some((start_str, end_str)) = range_part.split_once("..") {
+        let start = parse_expression(start_str.trim())?;
+        let end = parse_expression(end_str.trim())?;
+        return Some((variable, RangeExpression::Range(start, end)));
+    }
+
+    None
+}
+
+fn parse_while_loop(line: &str) -> Option<ConditionExpression> {
+    let rest = line.strip_prefix("while ")?.trim();
+    let condition = rest.strip_suffix('{').unwrap_or(rest).trim();
+    parse_condition_expression(condition)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1790,6 +2557,69 @@ mod tests {
         assert!(diagnostics.is_empty());
         let ast = ast.unwrap();
         assert_eq!(ast.declarations[0].exports[0].name, "jumpForce");
+    }
+
+    #[test]
+    fn compiles_vscene_to_scene_json() {
+        let source = r##"scene Example {
+    camera "Main Camera" {
+        transform {
+            position: Vec3(0, 1.5, -6)
+        }
+
+        perspective {
+            fov: 60
+            near: 0.01
+            far: 1000
+        }
+
+        primary: true
+    }
+
+    entity "Player" {
+        tag: "Player"
+
+        transform {
+            position: Vec3(0, 0, 0)
+        }
+
+        mesh: Box(size: Vec3(1, 1, 1))
+
+        material {
+            baseColor: Color("#7aa2ff")
+            roughness: 0.7
+        }
+
+        rigidbody {
+            mode: kinematic
+        }
+
+        collider {
+            shape: box
+            size: Vec3(1, 1, 1)
+        }
+
+        script PlayerController {
+            source: "scripts/player_controller.varg"
+            speed: 6.0
+            jumpForce: 8.0
+        }
+    }
+}
+"##;
+
+        let (json, diagnostics) = compile_vscene_source_to_json("scenes/example.vscene", source);
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let json = json.unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["name"], "Example");
+        assert_eq!(value["objects"].as_array().unwrap().len(), 2);
+        assert_eq!(value["objects"][1]["object"]["name"], "Player");
+        assert_eq!(
+            value["objects"][1]["object"]["components"][3]["data"]["source"],
+            "scripts/player_controller.varg"
+        );
     }
 
     #[test]
@@ -2017,6 +2847,320 @@ mod tests {
                 .get("released")
                 .and_then(|value| value.as_f64()),
             Some(1.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_for_loops_with_range() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/counter.varg",
+            r#"script Counter {
+    var sum: Int = 0
+
+    func update(_ dt: Float) {
+        for i in 1..5 {
+            state.sum += i
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        // 1 + 2 + 3 + 4 = 10
+        assert_eq!(
+            output.state.get("sum").and_then(|value| value.as_f64()),
+            Some(10.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_for_loops_with_inclusive_range() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/counter.varg",
+            r#"script Counter {
+    var sum: Int = 0
+
+    func update(_ dt: Float) {
+        for i in 1..=5 {
+            state.sum += i
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        // 1 + 2 + 3 + 4 + 5 = 15
+        assert_eq!(
+            output.state.get("sum").and_then(|value| value.as_f64()),
+            Some(15.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_for_loops_with_count() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/spawner.varg",
+            r#"script Spawner {
+    var count: Int = 0
+
+    func update(_ dt: Float) {
+        for i in count(3) {
+            state.count += 1
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        assert_eq!(
+            output.state.get("count").and_then(|value| value.as_f64()),
+            Some(3.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_while_loops() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/countdown.varg",
+            r#"script Countdown {
+    var counter: Int = 5
+
+    func update(_ dt: Float) {
+        while state.counter > 0 {
+            state.counter -= 1
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        assert_eq!(
+            output.state.get("counter").and_then(|value| value.as_f64()),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_break_in_loops() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/breaker.varg",
+            r#"script Breaker {
+    var sum: Int = 0
+
+    func update(_ dt: Float) {
+        for i in 0..10 {
+            if i >= 5 {
+                break
+            }
+            state.sum += i
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        // 0 + 1 + 2 + 3 + 4 = 10
+        assert_eq!(
+            output.state.get("sum").and_then(|value| value.as_f64()),
+            Some(10.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_continue_in_loops() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/skipper.varg",
+            r#"script Skipper {
+    var sum: Int = 0
+
+    func update(_ dt: Float) {
+        for i in 0..10 {
+            if i == 2 || i == 5 {
+                continue
+            }
+            state.sum += i
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        // 0 + 1 + 3 + 4 + 6 + 7 + 8 + 9 = 38
+        assert_eq!(
+            output.state.get("sum").and_then(|value| value.as_f64()),
+            Some(38.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_return_early() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/early_exit.varg",
+            r#"script EarlyExit {
+    var executed: Int = 0
+
+    func update(_ dt: Float) {
+        state.executed = 1
+        if state.executed == 1 {
+            return
+        }
+        state.executed = 2
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        assert_eq!(
+            output
+                .state
+                .get("executed")
+                .and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn runtime_supports_nested_loops() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/nested.varg",
+            r#"script Nested {
+    var sum: Int = 0
+
+    func update(_ dt: Float) {
+        for i in 0..3 {
+            for j in 0..2 {
+                state.sum += i + j
+            }
+        }
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+            },
+        );
+
+        // (0+0) + (0+1) + (1+0) + (1+1) + (2+0) + (2+1) = 0 + 1 + 1 + 2 + 2 + 3 = 9
+        assert_eq!(
+            output.state.get("sum").and_then(|value| value.as_f64()),
+            Some(9.0)
         );
     }
 

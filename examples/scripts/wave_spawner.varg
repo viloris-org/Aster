@@ -1,0 +1,92 @@
+// Enemy wave spawner with complex loop logic
+
+script WaveSpawner {
+    @export var enemiesPerWave: Int = 5
+    @export var maxWaves: Int = 10
+    @export var timeBetweenWaves: Float = 5.0
+    @export var spawnRadius: Float = 10.0
+
+    var currentWave: Int = 0
+    var waveTimer: Float = 0.0
+    var enemiesSpawned: Int = 0
+    var isSpawning: Bool = false
+
+    func start() {
+        state.currentWave = 0
+        state.waveTimer = timeBetweenWaves
+        state.enemiesSpawned = 0
+        state.isSpawning = 0
+        log("Wave spawner initialized")
+    }
+
+    func update(_ dt: Float) {
+        // Check if all waves completed
+        if state.currentWave >= maxWaves {
+            log("All waves completed!")
+            return
+        }
+
+        state.waveTimer -= dt
+
+        // Start new wave
+        if state.waveTimer <= 0 && state.isSpawning == 0 {
+            state.currentWave += 1
+            state.isSpawning = 1
+            state.enemiesSpawned = 0
+            log("Starting wave")
+        }
+
+        // Spawn enemies in current wave
+        if state.isSpawning == 1 {
+            let enemiesToSpawn: Int = enemiesPerWave + state.currentWave
+
+            // Spawn all enemies for this wave
+            for i in 0..enemiesToSpawn {
+                if state.enemiesSpawned >= enemiesToSpawn {
+                    break
+                }
+
+                // Calculate spawn position in a circle
+                let angle: Float = (state.enemiesSpawned * 360) / enemiesToSpawn
+                let radians: Float = angle * 0.01745329
+
+                state.enemiesSpawned += 1
+            }
+
+            // Wave finished spawning
+            if state.enemiesSpawned >= enemiesToSpawn {
+                state.isSpawning = 0
+                state.waveTimer = timeBetweenWaves
+            }
+        }
+
+        // Visual feedback - pulse the spawner
+        let pulse: Float = sin(Time.time * 3.0) * 0.2
+        position.y = 1.0 + pulse
+    }
+
+    func fixedUpdate(_ dt: Float) {
+        // Process enemy updates in batches
+        if state.isSpawning == 0 {
+            return
+        }
+
+        // Check for enemies in range (simplified)
+        var enemiesInRange: Int = 0
+        for i in 0..100 {
+            // Early exit if we've checked enough
+            if i >= state.enemiesSpawned {
+                break
+            }
+
+            // Skip dead enemies (simplified check)
+            if i % 7 == 0 {
+                continue
+            }
+
+            enemiesInRange += 1
+        }
+
+        state.enemiesInRange = enemiesInRange
+    }
+}
