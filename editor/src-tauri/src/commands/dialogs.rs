@@ -9,6 +9,16 @@ pub(crate) async fn select_project_location() -> Result<Option<String>, String> 
 }
 
 #[tauri::command]
+pub(crate) async fn select_existing_project() -> Result<Option<String>, String> {
+    let folder = rfd::AsyncFileDialog::new()
+        .set_title("Open Varg Project")
+        .pick_folder()
+        .await;
+
+    Ok(folder.map(|f| f.path().to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
 pub(crate) async fn open_scene_dialog() -> Result<Option<String>, String> {
     let file = rfd::AsyncFileDialog::new()
         .add_filter("Varg Scene", &["vscene"])

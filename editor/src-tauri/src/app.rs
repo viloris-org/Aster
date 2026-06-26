@@ -206,6 +206,7 @@ pub fn run() {
             crate::commands::viewport::open_wayland_embedded_compositor_scene_view,
             crate::commands::viewport::open_editor_compositor_scene_view,
             crate::commands::dialogs::select_project_location,
+            crate::commands::dialogs::select_existing_project,
             crate::commands::viewport::viewport_readback_raw,
             crate::commands::dialogs::open_scene_dialog,
             crate::commands::dialogs::import_asset_dialog,

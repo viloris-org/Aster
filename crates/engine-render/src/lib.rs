@@ -453,6 +453,9 @@ impl RenderWorld {
                                     .map(|id| format!("asset:{:032x}", id.as_u128()))
                             })
                             .unwrap_or_default();
+                        if let Some(params) = parse_vscene_material_params(&material_name) {
+                            world.material_params.insert(material_name.clone(), params);
+                        }
                         let material_name = if let Some(fluid) = fluid_volume {
                             let material_name = format!("@water:{}", obj.id.as_u128());
                             let (base_color, metallic, roughness, emissive) =
@@ -600,6 +603,49 @@ impl RenderWorld {
 
         world
     }
+}
+
+fn parse_vscene_material_params(material: &str) -> Option<RenderMaterialParams> {
+    let source = material.strip_prefix("@vscene-material:")?;
+    let mut base_color = [1.0, 1.0, 1.0, 1.0];
+    let mut metallic = 0.0;
+    let mut roughness = 0.5;
+    let mut emissive = [0.0, 0.0, 0.0];
+
+    for part in source.split(';') {
+        let (key, value) = part.split_once('=')?;
+        match key {
+            "base" => {
+                let values = parse_f32_list(value);
+                if values.len() == 4 {
+                    base_color = [values[0], values[1], values[2], values[3]];
+                }
+            }
+            "metallic" => metallic = value.parse().ok()?,
+            "roughness" => roughness = value.parse().ok()?,
+            "emissive" => {
+                let values = parse_f32_list(value);
+                if values.len() == 3 {
+                    emissive = [values[0], values[1], values[2]];
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Some(RenderMaterialParams {
+        base_color,
+        metallic,
+        roughness,
+        emissive,
+    })
+}
+
+fn parse_f32_list(source: &str) -> Vec<f32> {
+    source
+        .split(',')
+        .filter_map(|part| part.parse::<f32>().ok())
+        .collect()
 }
 
 /// Render backend abstraction.
@@ -1081,6 +1127,38 @@ mod tests {
         assert_eq!(params.base_color[3], 0.62);
         assert_eq!(params.metallic, 0.9);
         assert_eq!(params.roughness, 0.04);
+    }
+
+    #[test]
+    fn extracts_vscene_inline_material_params() {
+        let mut scene = Scene::new();
+        let entity = scene.create_object("Inline Material").unwrap();
+        let material =
+            "@vscene-material:base=0.25,0.5,0.75,1;metallic=0.1;roughness=0.35;emissive=0.2,0.1,0";
+        scene
+            .upsert_component(
+                entity,
+                ComponentData::MeshRenderer(engine_ecs::MeshRendererComponentData {
+                    builtin_mesh: Some("debug/cube".to_string()),
+                    material: engine_ecs::MaterialRef {
+                        asset: None,
+                        builtin: Some(material.to_string()),
+                    },
+                    casts_shadows: true,
+                    receive_shadows: true,
+                    ..engine_ecs::MeshRendererComponentData::default()
+                }),
+            )
+            .unwrap();
+
+        let world = RenderWorld::extract(&scene);
+        let params = world.material_params.get(material).unwrap();
+
+        assert_eq!(world.objects[0].material, material);
+        assert_eq!(params.base_color, [0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(params.metallic, 0.1);
+        assert_eq!(params.roughness, 0.35);
+        assert_eq!(params.emissive, [0.2, 0.1, 0.0]);
     }
 
     #[test]

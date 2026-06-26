@@ -221,38 +221,13 @@ struct GameApp {
 
 impl ApplicationHandler for GameApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
-        }
-        let attrs = WindowAttributes::default()
-            .with_title(&self.title)
-            .with_inner_size(winit::dpi::LogicalSize::new(self.width, self.height));
-        let window = match event_loop.create_window(attrs) {
-            Ok(w) => w,
-            Err(e) => {
-                let _ = self
-                    .event_tx
-                    .send(GameEvent::Error(format!("create window: {e}")));
-                event_loop.exit();
-                return;
-            }
-        };
-
-        self.window = Some(window);
-        let Some(snapshot) = self.pending_snapshot.take() else {
-            let _ = self.event_tx.send(GameEvent::Error(
-                "missing initial runtime snapshot".to_owned(),
-            ));
-            event_loop.exit();
-            return;
-        };
-        if let Err(error) = self.install_runtime(snapshot) {
+        if let Err(error) = self.create_window_and_install_runtime(event_loop) {
             let _ = self.event_tx.send(GameEvent::Error(error));
             event_loop.exit();
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, _event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         if !matches!(&event, WindowEvent::CloseRequested) {
             if let Some(runtime) = self.runtime.as_mut() {
                 runtime.process_winit_event(&event);
@@ -260,9 +235,8 @@ impl ApplicationHandler for GameApp {
         }
         match event {
             WindowEvent::CloseRequested => {
-                self.visible = false;
+                self.close_window();
                 let _ = self.event_tx.send(GameEvent::Closed);
-                event_loop.exit();
             }
             WindowEvent::Resized(size) => {
                 self.width = size.width.max(1);
@@ -284,12 +258,21 @@ impl ApplicationHandler for GameApp {
         for cmd in commands {
             match cmd {
                 GameCommand::Restart(snapshot) => {
-                    if let Err(error) = self.install_runtime(snapshot) {
-                        let _ = self.event_tx.send(GameEvent::Error(error));
+                    if self.window.is_some() {
+                        if let Err(error) = self.install_runtime(snapshot) {
+                            let _ = self.event_tx.send(GameEvent::Error(error));
+                        }
+                    } else {
+                        self.pending_snapshot = Some(snapshot);
                     }
                 }
                 GameCommand::Show => {
                     self.visible = true;
+                    if self.window.is_none() {
+                        if let Err(error) = self.create_window_and_install_runtime(event_loop) {
+                            let _ = self.event_tx.send(GameEvent::Error(error));
+                        }
+                    }
                     if let Some(window) = self.window.as_ref() {
                         window.set_visible(true);
                         window.focus_window();
@@ -332,6 +315,44 @@ impl ApplicationHandler for GameApp {
 }
 
 impl GameApp {
+    fn window_attributes(&self) -> WindowAttributes {
+        WindowAttributes::default()
+            .with_title(&self.title)
+            .with_inner_size(winit::dpi::LogicalSize::new(self.width, self.height))
+    }
+
+    fn create_window_and_install_runtime(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), String> {
+        if self.window.is_some() {
+            return Ok(());
+        }
+
+        let window = event_loop
+            .create_window(self.window_attributes())
+            .map_err(|error| format!("create window: {error}"))?;
+        self.window = Some(window);
+
+        let Some(snapshot) = self.pending_snapshot.take() else {
+            self.close_window();
+            return Err("missing runtime snapshot".to_owned());
+        };
+
+        if let Err(error) = self.install_runtime(snapshot) {
+            self.close_window();
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    fn close_window(&mut self) {
+        self.visible = false;
+        self.runtime = None;
+        self.window = None;
+    }
+
     fn install_runtime(&mut self, snapshot: GameRuntimeSnapshot) -> Result<(), String> {
         // Drop the old surface before creating a replacement for the same window.
         self.runtime = None;

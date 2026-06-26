@@ -98,7 +98,8 @@ fn vscene_compile(args: Vec<String>) -> EngineResult<()> {
         path: input.clone(),
         source,
     })?;
-    let (json, diagnostics) = engine_script_varg::compile_vscene_source_to_json(&input, &source);
+    let (file, diagnostics) =
+        engine_script_varg::compile_vscene_source_to_scene_file(&input, &source);
     for diagnostic in &diagnostics {
         eprintln!(
             "{}:{}:{}: {}: {}",
@@ -109,10 +110,12 @@ fn vscene_compile(args: Vec<String>) -> EngineResult<()> {
             diagnostic.message
         );
     }
-    let Some(json) = json else {
+    let Some(file) = file else {
         return Err(EngineError::config(".vscene compilation failed"));
     };
-    engine_ecs::Scene::from_json(&json)?;
+    let scene_name = file.name.clone();
+    let scene = engine_ecs::Scene::from_scene_file(file)?;
+    let json = scene.to_json(scene_name)?;
 
     if let Some(output) = output {
         if let Some(parent) = output.parent() {

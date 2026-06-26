@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { rpc, selectProjectLocation } from '../api';
+import { rpc, selectExistingProject, selectProjectLocation } from '../api';
 import { useTranslation } from '../i18n';
 import {
   buttonClass,
@@ -501,6 +501,8 @@ function ProjectsPage({
   onOpen,
   onDeleteRequest,
   onNewProject,
+  onOpenExistingProject,
+  openError,
 }: {
   projects: ProjectMeta[];
   selectedPath: string | null;
@@ -508,6 +510,8 @@ function ProjectsPage({
   onOpen: (path: string) => void;
   onDeleteRequest: (path: string) => void;
   onNewProject: () => void;
+  onOpenExistingProject: () => void;
+  openError: string | null;
 }) {
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
@@ -545,6 +549,9 @@ function ProjectsPage({
       <div className={hubPageHeaderClass}>
         <h2 className={hubPageTitleClass}>{t('hub_projects_title')}</h2>
         <div className={hubPageActionsClass}>
+          <button className={buttonClass('secondary', 'sm')} onClick={onOpenExistingProject}>
+            <IconFolder /> {t('hub_open_project')}
+          </button>
           <button className={buttonClass('primary', 'sm')} onClick={onNewProject}>
             <IconPlus /> {t('hub_new_project')}
           </button>
@@ -560,6 +567,7 @@ function ProjectsPage({
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
+        {openError && <p className={`${formErrorClass} mt-2`}>{openError}</p>}
       </div>
 
       {/* Action bar (shown when a project is selected) */}
@@ -1193,6 +1201,7 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [projectOpenError, setProjectOpenError] = useState<string | null>(null);
 
   // Reset selection when projects change
   useEffect(() => {
@@ -1219,6 +1228,17 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
     const sep = req.location.includes('\\') ? '\\' : '/';
     const createdPath = `${req.location}${sep}${req.name}`;
     await onOpenProject(createdPath);
+  }, [onOpenProject]);
+
+  const handleOpenExistingProject = useCallback(async () => {
+    setProjectOpenError(null);
+    try {
+      const selected = await selectExistingProject();
+      if (!selected) return;
+      await onOpenProject(selected);
+    } catch (err) {
+      setProjectOpenError(err instanceof Error ? err.message : String(err));
+    }
   }, [onOpenProject]);
 
   const handleDeleteRecent = useCallback(async () => {
@@ -1255,6 +1275,8 @@ export default function HubPage({ state, onOpenProject, onNavigate, onSetTheme, 
             onOpen={onOpenProject}
             onDeleteRequest={setDeleteTarget}
             onNewProject={() => setShowNewDialog(true)}
+            onOpenExistingProject={handleOpenExistingProject}
+            openError={projectOpenError}
           />
         );
     }

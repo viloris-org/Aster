@@ -56,6 +56,8 @@ use engine_script_varg::{
     VargRuntimeContext, VargSceneContext, VargScript, compile_script_source,
     compile_vscene_source_to_scene,
 };
+#[cfg(feature = "audio")]
+use std::collections::HashSet;
 
 /// Explicit runtime services. There is no hidden global mutable state.
 #[derive(Debug)]
@@ -115,6 +117,8 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     #[cfg(feature = "asset-import")]
     hot_reload: HotReloadTracker,
     varg_script_cache: HashMap<PathBuf, VargScript>,
+    #[cfg(feature = "audio")]
+    reported_script_errors: HashSet<String>,
     #[cfg(feature = "audio")]
     audio_bindings: Vec<AudioBinding>,
     #[cfg(feature = "audio")]
@@ -291,6 +295,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
             #[cfg(feature = "asset-import")]
             hot_reload: HotReloadTracker::default(),
             varg_script_cache: HashMap::new(),
+            #[cfg(feature = "audio")]
+            reported_script_errors: HashSet::new(),
             #[cfg(feature = "audio")]
             audio_bindings: Vec::new(),
             #[cfg(feature = "audio")]
@@ -2887,6 +2893,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "asset-import")]
     #[test]
     fn model_texture_refs_resolve_relative_to_model_source() {
         assert_eq!(

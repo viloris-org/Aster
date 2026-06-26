@@ -1,0 +1,319 @@
+scene JumpJump {
+    camera "Main Camera" {
+        transform {
+            position: Vec3(9.5, 11.5, -14.0)
+            rotation: Vec3(-42, 0, 0)
+        }
+
+        perspective {
+            fov: 52
+            near: 0.01
+            far: 1000
+        }
+
+        primary: true
+    }
+
+    light "Sun" {
+        kind: directional
+        intensity: 3.5
+        color: Vec3(1.0, 0.94, 0.84)
+        rotation: Vec3(-50, 35, 0)
+    }
+
+    entity "Player" {
+        tag: "Player"
+
+        transform {
+            position: Vec3(0, 1.1, 0)
+        }
+
+        mesh: Box(size: Vec3(0.8, 0.8, 0.8))
+
+        material {
+            baseColor: Color("#ff6f61")
+            roughness: 0.55
+        }
+
+        rigidbody {
+            mode: kinematic
+        }
+
+        collider {
+            shape: box
+            size: Vec3(0.8, 0.8, 0.8)
+        }
+
+        script JumpPlayer {
+            source: "scripts/jump_player.varg"
+            maxCharge: 1.25
+            jumpScale: 5.0
+            arcHeight: 3.0
+            timeLimit: 45.0
+        }
+    }
+
+    entity "Start Platform" {
+        tag: "Platform"
+
+        transform {
+            position: Vec3(0, 0, 0)
+        }
+
+        mesh: Box(size: Vec3(3.0, 0.5, 3.0))
+
+        material {
+            baseColor: Color("#3f8f7b")
+            roughness: 0.72
+        }
+
+        collider {
+            shape: box
+            size: Vec3(3.0, 0.5, 3.0)
+        }
+    }
+
+    entity "Crystal Landing" {
+        tag: "Platform"
+
+        transform {
+            position: Vec3(3.0, 0, 2.6)
+        }
+
+        mesh: Box(size: Vec3(2.0, 0.5, 2.0))
+
+        material {
+            baseColor: Color("#5f7be8")
+            roughness: 0.68
+        }
+
+        collider {
+            shape: box
+            size: Vec3(2.0, 0.5, 2.0)
+        }
+    }
+
+    entity "Narrow Hop" {
+        tag: "Platform"
+
+        transform {
+            position: Vec3(6.1, 0, 5.1)
+        }
+
+        mesh: Box(size: Vec3(2.0, 0.5, 2.0))
+
+        material {
+            baseColor: Color("#f1b84b")
+            roughness: 0.74
+        }
+
+        collider {
+            shape: box
+            size: Vec3(2.0, 0.5, 2.0)
+        }
+    }
+
+    entity "High Score Island" {
+        tag: "Platform"
+
+        transform {
+            position: Vec3(9.5, 0, 8.0)
+        }
+
+        mesh: Box(size: Vec3(2.6, 0.5, 2.6))
+
+        material {
+            baseColor: Color("#8b64d8")
+            roughness: 0.7
+        }
+
+        collider {
+            shape: box
+            size: Vec3(2.6, 0.5, 2.6)
+        }
+    }
+
+    entity "Side Route" {
+        tag: "Platform"
+
+        transform {
+            position: Vec3(12.6, 0, 5.0)
+        }
+
+        mesh: Box(size: Vec3(2.0, 0.5, 2.0))
+
+        material {
+            baseColor: Color("#4ba7c9")
+            roughness: 0.66
+        }
+
+        collider {
+            shape: box
+            size: Vec3(2.0, 0.5, 2.0)
+        }
+    }
+
+    entity "Final Crystal Island" {
+        tag: "Platform"
+
+        transform {
+            position: Vec3(15.5, 0, 7.9)
+        }
+
+        mesh: Box(size: Vec3(2.2, 0.5, 2.2))
+
+        material {
+            baseColor: Color("#d96cae")
+            roughness: 0.68
+        }
+
+        collider {
+            shape: box
+            size: Vec3(2.2, 0.5, 2.2)
+        }
+    }
+
+    entity "Goal Platform" {
+        tag: "Goal"
+
+        transform {
+            position: Vec3(19.3, 0, 10.7)
+        }
+
+        mesh: Box(size: Vec3(3.0, 0.5, 3.0))
+
+        material {
+            baseColor: Color("#66c96f")
+            roughness: 0.64
+            emissive: Vec3(0.08, 0.18, 0.08)
+        }
+
+        collider {
+            shape: box
+            size: Vec3(3.0, 0.5, 3.0)
+        }
+    }
+
+    entity "Crystal A" {
+        tag: "Collectible"
+
+        transform {
+            position: Vec3(3.0, 1.15, 2.6)
+        }
+
+        mesh: Sphere(radius: 0.35)
+
+        material {
+            baseColor: Color("#7df9ff")
+            roughness: 0.25
+            emissive: Vec3(0.0, 0.45, 0.5)
+        }
+
+        script Bobber {
+            source: "scripts/bobber.varg"
+            amplitude: 0.22
+            speed: 2.4
+            offset: 0.0
+        }
+    }
+
+    entity "Crystal B" {
+        tag: "Collectible"
+
+        transform {
+            position: Vec3(9.5, 1.15, 8.0)
+        }
+
+        mesh: Sphere(radius: 0.35)
+
+        material {
+            baseColor: Color("#f8f06a")
+            roughness: 0.2
+            emissive: Vec3(0.45, 0.38, 0.0)
+        }
+
+        script Bobber {
+            source: "scripts/bobber.varg"
+            amplitude: 0.24
+            speed: 2.1
+            offset: 1.7
+        }
+    }
+
+    entity "Crystal C" {
+        tag: "Collectible"
+
+        transform {
+            position: Vec3(15.5, 1.15, 7.9)
+        }
+
+        mesh: Sphere(radius: 0.35)
+
+        material {
+            baseColor: Color("#b78cff")
+            roughness: 0.22
+            emissive: Vec3(0.28, 0.1, 0.55)
+        }
+
+        script Bobber {
+            source: "scripts/bobber.varg"
+            amplitude: 0.26
+            speed: 2.7
+            offset: 2.8
+        }
+    }
+
+    entity "Hot Zone" {
+        tag: "Hazard"
+
+        transform {
+            position: Vec3(7.5, 0.08, 3.4)
+        }
+
+        mesh: Box(size: Vec3(1.4, 0.18, 1.6))
+
+        material {
+            baseColor: Color("#ff3b30")
+            roughness: 0.35
+            emissive: Vec3(0.55, 0.08, 0.02)
+        }
+    }
+
+    entity "Goal Beacon" {
+        tag: "Goal"
+
+        transform {
+            position: Vec3(19.3, 1.7, 10.7)
+        }
+
+        mesh: Sphere(radius: 0.55)
+
+        material {
+            baseColor: Color("#b7ff6a")
+            roughness: 0.18
+            emissive: Vec3(0.25, 0.6, 0.05)
+        }
+
+        script Bobber {
+            source: "scripts/bobber.varg"
+            amplitude: 0.2
+            speed: 1.8
+            offset: 0.6
+        }
+    }
+
+    entity "Fall Zone" {
+        tag: "Hazard"
+
+        transform {
+            position: Vec3(9.5, -1.0, 5.6)
+        }
+
+        mesh: Box(size: Vec3(24, 0.2, 18))
+
+        material {
+            baseColor: Color("#202833")
+            roughness: 0.9
+        }
+    }
+}

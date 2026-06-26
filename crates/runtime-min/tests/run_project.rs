@@ -13,7 +13,7 @@ fn load_runtime_project_loads_example() {
 
     assert_eq!(project.manifest.name, "Varg Example");
     assert_eq!(project.manifest.asset_root, "assets");
-    assert_eq!(project.manifest.default_scene, "scenes/example.vscene");
+    assert_eq!(project.manifest.default_scene, "scenes/jump_jump.vscene");
     assert!(
         !project.scene.objects().is_empty(),
         "scene should have objects"

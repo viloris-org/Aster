@@ -162,20 +162,15 @@ impl EditorHost {
             return;
         };
 
-        let mut closed = false;
         for event in gw.poll_events() {
             match event {
                 game_window::GameEvent::Closed => {
                     tracing::debug!(target: "editor", "game window closed");
-                    closed = true;
                 }
                 game_window::GameEvent::Error(msg) => {
                     tracing::error!(target: "editor", "game window error: {msg}");
                 }
             }
-        }
-        if closed {
-            self.game_window = None;
         }
     }
 

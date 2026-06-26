@@ -1417,13 +1417,13 @@ fn compile_vscene_scene(scene_block: &VsceneBlock) -> Result<SceneFile, VargDiag
 
     for child in &scene_block.children {
         match child.kind.as_str() {
-            "camera" | "entity" => {
+            "camera" | "entity" | "light" => {
                 objects.push(compile_vscene_object(child, next_id)?);
                 next_id += 1;
             }
             "group" => {
                 for nested in &child.children {
-                    if matches!(nested.kind.as_str(), "camera" | "entity") {
+                    if matches!(nested.kind.as_str(), "camera" | "entity" | "light") {
                         objects.push(compile_vscene_object(nested, next_id)?);
                         next_id += 1;
                     }
@@ -1435,7 +1435,7 @@ fn compile_vscene_scene(scene_block: &VsceneBlock) -> Result<SceneFile, VargDiag
                     child,
                     "VSCENE2000",
                     &format!("unsupported scene child block `{}`", child.kind),
-                    "`camera`, `entity`, `group`, or future generator blocks",
+                    "`camera`, `entity`, `light`, `group`, or future generator blocks",
                     "Use an entity-like block supported by the compiler.",
                 ));
             }
@@ -1472,10 +1472,18 @@ fn compile_vscene_object(
         camera_role = Some(CameraRole::Main);
         components.push(ComponentData::Camera(compile_camera_component(block)));
     }
+    if block.kind == "light" {
+        tag = "Light".to_string();
+        components.push(ComponentData::Light(compile_light_component(block)));
+    }
+    apply_vscene_transform_properties(block, &mut transform);
 
     for child in &block.children {
         match child.kind.as_str() {
-            "transform" => transform = compile_vscene_transform(child),
+            "transform" => {
+                transform = Transform::IDENTITY;
+                apply_vscene_transform_properties(child, &mut transform);
+            }
             "perspective" => upsert_component(
                 &mut components,
                 ComponentData::Camera(compile_camera_component(child)),
@@ -1535,8 +1543,7 @@ fn compile_vscene_object(
     })
 }
 
-fn compile_vscene_transform(block: &VsceneBlock) -> Transform {
-    let mut transform = Transform::IDENTITY;
+fn apply_vscene_transform_properties(block: &VsceneBlock, transform: &mut Transform) {
     if let Some(position) = vec3_property(block, "position") {
         transform.translation = position;
     }
@@ -1546,7 +1553,6 @@ fn compile_vscene_transform(block: &VsceneBlock) -> Transform {
     if let Some(scale) = vec3_property(block, "scale") {
         transform.scale = scale;
     }
-    transform
 }
 
 fn compile_camera_component(block: &VsceneBlock) -> CameraComponentData {
@@ -1634,10 +1640,40 @@ fn vscene_mesh_builtin_from_call(value: &VsceneValue) -> Option<String> {
 }
 
 fn vscene_material_builtin(block: &VsceneBlock) -> Option<String> {
+    if block.properties.contains_key("baseColor")
+        || block.properties.contains_key("color")
+        || block.properties.contains_key("emissive")
+        || block.properties.contains_key("metallic")
+        || block.properties.contains_key("roughness")
+    {
+        return Some(vscene_inline_material_name(block));
+    }
     string_property(block, "builtin")
         .or_else(|| string_property(block, "name"))
         .or_else(|| string_property(block, "type"))
         .or_else(|| string_property(block, "kind"))
+}
+
+fn vscene_inline_material_name(block: &VsceneBlock) -> String {
+    let base_color = vec3_property(block, "baseColor")
+        .or_else(|| vec3_property(block, "color"))
+        .unwrap_or(Vec3::ONE);
+    let alpha = number_property(block, "alpha").unwrap_or(1.0);
+    let metallic = number_property(block, "metallic").unwrap_or(0.0);
+    let roughness = number_property(block, "roughness").unwrap_or(0.5);
+    let emissive = vec3_property(block, "emissive").unwrap_or(Vec3::ZERO);
+    format!(
+        "@vscene-material:base={},{},{},{};metallic={};roughness={};emissive={},{},{}",
+        base_color.x,
+        base_color.y,
+        base_color.z,
+        alpha,
+        metallic,
+        roughness,
+        emissive.x,
+        emissive.y,
+        emissive.z
+    )
 }
 
 fn compile_rigidbody_component(block: &VsceneBlock) -> RigidbodyComponentData {
@@ -1681,7 +1717,9 @@ fn compile_light_component(block: &VsceneBlock) -> LightComponentData {
     LightComponentData {
         color: vec3_property(block, "color").unwrap_or(Vec3::ONE),
         intensity: number_property(block, "intensity").unwrap_or(1.0),
-        kind: identifier_property(block, "type").unwrap_or_else(|| "point".to_string()),
+        kind: identifier_property(block, "kind")
+            .or_else(|| identifier_property(block, "type"))
+            .unwrap_or_else(|| "point".to_string()),
         range: number_property(block, "range").unwrap_or(10.0),
         spot_angle: number_property(block, "spotAngle").unwrap_or(30.0),
     }
@@ -1874,12 +1912,32 @@ fn write_vscene_object(
             .components
             .iter()
             .any(|component| matches!(component, ComponentData::Camera(_)));
+    let standalone_light = (!is_camera)
+        .then(|| {
+            record
+                .object
+                .components
+                .iter()
+                .find_map(|component| match component {
+                    ComponentData::Light(light) if record.object.components.len() == 1 => {
+                        Some(light)
+                    }
+                    _ => None,
+                })
+        })
+        .flatten();
     write_indent(output, indent);
-    output.push_str(if is_camera { "camera " } else { "entity " });
+    output.push_str(if is_camera {
+        "camera "
+    } else if standalone_light.is_some() {
+        "light "
+    } else {
+        "entity "
+    });
     output.push_str(&vscene_quoted(&record.object.name));
     output.push_str(" {\n");
 
-    if !is_camera && record.object.tag != "Untagged" {
+    if !is_camera && standalone_light.is_none() && record.object.tag != "Untagged" {
         write_property(
             output,
             indent + 1,
@@ -1889,8 +1947,14 @@ fn write_vscene_object(
     }
 
     write_transform_block(output, indent + 1, record.local_transform);
+    if let Some(light) = standalone_light {
+        write_light_properties(output, indent + 1, light);
+    }
 
     for component in &record.object.components {
+        if standalone_light.is_some() && matches!(component, ComponentData::Light(_)) {
+            continue;
+        }
         match component {
             ComponentData::Camera(camera) => write_camera_block(output, indent + 1, camera),
             ComponentData::MeshRenderer(mesh) => {
@@ -2048,23 +2112,22 @@ fn write_script_block(output: &mut String, indent: usize, script: &ScriptCompone
 fn write_light_block(output: &mut String, indent: usize, light: &LightComponentData) {
     write_indent(output, indent);
     output.push_str("light {\n");
-    write_property(output, indent + 1, "type", &light.kind);
-    write_property(output, indent + 1, "color", &vscene_vec3(light.color));
+    write_light_properties(output, indent + 1, light);
+    write_indent(output, indent);
+    output.push_str("}\n");
+}
+
+fn write_light_properties(output: &mut String, indent: usize, light: &LightComponentData) {
+    write_property(output, indent, "kind", &light.kind);
+    write_property(output, indent, "color", &vscene_vec3(light.color));
+    write_property(output, indent, "intensity", &vscene_number(light.intensity));
+    write_property(output, indent, "range", &vscene_number(light.range));
     write_property(
         output,
-        indent + 1,
-        "intensity",
-        &vscene_number(light.intensity),
-    );
-    write_property(output, indent + 1, "range", &vscene_number(light.range));
-    write_property(
-        output,
-        indent + 1,
+        indent,
         "spotAngle",
         &vscene_number(light.spot_angle),
     );
-    write_indent(output, indent);
-    output.push_str("}\n");
 }
 
 fn write_property(output: &mut String, indent: usize, key: &str, value: &str) {
@@ -3819,6 +3882,43 @@ mod tests {
             mesh_for("ModelActor").builtin_mesh.as_deref(),
             Some("model:models/ship.gltf")
         );
+    }
+
+    #[test]
+    fn compiles_top_level_light_blocks_to_light_objects() {
+        let source = r##"scene Lighting {
+    light "Sun" {
+        kind: directional
+        intensity: 3.5
+        color: Vec3(1.0, 0.94, 0.84)
+        rotation: Vec3(-50, 35, 0)
+    }
+}
+"##;
+
+        let (file, diagnostics) =
+            compile_vscene_source_to_scene_file("scenes/lighting.vscene", source);
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let file = file.unwrap();
+        assert_eq!(file.objects.len(), 1);
+        assert_eq!(file.objects[0].object.name, "Sun");
+        assert_eq!(file.objects[0].object.tag, "Light");
+        let light = file.objects[0]
+            .object
+            .components
+            .iter()
+            .find_map(|component| match component {
+                ComponentData::Light(light) => Some(light),
+                _ => None,
+            })
+            .expect("Sun should have light component");
+        assert_eq!(light.kind, "directional");
+        assert_eq!(light.intensity, 3.5);
+
+        let serialized = serialize_scene_file_to_vscene(&file).unwrap();
+        assert!(serialized.contains("light \"Sun\""));
+        assert!(serialized.contains("kind: directional"));
     }
 
     #[test]

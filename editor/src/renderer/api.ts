@@ -434,6 +434,10 @@ export function selectProjectLocation(): Promise<string | null> {
   return invoke<string | null>('select_project_location');
 }
 
+export function selectExistingProject(): Promise<string | null> {
+  return invoke<string | null>('select_existing_project');
+}
+
 /**
  * Show native file-open dialog for scene JSON files,
  * then load the selected scene via RPC.
