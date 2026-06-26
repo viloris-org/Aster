@@ -7,6 +7,7 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
@@ -55,7 +56,7 @@ use engine_render::{ImageDesc, ImageFormat, ImageUsage, RenderMaterialTextures};
 #[cfg(feature = "wgpu")]
 pub use engine_render_wgpu::WgpuRenderDevice;
 use engine_script_varg::{
-    VargAudioCommand, VargRuntimeContext, VargSceneContext, VargScript, VargSpawnRequest,
+    VargAudioCommand, VargRuntimeContextRef, VargSceneContext, VargScript, VargSpawnRequest,
     VargUiCommand, compile_script_source, compile_vscene_source_to_scene,
 };
 #[cfg(feature = "audio")]
@@ -122,7 +123,9 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     frame_counter: FrameCounter,
     #[cfg(feature = "asset-import")]
     hot_reload: HotReloadTracker,
-    varg_script_cache: HashMap<PathBuf, VargScript>,
+    script_index: RuntimeScriptIndex,
+    scene_snapshot: RuntimeSceneSnapshot,
+    varg_script_cache: HashMap<PathBuf, Arc<VargScript>>,
     #[cfg(feature = "audio")]
     reported_script_errors: HashSet<String>,
     #[cfg(feature = "audio")]
@@ -195,6 +198,167 @@ pub struct RuntimeStats {
 pub struct RuntimeInputCapture {
     /// Whether the game window should capture and hide the mouse cursor.
     pub mouse: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VargLifecycleHook {
+    Start,
+    FixedUpdate,
+    Update,
+    LateUpdate,
+}
+
+impl VargLifecycleHook {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::FixedUpdate => "fixedUpdate",
+            Self::Update => "update",
+            Self::LateUpdate => "lateUpdate",
+        }
+    }
+
+    fn runs_once(self) -> bool {
+        matches!(self, Self::Start)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeScriptInvocation {
+    entity: engine_ecs::Entity,
+    source: String,
+}
+
+#[derive(Clone, Debug, Default)]
+struct RuntimeScriptIndex {
+    scene_version: Option<u64>,
+    start: Vec<RuntimeScriptInvocation>,
+    fixed_update: Vec<RuntimeScriptInvocation>,
+    update: Vec<RuntimeScriptInvocation>,
+    late_update: Vec<RuntimeScriptInvocation>,
+}
+
+impl RuntimeScriptIndex {
+    fn refresh(&mut self, scene: &Scene) {
+        let scene_version = scene.structure_version();
+        if self.scene_version == Some(scene_version) {
+            return;
+        }
+
+        self.start.clear();
+        self.fixed_update.clear();
+        self.update.clear();
+        self.late_update.clear();
+
+        for (entity, object) in scene.iter_objects() {
+            for script in object
+                .scripts
+                .iter()
+                .chain(
+                    object
+                        .components
+                        .iter()
+                        .filter_map(|component| match component {
+                            ComponentData::Script(script) => Some(script),
+                            _ => None,
+                        }),
+                )
+            {
+                let invocation = RuntimeScriptInvocation {
+                    entity,
+                    source: script.source.clone(),
+                };
+                self.start.push(invocation.clone());
+                self.fixed_update.push(invocation.clone());
+                self.update.push(invocation.clone());
+                self.late_update.push(invocation);
+            }
+        }
+
+        self.scene_version = Some(scene_version);
+    }
+
+    fn invocations(&self, hook: VargLifecycleHook) -> &[RuntimeScriptInvocation] {
+        match hook {
+            VargLifecycleHook::Start => &self.start,
+            VargLifecycleHook::FixedUpdate => &self.fixed_update,
+            VargLifecycleHook::Update => &self.update,
+            VargLifecycleHook::LateUpdate => &self.late_update,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct RuntimeSceneSnapshot {
+    entity_names: HashMap<engine_ecs::Entity, String>,
+    entity_tags: HashMap<engine_ecs::Entity, String>,
+    positions_by_entity: HashMap<engine_ecs::Entity, Vec3>,
+    shared_positions_by_name: Arc<HashMap<String, Vec3>>,
+    shared_positions_by_tag: Arc<HashMap<String, Vec<Vec3>>>,
+}
+
+impl RuntimeSceneSnapshot {
+    fn refresh(&mut self, scene: &Scene) {
+        self.entity_names.clear();
+        self.entity_tags.clear();
+        self.positions_by_entity.clear();
+        let mut positions_by_name: HashMap<String, Vec3> = HashMap::new();
+        let mut positions_by_tag: HashMap<String, Vec<Vec3>> = HashMap::new();
+
+        for (entity, object) in scene.iter_objects() {
+            self.entity_names.insert(entity, object.name.clone());
+            self.entity_tags.insert(entity, object.tag.clone());
+            if let Some(transform) = scene.transforms().local(entity) {
+                self.positions_by_entity
+                    .insert(entity, transform.translation);
+                positions_by_name.insert(object.name.clone(), transform.translation);
+                positions_by_tag
+                    .entry(object.tag.clone())
+                    .or_default()
+                    .push(transform.translation);
+            }
+        }
+        self.shared_positions_by_name = Arc::new(positions_by_name);
+        self.shared_positions_by_tag = Arc::new(positions_by_tag);
+    }
+
+    fn sync_entity_transform(&mut self, scene: &Scene, entity: engine_ecs::Entity) {
+        let Some(object) = scene.object(entity) else {
+            return;
+        };
+        let Some(transform) = scene.transforms().local(entity) else {
+            return;
+        };
+        let position = transform.translation;
+        self.entity_names.insert(entity, object.name.clone());
+        self.entity_tags.insert(entity, object.tag.clone());
+        Arc::make_mut(&mut self.shared_positions_by_name).insert(object.name.clone(), position);
+        if let Some(previous) = self.positions_by_entity.insert(entity, position) {
+            if let Some(tag_positions) =
+                Arc::make_mut(&mut self.shared_positions_by_tag).get_mut(&object.tag)
+            {
+                if let Some(index) = tag_positions
+                    .iter()
+                    .position(|candidate| *candidate == previous)
+                {
+                    tag_positions.remove(index);
+                }
+            }
+        }
+        Arc::make_mut(&mut self.shared_positions_by_tag)
+            .entry(object.tag.clone())
+            .or_default()
+            .push(position);
+    }
+
+    fn context_for(&self, entity: engine_ecs::Entity) -> VargSceneContext {
+        VargSceneContext::from_shared_positions(
+            self.entity_names.get(&entity).cloned().unwrap_or_default(),
+            self.entity_tags.get(&entity).cloned().unwrap_or_default(),
+            Arc::clone(&self.shared_positions_by_name),
+            Arc::clone(&self.shared_positions_by_tag),
+        )
+    }
 }
 
 /// Structured runtime diagnostic entry.
@@ -313,6 +477,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
             frame_counter: FrameCounter::default(),
             #[cfg(feature = "asset-import")]
             hot_reload: HotReloadTracker::default(),
+            script_index: RuntimeScriptIndex::default(),
+            scene_snapshot: RuntimeSceneSnapshot::default(),
             varg_script_cache: HashMap::new(),
             #[cfg(feature = "audio")]
             reported_script_errors: HashSet::new(),
@@ -545,51 +711,37 @@ impl<R: RenderDevice> RuntimeServices<R> {
     }
 
     fn run_varg_scripts_start(&mut self) {
-        self.run_varg_lifecycle("start", 0.0, true);
+        self.run_varg_lifecycle(VargLifecycleHook::Start, 0.0);
     }
 
     fn run_varg_scripts_fixed_update(&mut self, fixed_dt: f32) {
-        self.run_varg_lifecycle("fixedUpdate", fixed_dt, false);
+        self.run_varg_lifecycle(VargLifecycleHook::FixedUpdate, fixed_dt);
     }
 
     fn run_varg_scripts_update(&mut self, dt: f32) {
-        self.run_varg_lifecycle("update", dt, false);
+        self.run_varg_lifecycle(VargLifecycleHook::Update, dt);
     }
 
     fn run_varg_scripts_late_update(&mut self, dt: f32) {
-        self.run_varg_lifecycle("lateUpdate", dt, false);
+        self.run_varg_lifecycle(VargLifecycleHook::LateUpdate, dt);
     }
 
-    fn run_varg_lifecycle(&mut self, hook: &str, dt: f32, once: bool) {
-        let invocations = self
-            .scene
-            .iter_objects()
-            .flat_map(|(entity, object)| {
-                object
-                    .scripts
-                    .iter()
-                    .chain(
-                        object
-                            .components
-                            .iter()
-                            .filter_map(|component| match component {
-                                ComponentData::Script(script) => Some(script),
-                                _ => None,
-                            }),
-                    )
-                    .cloned()
-                    .map(move |script| (entity, script))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
+    fn run_varg_lifecycle(&mut self, hook: VargLifecycleHook, dt: f32) {
+        self.script_index.refresh(&self.scene);
+        self.scene_snapshot.refresh(&self.scene);
+        let invocations = self.script_index.invocations(hook).to_vec();
 
-        for (entity, script) in invocations {
-            if once && script.state.contains_key("__varg_started") {
+        for invocation in invocations {
+            let entity = invocation.entity;
+            let Some(script) = self.varg_script_component(entity, &invocation.source) else {
+                continue;
+            };
+            if hook.runs_once() && script.state.contains_key("__varg_started") {
                 continue;
             }
             let script_path = self.resolve_project_path(&script.source);
             let compiled = match self.load_varg_script(&script_path) {
-                Ok(script) => script.clone(),
+                Ok(script) => script,
                 Err(error) => {
                     self.diagnostics.push(RuntimeDiagnostic {
                         source: "script".to_string(),
@@ -602,21 +754,21 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 }
             };
             let transform = self.scene.transforms().local(entity).unwrap_or_default();
-            let scene_context = self.varg_scene_context(entity);
-            let mut output = compiled.run_hook(
-                hook,
-                VargRuntimeContext {
+            let scene_context = self.scene_snapshot.context_for(entity);
+            let mut output = compiled.run_hook_borrowed(
+                hook.name(),
+                VargRuntimeContextRef {
                     transform,
-                    input: self.input.clone(),
+                    input: &self.input,
                     delta_time: dt,
                     total_time: self.time.total_time,
                     frame_index: self.time.frame_index,
-                    exported_values: script.exported_values.clone(),
+                    exported_values: &script.exported_values,
                     state: script.state.clone(),
                     scene: scene_context,
                 },
             );
-            if once {
+            if hook.runs_once() {
                 output
                     .state
                     .insert("__varg_started".to_string(), serde_json::Value::Bool(true));
@@ -624,6 +776,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
             self.scene
                 .transforms_mut()
                 .set_local(entity, output.transform);
+            self.scene_snapshot
+                .sync_entity_transform(&self.scene, entity);
             self.apply_varg_script_state(entity, &script.source, output.state);
             if output.destroy_self {
                 if let Err(error) = self.scene.destroy_deferred(entity) {
@@ -645,6 +799,8 @@ impl<R: RenderDevice> RuntimeServices<R> {
                         file: Some(script_path.clone()),
                         line: None,
                     });
+                } else {
+                    self.scene_snapshot.refresh(&self.scene);
                 }
             }
             if let Some(mouse_capture) = output.mouse_capture {
@@ -672,6 +828,28 @@ impl<R: RenderDevice> RuntimeServices<R> {
             }
             self.ui_commands.extend(output.ui_commands);
         }
+    }
+
+    fn varg_script_component(
+        &self,
+        entity: engine_ecs::Entity,
+        source: &str,
+    ) -> Option<ScriptComponent> {
+        let object = self.scene.object(entity)?;
+        object
+            .scripts
+            .iter()
+            .chain(
+                object
+                    .components
+                    .iter()
+                    .filter_map(|component| match component {
+                        ComponentData::Script(script) => Some(script),
+                        _ => None,
+                    }),
+            )
+            .find(|script| script.source == source)
+            .cloned()
     }
 
     fn apply_varg_spawn_request(&mut self, request: VargSpawnRequest) -> EngineResult<()> {
@@ -824,28 +1002,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         ))
     }
 
-    fn varg_scene_context(&self, entity: engine_ecs::Entity) -> VargSceneContext {
-        let mut context = VargSceneContext::default();
-        if let Some(object) = self.scene.object(entity) {
-            context.entity_name = object.name.clone();
-            context.entity_tag = object.tag.clone();
-        }
-        for (candidate, object) in self.scene.iter_objects() {
-            if let Some(transform) = self.scene.transforms().local(candidate) {
-                context
-                    .positions_by_name
-                    .insert(object.name.clone(), transform.translation);
-                context
-                    .positions_by_tag
-                    .entry(object.tag.clone())
-                    .or_default()
-                    .push(transform.translation);
-            }
-        }
-        context
-    }
-
-    fn load_varg_script(&mut self, path: &Path) -> EngineResult<&VargScript> {
+    fn load_varg_script(&mut self, path: &Path) -> EngineResult<Arc<VargScript>> {
         if !self.varg_script_cache.contains_key(path) {
             let source = fs::read_to_string(path).map_err(|source| EngineError::Filesystem {
                 path: path.to_path_buf(),
@@ -871,9 +1028,12 @@ impl<R: RenderDevice> RuntimeServices<R> {
             let Some(script) = script else {
                 return Err(EngineError::other("Varg script did not compile"));
             };
-            self.varg_script_cache.insert(path.to_path_buf(), script);
+            self.varg_script_cache
+                .insert(path.to_path_buf(), Arc::new(script));
         }
-        Ok(self.varg_script_cache.get(path).expect("script inserted"))
+        Ok(Arc::clone(
+            self.varg_script_cache.get(path).expect("script inserted"),
+        ))
     }
 
     fn apply_varg_script_state(
@@ -882,20 +1042,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         source: &str,
         state: HashMap<String, serde_json::Value>,
     ) {
-        if let Some(object) = self.scene.object_mut(entity) {
-            for candidate in &mut object.scripts {
-                if candidate.source == source {
-                    candidate.state = state.clone();
-                }
-            }
-            for component in &mut object.components {
-                if let ComponentData::Script(candidate) = component {
-                    if candidate.source == source {
-                        candidate.state = state.clone();
-                    }
-                }
-            }
-        }
+        let _ = self.scene.update_script_state(entity, source, state);
     }
 
     fn resolve_project_path(&self, path: &str) -> PathBuf {

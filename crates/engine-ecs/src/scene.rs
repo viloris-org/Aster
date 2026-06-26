@@ -1762,6 +1762,37 @@ impl Scene {
         Ok(removed)
     }
 
+    /// Updates matching script runtime state without changing scene structure.
+    pub fn update_script_state(
+        &mut self,
+        entity: Entity,
+        source: &str,
+        state: HashMap<String, serde_json::Value>,
+    ) -> EngineResult<bool> {
+        let scene_state = self.active_mut();
+        Self::ensure_alive(scene_state, entity)?;
+        let object = scene_state
+            .objects
+            .get_mut(&entity)
+            .ok_or_else(|| EngineError::invalid_handle("object metadata is missing"))?;
+        let mut updated = false;
+        for candidate in &mut object.scripts {
+            if candidate.source == source {
+                candidate.state = state.clone();
+                updated = true;
+            }
+        }
+        for component in &mut object.components {
+            if let ComponentData::Script(candidate) = component {
+                if candidate.source == source {
+                    candidate.state = state.clone();
+                    updated = true;
+                }
+            }
+        }
+        Ok(updated)
+    }
+
     /// Finds the first object by name.
     pub fn find_by_name(&self, name: &str) -> Option<Entity> {
         self.active()
@@ -2113,6 +2144,43 @@ mod tests {
             loaded.components(camera).unwrap()[0],
             ComponentData::Camera(_)
         ));
+    }
+
+    #[test]
+    fn script_state_update_does_not_change_structure_version() {
+        let mut scene = Scene::new();
+        let entity = scene.create_object("Scripted").unwrap();
+        scene
+            .upsert_component(
+                entity,
+                ComponentData::Script(ScriptComponent::new("move.varg")),
+            )
+            .unwrap();
+        let version = scene.structure_version();
+
+        let updated = scene
+            .update_script_state(
+                entity,
+                "move.varg",
+                HashMap::from([("ticks".to_string(), serde_json::Value::from(1.0))]),
+            )
+            .unwrap();
+
+        assert!(updated);
+        assert_eq!(scene.structure_version(), version);
+        let script = scene
+            .components(entity)
+            .unwrap()
+            .iter()
+            .find_map(|component| match component {
+                ComponentData::Script(script) => Some(script),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            script.state.get("ticks").and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
     }
 
     #[test]

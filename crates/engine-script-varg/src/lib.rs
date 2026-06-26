@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use engine_core::math::{Quat, Transform, Vec3};
 use engine_ecs::{
@@ -215,6 +216,26 @@ pub struct VargRuntimeContext {
     pub scene: VargSceneContext,
 }
 
+/// Borrowed per-invocation context for hot runtime dispatch.
+pub struct VargRuntimeContextRef<'a> {
+    /// Local transform for the entity this script is attached to.
+    pub transform: Transform,
+    /// Frame input state.
+    pub input: &'a engine_platform::InputState,
+    /// Delta time for the lifecycle call.
+    pub delta_time: f32,
+    /// Total elapsed runtime time in seconds.
+    pub total_time: f32,
+    /// Monotonic runtime frame index.
+    pub frame_index: u64,
+    /// Editor-exposed overrides keyed by exported property name.
+    pub exported_values: &'a HashMap<String, serde_json::Value>,
+    /// Persistent script state keyed by state variable name.
+    pub state: HashMap<String, serde_json::Value>,
+    /// Read-only scene facts exposed to migrated declarative gameplay APIs.
+    pub scene: VargSceneContext,
+}
+
 /// Result of executing one lifecycle hook.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VargRuntimeOutput {
@@ -337,9 +358,30 @@ pub struct VargSceneContext {
     pub positions_by_name: HashMap<String, Vec3>,
     /// Local positions grouped by tag.
     pub positions_by_tag: HashMap<String, Vec<Vec3>>,
+    /// Shared local positions keyed by user-visible object name.
+    pub shared_positions_by_name: Option<Arc<HashMap<String, Vec3>>>,
+    /// Shared local positions grouped by tag.
+    pub shared_positions_by_tag: Option<Arc<HashMap<String, Vec<Vec3>>>>,
 }
 
 impl VargSceneContext {
+    /// Creates a context backed by shared frame-level scene position snapshots.
+    pub fn from_shared_positions(
+        entity_name: impl Into<String>,
+        entity_tag: impl Into<String>,
+        positions_by_name: Arc<HashMap<String, Vec3>>,
+        positions_by_tag: Arc<HashMap<String, Vec<Vec3>>>,
+    ) -> Self {
+        Self {
+            entity_name: entity_name.into(),
+            entity_tag: entity_tag.into(),
+            positions_by_name: HashMap::new(),
+            positions_by_tag: HashMap::new(),
+            shared_positions_by_name: Some(positions_by_name),
+            shared_positions_by_tag: Some(positions_by_tag),
+        }
+    }
+
     /// Returns true when the owning entity has the requested tag.
     pub fn entity_has_tag(&self, tag: &str) -> bool {
         self.entity_tag == tag
@@ -348,7 +390,7 @@ impl VargSceneContext {
     /// Returns the distance from the owning entity position to the first object
     /// with the given name.
     pub fn distance_to_name(&self, origin: Vec3, name: &str) -> Option<f32> {
-        self.positions_by_name
+        self.positions_by_name()
             .get(name)
             .map(|target| (*target - origin).length())
     }
@@ -356,7 +398,7 @@ impl VargSceneContext {
     /// Returns the nearest distance from the owning entity position to objects
     /// with the given tag.
     pub fn distance_to_tag(&self, origin: Vec3, tag: &str) -> Option<f32> {
-        self.positions_by_tag
+        self.positions_by_tag()
             .get(tag)?
             .iter()
             .map(|target| (*target - origin).length())
@@ -365,17 +407,35 @@ impl VargSceneContext {
 
     /// Returns a named object's local X position.
     pub fn x_of_name(&self, name: &str) -> Option<f32> {
-        self.positions_by_name.get(name).map(|position| position.x)
+        self.positions_by_name()
+            .get(name)
+            .map(|position| position.x)
     }
 
     /// Returns a named object's local Y position.
     pub fn y_of_name(&self, name: &str) -> Option<f32> {
-        self.positions_by_name.get(name).map(|position| position.y)
+        self.positions_by_name()
+            .get(name)
+            .map(|position| position.y)
     }
 
     /// Returns a named object's local Z position.
     pub fn z_of_name(&self, name: &str) -> Option<f32> {
-        self.positions_by_name.get(name).map(|position| position.z)
+        self.positions_by_name()
+            .get(name)
+            .map(|position| position.z)
+    }
+
+    fn positions_by_name(&self) -> &HashMap<String, Vec3> {
+        self.shared_positions_by_name
+            .as_deref()
+            .unwrap_or(&self.positions_by_name)
+    }
+
+    fn positions_by_tag(&self) -> &HashMap<String, Vec<Vec3>> {
+        self.shared_positions_by_tag
+            .as_deref()
+            .unwrap_or(&self.positions_by_tag)
     }
 }
 
@@ -787,7 +847,36 @@ pub fn serialize_scene_file_to_vscene(file: &SceneFile) -> engine_core::EngineRe
 
 impl VargScript {
     /// Executes a lifecycle hook if the script defines it.
-    pub fn run_hook(&self, hook: &str, mut context: VargRuntimeContext) -> VargRuntimeOutput {
+    pub fn run_hook(&self, hook: &str, context: VargRuntimeContext) -> VargRuntimeOutput {
+        self.run_hook_borrowed(
+            hook,
+            VargRuntimeContextRef {
+                transform: context.transform,
+                input: &context.input,
+                delta_time: context.delta_time,
+                total_time: context.total_time,
+                frame_index: context.frame_index,
+                exported_values: &context.exported_values,
+                state: context.state,
+                scene: context.scene,
+            },
+        )
+    }
+
+    /// Executes a lifecycle hook using borrowed immutable frame inputs.
+    pub fn run_hook_borrowed(
+        &self,
+        hook: &str,
+        mut context: VargRuntimeContextRef<'_>,
+    ) -> VargRuntimeOutput {
+        self.run_hook_inner(hook, &mut context)
+    }
+
+    fn run_hook_inner(
+        &self,
+        hook: &str,
+        context: &mut VargRuntimeContextRef<'_>,
+    ) -> VargRuntimeOutput {
         for (name, value) in &self.state_defaults {
             context
                 .state
@@ -797,7 +886,7 @@ impl VargScript {
 
         let mut output = VargRuntimeOutput {
             transform: context.transform,
-            state: context.state,
+            state: std::mem::take(&mut context.state),
             logs: Vec::new(),
             ui_commands: Vec::new(),
             audio_commands: Vec::new(),
@@ -810,11 +899,11 @@ impl VargScript {
         };
         let mut env = RuntimeEnvironment {
             script: self,
-            input: &context.input,
+            input: context.input,
             delta_time: context.delta_time,
             total_time: context.total_time,
             frame_index: context.frame_index,
-            exported_values: &context.exported_values,
+            exported_values: context.exported_values,
             scene: &context.scene,
             transform: &mut output.transform,
             state: &mut output.state,
