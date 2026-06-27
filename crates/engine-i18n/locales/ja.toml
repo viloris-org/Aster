@@ -376,7 +376,7 @@ command_add_particle_emitter = "パーティクルエミッターを追加"
 command_add_script = "スクリプトを追加"
 command_reset_layout = "レイアウトをリセット"
 command_palette = "コマンドパレット"
-command_about_aster = "Varg について"
+command_about_varg = "Varg について"
 
 # Command categories
 category_file = "ファイル"

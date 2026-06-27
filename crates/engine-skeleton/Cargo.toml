@@ -1,6 +1,6 @@
 [package]
 name = "engine-skeleton"
-description = "Aster skeletal animation: bones, skinning, IK, and bone modifiers"
+description = "Varg skeletal animation: bones, skinning, IK, and bone modifiers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

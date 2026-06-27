@@ -1,6 +1,6 @@
 # Quest Workflow UI Reference
 
-This document captures design observations from peer AI workbench references and translates them into Aster Quest UI direction. It complements `docs/ui-design-guidelines.md` and `docs/ai-editor-quest-prd.md`; it does not replace their product safety or state-machine requirements.
+This document captures design observations from peer AI workbench references and translates them into Varg Quest UI direction. It complements `docs/ui-design-guidelines.md` and `docs/ai-editor-quest-prd.md`; it does not replace their product safety or state-machine requirements.
 
 ## Core Direction
 
@@ -171,7 +171,7 @@ A useful knowledge artifact can show:
 
 When an activity feed row references memory or knowledge, clicking it should open that artifact in the right pane.
 
-## Aster Layout Model
+## Varg Layout Model
 
 ### Left Rail
 

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Physics abstraction and null backend for the Aster engine.
+//! Physics abstraction and null backend for the Varg engine.
 //!
 //! The null backend compiles everywhere and satisfies the trait contract without
 //! linking any physics library. The `rapier` feature enables [`RapierPhysicsBackend`],

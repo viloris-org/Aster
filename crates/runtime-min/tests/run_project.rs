@@ -7,13 +7,13 @@ use std::path::PathBuf;
 #[test]
 fn load_runtime_project_loads_example() {
     let workspace_root = find_workspace_root();
-    let project_path = workspace_root.join("examples/project");
+    let project_path = workspace_root.join("examples/project/fps_arena");
 
     let project = load_runtime_project(&project_path).expect("load example project");
 
-    assert_eq!(project.manifest.name, "Varg Examples");
+    assert_eq!(project.manifest.name, "FPS Arena");
     assert_eq!(project.manifest.asset_root, "assets");
-    assert_eq!(project.manifest.default_scene, "scenes/example.vscene");
+    assert_eq!(project.manifest.default_scene, "scenes/fps_arena.vscene");
     assert!(
         !project.scene.objects().is_empty(),
         "scene should have objects"
@@ -41,7 +41,7 @@ fn load_runtime_project_loads_jump_jump_example() {
 #[test]
 fn load_runtime_project_example_camera_sees_scene() {
     let workspace_root = find_workspace_root();
-    let project_path = workspace_root.join("examples/project");
+    let project_path = workspace_root.join("examples/project/fps_arena");
 
     let project = load_runtime_project(&project_path).expect("load example project");
     let world = runtime_min::extract_render_world(&project.scene);
@@ -68,7 +68,7 @@ fn load_runtime_project_fails_for_missing_project() {
 /// Verifies that load_runtime_project returns an error for invalid manifest.
 #[test]
 fn load_runtime_project_fails_for_invalid_manifest() {
-    let temp_dir = std::env::temp_dir().join("aster_test_invalid_manifest");
+    let temp_dir = std::env::temp_dir().join("varg_test_invalid_manifest");
     let _ = std::fs::create_dir_all(&temp_dir);
     let manifest_path = temp_dir.join("Varg.toml");
     std::fs::write(&manifest_path, "invalid toml content {{{").unwrap();
@@ -83,7 +83,9 @@ fn find_workspace_root() -> PathBuf {
     let mut current = std::env::current_dir().expect("get current dir");
     loop {
         if current.join("Cargo.toml").is_file()
-            && current.join("examples/project/Varg.toml").is_file()
+            && current
+                .join("examples/project/fps_arena/Varg.toml")
+                .is_file()
         {
             return current;
         }

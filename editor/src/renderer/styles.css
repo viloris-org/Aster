@@ -87,13 +87,13 @@
   --color-axis-z: var(--axis-z);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --radius-aster-sm: var(--radius-sm);
-  --radius-aster-md: var(--radius-md);
-  --radius-aster-lg: var(--radius-lg);
-  --radius-aster-xl: var(--radius-xl);
-  --shadow-aster-sm: var(--shadow-sm);
-  --shadow-aster-md: var(--shadow-md);
-  --shadow-aster-lg: var(--shadow-lg);
+  --radius-varg-sm: var(--radius-sm);
+  --radius-varg-md: var(--radius-md);
+  --radius-varg-lg: var(--radius-lg);
+  --radius-varg-xl: var(--radius-xl);
+  --shadow-varg-sm: var(--shadow-sm);
+  --shadow-varg-md: var(--shadow-md);
+  --shadow-varg-lg: var(--shadow-lg);
 }
 
 @layer base {

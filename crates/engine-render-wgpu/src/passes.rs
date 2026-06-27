@@ -92,7 +92,7 @@ pub(crate) fn encode_batched_forward_pass<'a>(
         stencil_ops: None,
     });
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("aster forward pass"),
+        label: Some("varg forward pass"),
         color_attachments: &[
             color_attachment,
             normal_attachment,
@@ -156,7 +156,7 @@ pub(crate) fn encode_shadow_pass(
     mesh_cache: &HashMap<String, MeshBuffers>,
 ) {
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("aster shadow pass"),
+        label: Some("varg shadow pass"),
         color_attachments: &[],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: depth_view,
@@ -222,7 +222,7 @@ pub(crate) fn encode_grid_pass(
         stencil_ops: None,
     });
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("aster grid pass"),
+        label: Some("varg grid pass"),
         color_attachments: &[color_attachment],
         depth_stencil_attachment: depth_attachment,
         timestamp_writes: None,
@@ -264,7 +264,7 @@ pub(crate) fn encode_skybox_pass(
         stencil_ops: None,
     });
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("aster skybox pass"),
+        label: Some("varg skybox pass"),
         color_attachments: &[color_attachment],
         depth_stencil_attachment: depth_attachment,
         timestamp_writes: None,

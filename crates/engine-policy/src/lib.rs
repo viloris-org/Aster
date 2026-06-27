@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Deterministic policy engine for the Aster AI Editor Copilot.
+//! Deterministic policy engine for the Varg AI Editor Copilot.
 //!
 //! Owns:
 //! - Core AI identifiers (TaskId, SnapshotId, WorkspaceId, GrantHash, BundleHash, ContextHash)

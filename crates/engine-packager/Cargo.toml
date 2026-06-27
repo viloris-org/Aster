@@ -1,6 +1,6 @@
 [package]
 name = "engine-packager"
-description = "Aster project build and package pipeline"
+description = "Varg project build and package pipeline"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

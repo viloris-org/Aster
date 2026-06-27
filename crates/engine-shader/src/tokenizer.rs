@@ -1,4 +1,4 @@
-//! Shader source tokenizer for the Aster shading language.
+//! Shader source tokenizer for the Varg shading language.
 
 /// Token produced by the shader tokenizer.
 #[derive(Clone, Debug, PartialEq)]
@@ -19,7 +19,7 @@ pub enum ShaderToken {
     Eof,
 }
 
-/// Reserved keywords in the Aster shading language.
+/// Reserved keywords in the Varg shading language.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShaderKeyword {
     /// `fn` keyword.

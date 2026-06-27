@@ -1190,7 +1190,7 @@ pub fn register_core_commands(registry: &mut CommandRegistry) {
         ),
         command(
             "help.about",
-            "About Aster",
+            "About Varg",
             "Help",
             None,
             CommandAvailability::Always,
@@ -1474,14 +1474,14 @@ mod tests {
     fn validates_project_creation_and_remembers_root_path() {
         let request = NewProjectRequest {
             name: "Space Demo".to_owned(),
-            location: Some(PathBuf::from("/tmp/aster")),
+            location: Some(PathBuf::from("/tmp/varg")),
             template_id: Some("empty".to_owned()),
             toolchain_version: Some("0.1.0".to_owned()),
         };
 
         let plan = validate_new_project(&request).unwrap();
 
-        assert_eq!(plan.path, PathBuf::from("/tmp/aster/Space Demo"));
+        assert_eq!(plan.path, PathBuf::from("/tmp/varg/Space Demo"));
     }
 
     #[test]
@@ -1683,11 +1683,11 @@ mod tests {
     #[test]
     fn opens_example_project_and_loads_manifest_scene_and_assets() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let project_root = manifest_dir.join("../../examples/project");
+        let project_root = manifest_dir.join("../../examples/project/fps_arena");
 
         let ctx = ProjectContext::open(&project_root).unwrap();
 
-        assert_eq!(ctx.manifest.name, "Varg Example");
+        assert_eq!(ctx.manifest.name, "FPS Arena");
         assert!(ctx.scene.object_count() > 0);
         assert_eq!(ctx.root, project_root);
     }
@@ -1695,7 +1695,7 @@ mod tests {
     #[test]
     fn ai_context_includes_scene_objects_and_assets() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let project_root = manifest_dir.join("../../examples/project");
+        let project_root = manifest_dir.join("../../examples/project/fps_arena");
 
         let ctx = ProjectContext::open(&project_root).unwrap();
         let ai_ctx = ctx.to_ai_context();

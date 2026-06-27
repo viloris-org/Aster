@@ -10,7 +10,7 @@ use engine_render::{RenderCamera, RenderDevice, RenderFrame, RenderObject, Rende
 use engine_render_wgpu::{WgpuOffscreenConfig, WgpuRenderDevice};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let frames = std::env::var("ASTER_BENCH_FRAMES")
+    let frames = std::env::var("VARG_BENCH_FRAMES")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(240);

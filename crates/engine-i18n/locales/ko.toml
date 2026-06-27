@@ -376,7 +376,7 @@ command_add_particle_emitter = "파티클 이미터 추가"
 command_add_script = "스크립트 추가"
 command_reset_layout = "레이아웃 초기화"
 command_palette = "명령 팔레트"
-command_about_aster = "Varg 정보"
+command_about_varg = "Varg 정보"
 
 # Command categories
 category_file = "파일"

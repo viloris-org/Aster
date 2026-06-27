@@ -1,109 +1,109 @@
-# Aster 超分与插帧渲染能力 PRD
+# Varg Super Resolution and Frame Generation Rendering Capability PRD
 
-状态：Draft  
-目标版本：分阶段交付  
-最后更新：2026-06-20
+Status: Draft  
+Target version: phased delivery  
+Last updated: 2026-06-20
 
 ## Problem Statement
 
-Aster 已经有 `engine-render` 抽象、`engine-render-wgpu` 后端、动态分辨率配置和 4K/120 Hz 运行时性能目标，但当前渲染输出仍主要假设“内部渲染分辨率接近最终输出分辨率”。这对桌面高刷、掌机、移动端和未来 XR/云游戏都不够：
+Varg already has the `engine-render` abstraction, the `engine-render-wgpu` backend, dynamic resolution configuration, and 4K/120 Hz runtime performance targets. The current rendering output still mostly assumes that internal render resolution is close to final output resolution. That is not enough for high-refresh desktop, handheld, mobile, future XR, or cloud gaming:
 
-- 高分辨率和高刷新率会快速吃掉 GPU、带宽、功耗和热预算。
-- 移动端设备通常更受限于 tile memory、带宽、温控、驱动能力和电池。
-- 桌面端玩家已经预期 DLSS、FSR、XeSS、DirectSR、MetalFX 等主流超分能力。
-- 新一代厂商方案正在把超分、反走样、插帧、多帧生成、低延迟和神经渲染绑定在一起，但硬件、平台、SDK 和授权差异很大。
-- 插帧能提高显示流畅度，但会放大输入延迟、UI 合成、present pacing、motion vector、遮挡和后处理顺序问题。
-- 如果直接把某一家 SDK 接进 `engine-render-wgpu`，Aster 会过早绑定到单一平台和厂商，移动端也会被边缘化。
+- High resolution and high refresh rates quickly consume GPU, bandwidth, power, and thermal budgets.
+- Mobile devices are usually more constrained by tile memory, bandwidth, thermals, driver capabilities, and battery.
+- Desktop players already expect mainstream super-resolution capabilities such as DLSS, FSR, XeSS, DirectSR, and MetalFX.
+- New vendor solutions increasingly bundle super resolution, anti-aliasing, frame generation, multi-frame generation, low latency, and neural rendering, but hardware, platform, SDK, and licensing constraints differ widely.
+- Frame generation can improve perceived smoothness, but it amplifies input latency, UI composition, present pacing, motion vector, occlusion, and post-processing-ordering problems.
+- If Varg directly integrates one vendor SDK into `engine-render-wgpu`, it will bind too early to one platform and vendor while marginalizing mobile.
 
-Aster 需要先定义平台无关的超分与插帧能力模型，让游戏内容和编辑器设置面向“能力、质量档位和预算”，而不是面向某个厂商 SDK。移动端必须从第一阶段开始作为核心目标，不能等桌面实现完成后再补。
+Varg first needs a platform-independent super-resolution and frame-generation capability model. Game content and editor settings should target capabilities, quality tiers, and budgets rather than a specific vendor SDK. Mobile must be a core target from the first phase, not something added after desktop is complete.
 
 ## Solution
 
-Aster 将建立一个跨平台的 Render Scaling and Frame Generation 能力层。该能力层负责：
+Varg will establish a cross-platform Render Scaling and Frame Generation capability layer. This layer is responsible for:
 
-- 将内部渲染分辨率、显示输出分辨率、UI 分辨率和截图/录制分辨率解耦。
-- 定义统一的超分输入数据：color、depth、motion vectors、exposure、jitter、near/far、render size、display size、reactive/transparency masks、frame history。
-- 定义统一的插帧输入数据：连续帧 color、depth、motion vectors、UI composition policy、present timing、latency markers、frame generation multiplier。
-- 提供 runtime capability negotiation，按平台、后端、GPU、驱动、SDK、功耗和温度选择可用方案。
-- 提供稳定的 editor/project settings，让游戏可以声明目标质量和移动端策略。
-- 提供保守 fallback：native、dynamic resolution、built-in spatial scaler、built-in temporal upscaler。
+- Decoupling internal render resolution, display output resolution, UI resolution, and screenshot/recording resolution.
+- Defining unified super-resolution input data: color, depth, motion vectors, exposure, jitter, near/far, render size, display size, reactive/transparency masks, and frame history.
+- Defining unified frame-generation input data: consecutive-frame color, depth, motion vectors, UI composition policy, present timing, latency markers, and frame-generation multiplier.
+- Providing runtime capability negotiation that selects available solutions by platform, backend, GPU, driver, SDK, power, and temperature.
+- Providing stable editor/project settings so games can declare target quality and mobile strategy.
+- Providing conservative fallbacks: native, dynamic resolution, built-in spatial scaler, and built-in temporal upscaler.
 
-技术支持分为三层：
+Technical support is divided into three layers:
 
-1. **Aster 内置通用层**
-   - Native render scale。
-   - Dynamic Resolution Scaling。
-   - 简单 spatial upscaler。
-   - Temporal upscaler/TAA-ready path。
-   - 可选的轻量移动端 upscaler。
+1. **Varg built-in common layer**
+   - Native render scale.
+   - Dynamic Resolution Scaling.
+   - Simple spatial upscaler.
+   - Temporal upscaler/TAA-ready path.
+   - Optional lightweight mobile upscaler.
 
-2. **开放或较易跨平台的集成**
-   - AMD FSR 1/2/3。
-   - AMD FSR Upscaling / FSR 4 / Redstone，按 SDK 和硬件能力启用。
-   - Intel XeSS SR/FG/MFG。
-   - Apple MetalFX Upscaling / Frame Interpolation，用于 iOS、iPadOS、macOS、tvOS、visionOS。
-   - Qualcomm Snapdragon Game Super Resolution / GSR，作为 Android/Windows on Arm 移动与掌机方向的候选。
-   - Arm 或 GPU 厂商提供的移动端超分方案，作为 backend-specific adapter，不污染公共 API。
+2. **Open or relatively cross-platform integrations**
+   - AMD FSR 1/2/3.
+   - AMD FSR Upscaling / FSR 4 / Redstone, enabled according to SDK and hardware capability.
+   - Intel XeSS SR/FG/MFG.
+   - Apple MetalFX Upscaling / Frame Interpolation for iOS, iPadOS, macOS, tvOS, and visionOS.
+   - Qualcomm Snapdragon Game Super Resolution / GSR as a candidate for Android/Windows on Arm mobile and handheld targets.
+   - Mobile super-resolution solutions from Arm or GPU vendors as backend-specific adapters that do not contaminate the public API.
 
-3. **平台或厂商专用集成**
-   - NVIDIA DLSS Super Resolution、DLAA、Frame Generation、Multi Frame Generation、Ray Reconstruction。
-   - NVIDIA Streamline，作为 Windows 桌面聚合入口候选。
-   - Microsoft DirectSR，作为 D3D12/Windows 多厂商超分入口候选。
-   - 平台驱动级 Auto SR / driver override，仅作为检测和兼容性信息，不作为 Aster 的核心渲染路径。
+3. **Platform- or vendor-specific integrations**
+   - NVIDIA DLSS Super Resolution, DLAA, Frame Generation, Multi Frame Generation, and Ray Reconstruction.
+   - NVIDIA Streamline as a candidate Windows desktop aggregation entry point.
+   - Microsoft DirectSR as a candidate D3D12/Windows multi-vendor super-resolution entry point.
+   - Platform driver-level Auto SR / driver override only as detection and compatibility information, not as a core Varg rendering path.
 
 ## Goals
 
-- 让 Aster 在桌面、掌机和移动端都能以更低内部渲染成本输出高质量画面。
-- 将移动端作为 P0 设计约束，覆盖 Android、iOS/iPadOS、Windows on Arm 和移动 GPU 热预算。
-- 为 DLSS、FSR、XeSS、MetalFX、GSR、DirectSR 和 Streamline 预留稳定集成边界。
-- 先交付可靠超分，再交付插帧；插帧不得破坏输入响应、UI 可读性或 frame pacing。
-- 让项目作者可以按平台设置质量档位、目标 FPS、最低 render scale、功耗策略和 fallback。
-- 让编辑器能显示当前 active upscaler、render scale、输出分辨率、GPU 时间、插帧倍率和延迟状态。
-- 保持 headless 测试和无 GPU CI 可验证公共配置、能力选择和 fallback 行为。
+- Let Varg output high-quality images at lower internal rendering cost across desktop, handheld, and mobile.
+- Treat mobile as a P0 design constraint covering Android, iOS/iPadOS, Windows on Arm, and mobile GPU thermal budgets.
+- Reserve stable integration boundaries for DLSS, FSR, XeSS, MetalFX, GSR, DirectSR, and Streamline.
+- Deliver reliable super resolution before frame generation; frame generation must not break input responsiveness, UI readability, or frame pacing.
+- Let project authors configure quality tiers, target FPS, minimum render scale, power policy, and fallback per platform.
+- Let the editor show the current active upscaler, render scale, output resolution, GPU time, frame-generation multiplier, and latency state.
+- Keep public configuration, capability selection, and fallback behavior verifiable in headless tests and GPU-less CI.
 
 ## Non-Goals
 
-- 第一阶段不承诺接入所有厂商 SDK。
-- 第一阶段不实现 DLSS/FSR/XeSS/MetalFX/GSR 的完整生产集成。
-- 第一阶段不承诺多帧生成或插帧质量。
-- 不把 Aster 场景、材质或 UI 绑定到某个厂商 SDK。
-- 不把驱动控制面板里的外部覆盖功能视为引擎内置支持。
-- 不在移动端强行启用高成本 ML upscaler；移动端必须尊重功耗和温度。
+- The first phase does not promise integration with every vendor SDK.
+- The first phase does not implement full production integrations for DLSS/FSR/XeSS/MetalFX/GSR.
+- The first phase does not promise multi-frame generation or frame-generation quality.
+- Do not bind Varg scenes, materials, or UI to a specific vendor SDK.
+- Do not treat external override features in driver control panels as built-in engine support.
+- Do not force high-cost ML upscalers on mobile; mobile must respect power and temperature.
 
 ## Supported Technology Matrix
 
-| 技术 | 分类 | 主要平台 | 支持策略 |
+| Technology | Category | Main platforms | Support strategy |
 | --- | --- | --- | --- |
-| Native + Dynamic Resolution | 内置基础能力 | 全平台 | P0 |
-| Built-in Spatial Upscaler | 内置 fallback | 全平台 | P0 |
-| Built-in Temporal Upscaler / TAA path | 内置时域能力 | 全平台 | P1 |
-| AMD FSR 1 | 空间超分 | PC、掌机、部分移动/主机类环境 | P1 候选，作为低门槛 fallback |
-| AMD FSR 2/3 | 时域超分/插帧 | PC、掌机、支持的 Vulkan/DX 环境 | P1/P2 候选 |
-| AMD FSR Upscaling / FSR 4 / Redstone | ML 超分/神经渲染套件 | 主要 PC/掌机，RDNA 4 最优 | P2+，硬件和 SDK 能力检测 |
-| NVIDIA DLSS SR/DLAA | AI 超分/反走样 | RTX 桌面/笔记本 | P2+，Windows 优先 |
-| NVIDIA DLSS FG/MFG | 插帧/多帧生成 | RTX，MFG 依赖新硬件 | P3+，需低延迟和 present pacing 成熟 |
-| NVIDIA Streamline | 多厂商集成框架 | Windows 桌面 | P2+ 候选 |
-| Intel XeSS SR | AI/DP4a 超分 | Intel Arc/iGPU，部分跨厂商 GPU | P2 候选 |
-| Intel XeSS FG/MFG | 插帧/多帧生成 | 主要 Windows/DX12，能力依 SDK | P3+ 候选 |
-| Microsoft DirectSR | D3D12 多厂商 SR API | Windows/D3D12 | P2+，仅 D3D12 backend 可用 |
-| Apple MetalFX Upscaling | 平台超分 | iOS、iPadOS、macOS、tvOS、visionOS | Mobile P1 |
-| Apple MetalFX Frame Interpolation | 平台插帧 | Apple Metal 4 支持设备 | Mobile P3 |
-| Qualcomm Snapdragon GSR | 移动/Arm 超分 | Snapdragon Android、Windows on Arm | Mobile P1/P2 候选 |
-| Arm/MediaTek/Samsung GPU vendor SR | 移动厂商能力 | Android SoC | Mobile P2+ 调研和适配 |
-| OS/Driver Auto SR | 外部覆盖 | Windows/驱动支持设备 | 检测/说明，不作为核心路径 |
+| Native + Dynamic Resolution | Built-in foundation | All platforms | P0 |
+| Built-in Spatial Upscaler | Built-in fallback | All platforms | P0 |
+| Built-in Temporal Upscaler / TAA path | Built-in temporal capability | All platforms | P1 |
+| AMD FSR 1 | Spatial super resolution | PC, handheld, some mobile/console-like environments | P1 candidate, low-barrier fallback |
+| AMD FSR 2/3 | Temporal super resolution / frame generation | PC, handheld, supported Vulkan/DX environments | P1/P2 candidate |
+| AMD FSR Upscaling / FSR 4 / Redstone | ML super resolution / neural rendering suite | Mainly PC/handheld, best on RDNA 4 | P2+, hardware and SDK capability detection |
+| NVIDIA DLSS SR/DLAA | AI super resolution / anti-aliasing | RTX desktop/laptop | P2+, Windows first |
+| NVIDIA DLSS FG/MFG | Frame generation / multi-frame generation | RTX, MFG depends on newer hardware | P3+, requires mature low-latency and present pacing |
+| NVIDIA Streamline | Multi-vendor integration framework | Windows desktop | P2+ candidate |
+| Intel XeSS SR | AI/DP4a super resolution | Intel Arc/iGPU, some cross-vendor GPUs | P2 candidate |
+| Intel XeSS FG/MFG | Frame generation / multi-frame generation | Mainly Windows/DX12, capability depends on SDK | P3+ candidate |
+| Microsoft DirectSR | D3D12 multi-vendor SR API | Windows/D3D12 | P2+, D3D12 backend only |
+| Apple MetalFX Upscaling | Platform super resolution | iOS, iPadOS, macOS, tvOS, visionOS | Mobile P1 |
+| Apple MetalFX Frame Interpolation | Platform frame interpolation | Apple Metal 4 supported devices | Mobile P3 |
+| Qualcomm Snapdragon GSR | Mobile/Arm super resolution | Snapdragon Android, Windows on Arm | Mobile P1/P2 candidate |
+| Arm/MediaTek/Samsung GPU vendor SR | Mobile vendor capability | Android SoC | Mobile P2+ research and adaptation |
+| OS/Driver Auto SR | External override | Windows/driver-supported devices | Detection/explanation only, not a core path |
 
 ## Mobile-First Requirements
 
-- Android 和 iOS/iPadOS 必须拥有明确的 render scale、dynamic resolution、thermal policy 和 battery policy。
-- 移动端默认优先稳定帧时间和温控，不追求短时间峰值画质。
-- 移动端必须支持 30/40/45/60/90/120 FPS 目标档位，具体可用值按设备刷新率协商。
-- 移动端必须支持更激进的 internal resolution lower bound，例如 50% 以下是否可用由项目配置决定。
-- 移动端 UI、文本、HUD 和触控反馈不得被低质量插帧或超分破坏。
-- 移动端应优先使用平台原生能力：MetalFX on Apple、Snapdragon GSR on Qualcomm、Vulkan/厂商扩展 on Android。
-- Android 后端必须假设 GPU、驱动和扩展碎片化，不允许公共 API 依赖单一 SoC。
-- iOS/iPadOS 后端必须利用 Metal 的平台能力，同时保持与 `wgpu` 公共渲染抽象隔离。
-- 移动端必须暴露 thermal throttling、GPU time、render scale、upscaler mode 和 dropped frame telemetry。
-- 插帧在移动端默认关闭，只有在延迟、UI 合成和功耗策略满足条件时才允许启用。
+- Android and iOS/iPadOS must have explicit render scale, dynamic resolution, thermal policy, and battery policy.
+- Mobile defaults prioritize stable frame time and thermal control, not short-lived peak image quality.
+- Mobile must support 30/40/45/60/90/120 FPS target tiers, with concrete availability negotiated against the device refresh rate.
+- Mobile must support more aggressive internal resolution lower bounds, with project configuration deciding whether values below 50% are allowed.
+- Mobile UI, text, HUD, and touch feedback must not be damaged by low-quality frame generation or super resolution.
+- Mobile should prefer native platform capabilities: MetalFX on Apple, Snapdragon GSR on Qualcomm, and Vulkan/vendor extensions on Android.
+- Android backends must assume GPU, driver, and extension fragmentation. Public APIs must not depend on a single SoC.
+- iOS/iPadOS backends must use Metal platform capabilities while keeping them isolated from the public `wgpu` rendering abstraction.
+- Mobile must expose thermal throttling, GPU time, render scale, upscaler mode, and dropped-frame telemetry.
+- Frame generation is disabled by default on mobile and can only be enabled when latency, UI composition, and power policy conditions are satisfied.
 
 ## User Stories
 
@@ -174,7 +174,7 @@ Frame generation backends must additionally request:
 
 ### Desktop Windows
 
-- `wgpu` remains the current practical backend for Aster.
+- `wgpu` remains the current practical backend for Varg.
 - DirectSR requires a D3D12 path or native handle integration; do not assume it works through portable `wgpu` APIs.
 - Streamline/DLSS/XeSS/FSR integrations must be isolated behind backend-specific adapters.
 - Frame generation should not ship until the runtime can measure latency, queue depth and present pacing.
@@ -195,7 +195,7 @@ Frame generation backends must additionally request:
 ### Windows on Arm and Handhelds
 
 - Treat Windows on Arm as both desktop and mobile-adjacent.
-- Snapdragon X/G devices may expose driver or platform upscaling controls; Aster should detect and document interactions but not rely on driver overrides for correctness.
+- Snapdragon X/G devices may expose driver or platform upscaling controls; Varg should detect and document interactions but not rely on driver overrides for correctness.
 - Handheld presets should bias toward battery, thermals and stable frame pacing.
 
 ## Testing Decisions

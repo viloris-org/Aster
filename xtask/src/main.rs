@@ -140,7 +140,7 @@ fn print_vscene_help() {
 }
 
 fn package(args: Vec<String>) -> EngineResult<()> {
-    let mut project = std::path::PathBuf::from("examples/project");
+    let mut project = std::path::PathBuf::from("examples/project/fps_arena");
     let mut target = PackageTarget::current_desktop();
     let mut format = PackageFormat::Folder;
     let mut channel = PackageChannel::Debug;

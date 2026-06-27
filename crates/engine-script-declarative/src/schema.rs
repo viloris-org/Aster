@@ -161,8 +161,8 @@ fn default_true() -> bool {
 pub fn generate_json_schema() -> serde_json::Value {
     serde_json::json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
-        "title": "AsterBehaviorSchema",
-        "description": "Declarative behavior tree schema for Aster game engine",
+        "title": "VargBehaviorSchema",
+        "description": "Declarative behavior tree schema for Varg game engine",
         "type": "object",
         "required": ["entity", "behaviors"],
         "properties": {
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn json_schema_generation() {
         let schema = generate_json_schema();
-        assert_eq!(schema["title"], "AsterBehaviorSchema");
+        assert_eq!(schema["title"], "VargBehaviorSchema");
         assert!(schema["definitions"]["BehaviorNode"].is_object());
     }
 }

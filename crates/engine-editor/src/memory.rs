@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 // ─── ProjectMemory ────────────────────────────────────────────────────────────
 
-/// Persistent project-level context stored in `.aster/project.md`.
+/// Persistent project-level context stored in `.varg/project.md`.
 ///
 /// This file is AI-maintained (and human-editable) and contains:
 /// - Project description and goals
@@ -34,7 +34,7 @@ pub struct ProjectMemory {
 
 impl ProjectMemory {
     /// Path to the project memory file relative to project root.
-    const FILE_PATH: &'static str = ".aster/project.md";
+    const FILE_PATH: &'static str = ".varg/project.md";
 
     /// Creates a new ProjectMemory bound to a project root.
     ///
@@ -127,7 +127,7 @@ impl ProjectMemory {
 
 // ─── UserMemory ──────────────────────────────────────────────────────────────
 
-/// User-specific habit and preference memory stored in `.aster/memory.md`.
+/// User-specific habit and preference memory stored in `.varg/memory.md`.
 ///
 /// This file is NOT committed to version control (should be in .gitignore).
 /// The AI agent observes user patterns and updates this file to personalize
@@ -163,7 +163,7 @@ pub struct MemoryEntry {
 
 impl UserMemory {
     /// Path to the user memory file relative to project root.
-    const FILE_PATH: &'static str = ".aster/memory.md";
+    const FILE_PATH: &'static str = ".varg/memory.md";
 
     /// Creates a new UserMemory bound to a project root.
     pub fn open(project_root: &Path) -> Self {
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn project_memory_roundtrip() {
-        let tmp = env::temp_dir().join("aster_test_project_memory");
+        let tmp = env::temp_dir().join("varg_test_project_memory");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn project_memory_append_section() {
-        let tmp = env::temp_dir().join("aster_test_project_memory_append");
+        let tmp = env::temp_dir().join("varg_test_project_memory_append");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn user_memory_upsert_and_parse() {
-        let tmp = env::temp_dir().join("aster_test_user_memory");
+        let tmp = env::temp_dir().join("varg_test_user_memory");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn user_memory_confidence_increases() {
-        let tmp = env::temp_dir().join("aster_test_user_memory_conf");
+        let tmp = env::temp_dir().join("varg_test_user_memory_conf");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn user_memory_remove() {
-        let tmp = env::temp_dir().join("aster_test_user_memory_rm");
+        let tmp = env::temp_dir().join("varg_test_user_memory_rm");
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
 

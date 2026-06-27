@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Audio abstraction, asset decoding, and default backends for the Aster engine.
+//! Audio abstraction, asset decoding, and default backends for the Varg engine.
 //!
 //! The null backend compiles everywhere and satisfies the trait contract without
 //! linking any audio library. A real backend (FMOD, kira, cpal, …) replaces it

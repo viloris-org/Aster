@@ -1,6 +1,6 @@
 [package]
 name = "runtime-min"
-description = "Aster minimal runtime build path"
+description = "Varg minimal runtime build path"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

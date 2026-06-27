@@ -164,7 +164,7 @@ Renderer reads wheel_transforms for mesh placement
 ## Phase 2: Runtime Collision Filtering
 
 ### Motivation
-Commercial engines allow per-entity or per-pair collision filtering at runtime (Unreal's `NotifyHit`, Unity's collision matrix + layer override). Currently Aster can only decide layering at collider creation time.
+Commercial engines allow per-entity or per-pair collision filtering at runtime (Unreal's `NotifyHit`, Unity's collision matrix + layer override). Currently Varg can only decide layering at collider creation time.
 
 ### Design: Contact Filter Chain
 

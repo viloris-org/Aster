@@ -6,7 +6,7 @@ use varg_editor_tauri_lib::EditorHost;
 
 fn temp_store() -> (tempfile::TempDir, FileEditorStore) {
     let dir = tempfile::tempdir().expect("create temp dir");
-    let store = FileEditorStore::new(&dir.path().join("aster-test-state.toml"));
+    let store = FileEditorStore::new(&dir.path().join("varg-test-state.toml"));
     (dir, store)
 }
 

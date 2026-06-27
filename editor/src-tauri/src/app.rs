@@ -93,7 +93,6 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
 
     let background = Color(24, 24, 24, 255);
     let window = WebviewWindowBuilder::from_config(app, window_config)?
-        .transparent(false)
         .background_color(background)
         .on_page_load(|_webview, payload| {
             tracing::info!(

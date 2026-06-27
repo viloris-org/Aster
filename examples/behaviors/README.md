@@ -9,7 +9,7 @@ Basic WASD + Space player controller using parallel behaviors.
 
 **LLM Prompt to generate this:**
 ```
-Create a player controller behavior for an Aster game engine entity with:
+Create a player controller behavior for an Varg game engine entity with:
 - WASD movement (forward at 5.0 speed, back at 3.0, strafe at 4.0)
 - Space to jump with upward impulse of 15
 - All controls should work simultaneously (parallel execution)

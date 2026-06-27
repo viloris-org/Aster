@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Core runtime primitives shared by all Aster engine crates.
+//! Core runtime primitives shared by all Varg engine crates.
 
 pub mod config;
 pub mod error;

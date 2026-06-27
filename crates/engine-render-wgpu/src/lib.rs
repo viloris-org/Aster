@@ -1,4 +1,4 @@
-//! WebGPU rendering backend for Aster.
+//! WebGPU rendering backend for Varg.
 
 #![deny(missing_docs)]
 

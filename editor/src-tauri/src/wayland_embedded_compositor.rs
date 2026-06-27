@@ -1,7 +1,7 @@
 //! Wayland embedded compositor presentation boundary.
 //!
 //! Wayland does not provide an X11-style foreign child-window embedding model.
-//! Aster's Linux editor embedding path intentionally runs under X11/Xwayland
+//! Varg's Linux editor embedding path intentionally runs under X11/Xwayland
 //! instead of native Wayland so viewport embedding can use X11 window handles
 //! without depending on experimental compositor ownership.
 //!
@@ -1425,7 +1425,7 @@ mod backend {
         ));
         let runtime_telemetry = telemetry.clone();
         let thread = thread::Builder::new()
-            .name("aster-wayland-embedded-compositor".to_owned())
+            .name("varg-wayland-embedded-compositor".to_owned())
             .spawn(move || run_runtime(viewport, command_rx, ready_tx, runtime_telemetry))
             .map_err(|error| format!("spawn Wayland embedded compositor: {error}"))?;
 

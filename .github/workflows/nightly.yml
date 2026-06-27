@@ -52,7 +52,8 @@ jobs:
             libudev-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            libxdo-dev
+            libxdo-dev \
+            mold
 
       - uses: oven-sh/setup-bun@v2
 

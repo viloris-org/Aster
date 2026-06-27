@@ -1,10 +1,10 @@
-# Aster UI Design Guidelines
+# Varg UI Design Guidelines
 
-This document defines the product UI language for Aster Editor, Copilot, and Quest. It is a product design contract, not a styling suggestion. UI decisions should start from user tasks, then expose only the surfaces needed for those tasks.
+This document defines the product UI language for Varg Editor, Copilot, and Quest. It is a product design contract, not a styling suggestion. UI decisions should start from user tasks, then expose only the surfaces needed for those tasks.
 
 ## Product Positioning
 
-Aster is an AI-native game editor workbench.
+Varg is an AI-native game editor workbench.
 
 The core experience is not an AI dashboard, task tracker, or agent runtime monitor. The user should feel that they are editing a game in a stable creative workspace, with AI available as contextual assistance.
 
@@ -80,7 +80,7 @@ Hub, Editor, Copilot, and Quest must feel like one product. They may have differ
 - Artifact presentation
 - State language
 
-Quest is not a separate visual product. It is the asynchronous AI task mode of Aster Workbench.
+Quest is not a separate visual product. It is the asynchronous AI task mode of Varg Workbench.
 
 ### User Control Is Highest Priority
 
@@ -231,7 +231,7 @@ If AI is about to write, run commands, or use broad project knowledge, the confi
 
 ### Style
 
-Aster should use a professional dark workbench style.
+Varg should use a professional dark workbench style.
 
 The interface should feel:
 
@@ -471,7 +471,7 @@ Requirements:
 
 ## Responsive Behavior
 
-Aster is a desktop editor first, but it must degrade cleanly.
+Varg is a desktop editor first, but it must degrade cleanly.
 
 Breakpoints:
 
@@ -543,7 +543,7 @@ Partial application rule: if a change set is partly applied, split it into `appl
 
 ## Quest State Machine
 
-Quest is asynchronous AI work inside the Aster Workbench. It must be modeled as a state machine, not a dashboard timeline.
+Quest is asynchronous AI work inside the Varg Workbench. It must be modeled as a state machine, not a dashboard timeline.
 
 | State | User sees | Primary CTA | Stop | Resume | Add instruction | Partial artifacts | Undo | Blocks other Quest | Evidence drawer |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Minimal Aster runtime and first playable game runner.
+//! Minimal Varg runtime and first playable game runner.
 
 use std::{
     collections::HashMap,
@@ -2871,23 +2871,23 @@ pub fn extract_render_world(scene: &Scene) -> RenderWorld {
 
 /// Builds the native runtime performance policy from environment overrides.
 ///
-/// Supported variables are `ASTER_PRESENT_MODE`, `ASTER_TARGET_FPS`,
-/// `ASTER_RENDER_SCALE`, and `ASTER_DYNAMIC_RESOLUTION`.
+/// Supported variables are `VARG_PRESENT_MODE`, `VARG_TARGET_FPS`,
+/// `VARG_RENDER_SCALE`, and `VARG_DYNAMIC_RESOLUTION`.
 pub fn runtime_performance_config_from_env() -> RenderPerformanceConfig {
     let mut config = RenderPerformanceConfig::competitive_120hz();
-    if let Ok(value) = std::env::var("ASTER_PRESENT_MODE") {
+    if let Ok(value) = std::env::var("VARG_PRESENT_MODE") {
         config.present_strategy = match value.as_str() {
             "vsync" => PresentStrategy::VSync,
             "uncapped" => PresentStrategy::Uncapped,
             _ => PresentStrategy::LowLatency,
         };
     }
-    if let Ok(value) = std::env::var("ASTER_TARGET_FPS") {
+    if let Ok(value) = std::env::var("VARG_TARGET_FPS") {
         if let Ok(target_fps) = value.parse::<u32>() {
             config.dynamic_resolution.target_fps = target_fps.max(1);
         }
     }
-    if let Ok(value) = std::env::var("ASTER_RENDER_SCALE") {
+    if let Ok(value) = std::env::var("VARG_RENDER_SCALE") {
         if let Ok(scale) = value.parse::<f32>() {
             config.render_scale = scale.clamp(
                 config.dynamic_resolution.min_scale,
@@ -2895,7 +2895,7 @@ pub fn runtime_performance_config_from_env() -> RenderPerformanceConfig {
             );
         }
     }
-    if let Ok(value) = std::env::var("ASTER_DYNAMIC_RESOLUTION") {
+    if let Ok(value) = std::env::var("VARG_DYNAMIC_RESOLUTION") {
         config.dynamic_resolution.enabled = matches!(value.as_str(), "1" | "true" | "on");
     }
     config
@@ -2903,10 +2903,10 @@ pub fn runtime_performance_config_from_env() -> RenderPerformanceConfig {
 
 /// Builds render scaling settings from environment overrides.
 ///
-/// Supported variables are `ASTER_UPSCALER`, `ASTER_RENDER_QUALITY`,
-/// `ASTER_RENDER_SCALE_MIN`, `ASTER_RENDER_SCALE_MAX`, `ASTER_UPSCALE_SHARPNESS`,
-/// `ASTER_TARGET_FPS`, `ASTER_DYNAMIC_RESOLUTION`, `ASTER_BATTERY_POLICY`,
-/// `ASTER_FRAME_GENERATION`, `ASTER_UI_COMPOSITION`, and `ASTER_ANTI_ALIASING`.
+/// Supported variables are `VARG_UPSCALER`, `VARG_RENDER_QUALITY`,
+/// `VARG_RENDER_SCALE_MIN`, `VARG_RENDER_SCALE_MAX`, `VARG_UPSCALE_SHARPNESS`,
+/// `VARG_TARGET_FPS`, `VARG_DYNAMIC_RESOLUTION`, `VARG_BATTERY_POLICY`,
+/// `VARG_FRAME_GENERATION`, `VARG_UI_COMPOSITION`, and `VARG_ANTI_ALIASING`.
 pub fn runtime_scaling_settings_from_env() -> RenderScalingSettings {
     apply_runtime_scaling_env(RenderScalingSettings::default())
 }
@@ -3324,46 +3324,46 @@ fn gui_scissor_for_rect(x: f32, y: f32, width: f32, height: f32) -> [u32; 4] {
 }
 
 fn apply_runtime_scaling_env(mut settings: RenderScalingSettings) -> RenderScalingSettings {
-    if let Ok(value) = std::env::var("ASTER_UPSCALER") {
+    if let Ok(value) = std::env::var("VARG_UPSCALER") {
         settings.preferred_upscaler = Some(parse_upscaler(&value));
     }
-    if let Ok(value) = std::env::var("ASTER_RENDER_QUALITY") {
+    if let Ok(value) = std::env::var("VARG_RENDER_QUALITY") {
         settings.quality = parse_render_quality(&value);
     }
-    if let Ok(value) = std::env::var("ASTER_RENDER_SCALE_MIN") {
+    if let Ok(value) = std::env::var("VARG_RENDER_SCALE_MIN") {
         if let Ok(scale) = value.parse::<f32>() {
             settings.min_render_scale = scale;
         }
     }
-    if let Ok(value) = std::env::var("ASTER_RENDER_SCALE_MAX") {
+    if let Ok(value) = std::env::var("VARG_RENDER_SCALE_MAX") {
         if let Ok(scale) = value.parse::<f32>() {
             settings.max_render_scale = scale;
         }
     }
-    if let Ok(value) = std::env::var("ASTER_UPSCALE_SHARPNESS") {
+    if let Ok(value) = std::env::var("VARG_UPSCALE_SHARPNESS") {
         if let Ok(sharpness) = value.parse::<f32>() {
             settings.sharpness = sharpness;
         }
     }
-    if let Ok(value) = std::env::var("ASTER_TARGET_FPS") {
+    if let Ok(value) = std::env::var("VARG_TARGET_FPS") {
         if let Ok(target_fps) = value.parse::<u32>() {
             settings.target_fps = target_fps;
         }
     }
-    if let Ok(value) = std::env::var("ASTER_DYNAMIC_RESOLUTION") {
+    if let Ok(value) = std::env::var("VARG_DYNAMIC_RESOLUTION") {
         settings.dynamic_resolution = matches!(value.as_str(), "1" | "true" | "on");
     }
-    if let Ok(value) = std::env::var("ASTER_BATTERY_POLICY") {
+    if let Ok(value) = std::env::var("VARG_BATTERY_POLICY") {
         settings.battery_policy = parse_battery_policy(&value);
     }
-    if let Ok(value) = std::env::var("ASTER_FRAME_GENERATION") {
+    if let Ok(value) = std::env::var("VARG_FRAME_GENERATION") {
         settings.frame_generation = parse_frame_generation(&value);
     }
-    if let Ok(value) = std::env::var("ASTER_UI_COMPOSITION") {
+    if let Ok(value) = std::env::var("VARG_UI_COMPOSITION") {
         settings.ui_composition = parse_ui_composition(&value);
     }
     if let Ok(value) =
-        std::env::var("ASTER_ANTI_ALIASING").or_else(|_| std::env::var("ASTER_RENDER_AA"))
+        std::env::var("VARG_ANTI_ALIASING").or_else(|_| std::env::var("VARG_RENDER_AA"))
     {
         settings.anti_aliasing = parse_anti_aliasing(&value);
     }
@@ -3446,7 +3446,7 @@ pub fn runtime_scaling_context() -> RenderScalingContext {
     } else {
         RenderPlatformClass::Desktop
     };
-    let thermal_state = match std::env::var("ASTER_THERMAL_STATE")
+    let thermal_state = match std::env::var("VARG_THERMAL_STATE")
         .unwrap_or_default()
         .to_ascii_lowercase()
         .as_str()
@@ -3456,7 +3456,7 @@ pub fn runtime_scaling_context() -> RenderScalingContext {
         "critical" => ThermalState::Critical,
         _ => ThermalState::Nominal,
     };
-    let battery_saver = std::env::var("ASTER_BATTERY_SAVER")
+    let battery_saver = std::env::var("VARG_BATTERY_SAVER")
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "on"));
     RenderScalingContext {
         platform,
@@ -3674,11 +3674,11 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
             if self.window.is_some() {
                 return;
             }
-            let width = std::env::var("ASTER_OUTPUT_WIDTH")
+            let width = std::env::var("VARG_OUTPUT_WIDTH")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(1920_u32);
-            let height = std::env::var("ASTER_OUTPUT_HEIGHT")
+            let height = std::env::var("VARG_OUTPUT_HEIGHT")
                 .ok()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(1080_u32);
@@ -3731,7 +3731,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
                 WindowEvent::Resized(size) => {
                     self.resize_surface(size.width, size.height);
                     let title = format!(
-                        "Aster Runtime - {}x{}",
+                        "Varg Runtime - {}x{}",
                         size.width.max(1),
                         size.height.max(1)
                     );
@@ -3777,7 +3777,7 @@ pub fn run_project(project: impl AsRef<Path>) -> EngineResult<()> {
                             "empty"
                         };
                         window.set_title(&format!(
-                            "Aster Runtime - frame {} - {status}",
+                            "Varg Runtime - frame {} - {status}",
                             services.frame_index()
                         ));
                     }
@@ -4191,7 +4191,8 @@ mod tests {
     #[test]
     fn loads_example_project_and_extracts_render_world() {
         let project = load_runtime_project(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/project"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/project/fps_arena"),
         )
         .unwrap();
         let render_world = extract_render_world(&project.scene);
@@ -4203,7 +4204,8 @@ mod tests {
     #[test]
     fn game_frame_updates_stats_and_script_diagnostics() {
         let project = load_runtime_project(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/project"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/project/fps_arena"),
         )
         .unwrap();
         let mut services = RuntimeServices::minimal(EngineConfig::default());
@@ -5070,7 +5072,8 @@ mod tests {
     #[test]
     fn game_frame_creates_physics_bindings_for_scene_components() {
         let project = load_runtime_project(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/project"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/project/fps_arena"),
         )
         .unwrap();
         let mut services = RuntimeServices::minimal(EngineConfig::default());
@@ -5244,7 +5247,7 @@ mod tests {
     fn load_action_bindings_from_toml() {
         use engine_platform::KeyCode;
         let dir =
-            std::env::temp_dir().join(format!("aster-action-bindings-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-action-bindings-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let toml_path = dir.join("action_bindings.toml");
         std::fs::write(

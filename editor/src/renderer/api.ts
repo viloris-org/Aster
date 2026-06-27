@@ -1,4 +1,4 @@
-// Tauri IPC wrapper — matches the old window.aster.rpc() signature.
+// Tauri IPC wrapper — matches the old window.varg.rpc() signature.
 // Swap to direct typed invoke() calls later if needed.
 
 import { invoke } from '@tauri-apps/api/core';

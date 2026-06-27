@@ -376,7 +376,7 @@ command_add_particle_emitter = "Add Particle Emitter"
 command_add_script = "Add Script"
 command_reset_layout = "Reset Layout"
 command_palette = "Command Palette"
-command_about_aster = "About Varg"
+command_about_varg = "About Varg"
 
 # Command categories
 category_file = "File"

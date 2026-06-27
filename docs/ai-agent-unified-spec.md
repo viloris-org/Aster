@@ -1,11 +1,11 @@
-# Aster AI and Agent Unified Specification
+# Varg AI and Agent Unified Specification
 
 Status: Draft canonical specification
 Last updated: 2026-06-21
 
 ## Purpose
 
-This document is the canonical product and engineering specification for Aster's AI-assisted game creation workflows. It replaces the overlapping mode definitions in `docs/ai-editor-copilot-prd.md` and `docs/ai-editor-quest-prd.md`.
+This document is the canonical product and engineering specification for Varg's AI-assisted game creation workflows. It replaces the overlapping mode definitions in `docs/ai-editor-copilot-prd.md` and `docs/ai-editor-quest-prd.md`.
 
 ## Document Map
 
@@ -25,23 +25,23 @@ When these documents disagree, resolve in this order:
 
 The detailed sub-specs must not introduce stronger safety, autonomy, or product claims than this unified specification allows.
 
-Aster's AI direction is:
+Varg's AI direction is:
 
 - **Quest-led:** persistent AI work is the primary differentiator.
 - **Editor-assisted:** direct editor work remains available for inspection, local correction, and small scoped AI help.
-- **Example-rich for new languages:** Aster-specific languages need dense, task-relevant examples because models do not already know them.
+- **Example-rich for new languages:** Varg-specific languages need dense, task-relevant examples because models do not already know them.
 - **Honest about safety:** the product must only promise the isolation and enforcement it actually implements.
 
 This document intentionally separates current product commitments from future architecture. Future safety mechanisms may guide design, but they are not current guarantees until implemented and tested.
 
 ## Product Goal
 
-Aster's AI goal is to let creators turn intent into inspectable game artifacts faster than a manual-first editor, while keeping the user able to understand, reject, revise, and recover from AI output.
+Varg's AI goal is to let creators turn intent into inspectable game artifacts faster than a manual-first editor, while keeping the user able to understand, reject, revise, and recover from AI output.
 
 The target experience:
 
 - A creator can describe a game object, behavior, scene, mechanic, or fix in natural language.
-- Aster gathers relevant project context and Aster language examples.
+- Varg gathers relevant project context and Varg language examples.
 - The AI produces structured, previewable work rather than opaque prose.
 - The user can inspect generated files, scene changes, diagnostics, and validation results.
 - Small work happens locally in Editor AI.
@@ -51,7 +51,7 @@ The target experience:
 The business direction:
 
 - Do not compete with Unity, Godot, or VS Code on manual feature depth.
-- Compete on AI-native game creation, Aster-specific languages, validation loops, and persistent Quest workflows.
+- Compete on AI-native game creation, Varg-specific languages, validation loops, and persistent Quest workflows.
 - Use frontier-capable models as the primary design target.
 - Avoid weak-model UX compromises that add ceremony without improving output quality.
 - Be explicit about current safety limits so commercial claims stay defensible.
@@ -64,13 +64,13 @@ When product, implementation, and safety goals conflict, use this order:
 2. **Protect inspectability.** Users must see what changed, why, what evidence exists, and how to reject or recover.
 3. **Favor Quest for durable work.** If work needs persistence, broad context, validation, review, or restart recovery, route it to Quest.
 4. **Favor Editor AI for local work.** If work is narrow, reversible, and tied to current selection or file, keep it in Editor AI.
-5. **Teach Aster languages with examples.** Do not starve the model of syntax examples to make prompts look short.
+5. **Teach Varg languages with examples.** Do not starve the model of syntax examples to make prompts look short.
 6. **Move authority into code over time.** Prompt rules can guide model behavior, but real permissions, validation, and apply rules must live in trusted implementation.
 7. **Hide internal choreography by default.** Users need outcome, evidence, and decisions, not raw agent routing.
 
 ## Product Model
 
-Aster exposes two user-facing AI work surfaces.
+Varg exposes two user-facing AI work surfaces.
 
 ### Editor AI
 
@@ -125,7 +125,7 @@ Solo and Extra are commercial Quest capabilities. They should mean "the agent sy
 
 The MVP safety promise is **controlled AI editing**, not zero-trust enterprise isolation.
 
-For the current product, Aster may promise:
+For the current product, Varg may promise:
 
 - AI writes are shown as planned operations before execution when practical.
 - Write operations require explicit user approval, session-level approval, configured apply policy approval, or an equivalent visible decision.
@@ -136,7 +136,7 @@ For the current product, Aster may promise:
 - Model output is treated as fallible draft work and can be rejected.
 - Unsupported operations should be refused instead of simulated through prose.
 
-For the current product, Aster must not promise:
+For the current product, Varg must not promise:
 
 - complete sandbox isolation;
 - seccomp or OS-level process isolation;
@@ -200,7 +200,7 @@ Agent-requested external commands are split into two execution zones.
    prefix_rule(pattern=["git", "ls-remote"], decision="allow")
    ```
 
-   Aster rules should additionally record scope and constraints: once/session/permanent, cwd scope, network permission, write scope, risk, creator, reason, and last-used audit metadata.
+   Varg rules should additionally record scope and constraints: once/session/permanent, cwd scope, network permission, write scope, risk, creator, reason, and last-used audit metadata.
 
 Destructive commands are not allowed merely because they are inside the sandbox. Deletion, recursive deletion, force-clean, reset, prune, privileged container execution, shell interpreters, and arbitrary code execution forms require explicit policy handling. Sandbox deletion support, if added later, must be scoped to generated build/cache outputs or reviewed transaction groups.
 
@@ -309,9 +309,9 @@ Rules:
 - AI review can help find issues; it is not an authorization root.
 - Future grant systems must be enforced by code, not by prompt instructions.
 
-## Aster Language Family
+## Varg Language Family
 
-Aster uses a language family because game creation needs several different authoring and interchange surfaces. Some are AI-first, some are shared by AI and humans, and runtime scripting is human-first AI-assisted. General-purpose imperative code is fragile for model generation, so AI should prefer declarative languages when they can express the task.
+Varg uses a language family because game creation needs several different authoring and interchange surfaces. Some are AI-first, some are shared by AI and humans, and runtime scripting is human-first AI-assisted. General-purpose imperative code is fragile for model generation, so AI should prefer declarative languages when they can express the task.
 
 Canonical language family:
 
@@ -332,7 +332,7 @@ Rules:
 
 ## Prompt And Example Strategy
 
-Aster should not minimize prompts at the cost of generation quality. Models do not have strong prior knowledge of Aster's new languages.
+Varg should not minimize prompts at the cost of generation quality. Models do not have strong prior knowledge of Varg's new languages.
 
 The rule is:
 
@@ -358,7 +358,7 @@ Do use examples to teach:
 
 ### Example Bank
 
-Aster should maintain a structured Example Bank.
+Varg should maintain a structured Example Bank.
 
 Example organization:
 
@@ -387,7 +387,7 @@ Fixed example: ...
 The model prompt should say:
 
 ```text
-Follow the provided Aster examples as authoritative syntax and style.
+Follow the provided Varg examples as authoritative syntax and style.
 Do not invent syntax, fields, actions, hooks, or helper functions not shown in examples, schemas, or tool manifests.
 When unsure, generate the simplest statically checkable form and rely on diagnostics.
 ```
@@ -403,7 +403,7 @@ The orchestrator should retrieve examples by:
 - existing project conventions;
 - prior failed generation attempt.
 
-The goal is not a short total context. The goal is high-signal context: compact policy plus enough relevant examples for the model to write valid Aster files.
+The goal is not a short total context. The goal is high-signal context: compact policy plus enough relevant examples for the model to write valid Varg files.
 
 ## Execution Flow
 
@@ -667,7 +667,7 @@ Current non-goals:
 - supporting arbitrary unattended active-project mutation;
 - building compatibility flows for weak models at the cost of the main experience;
 - hiding the need for policy, audit, rollback, and review routes;
-- making prompts short by starving the model of Aster language examples;
+- making prompts short by starving the model of Varg language examples;
 - treating AI review as proof;
 - duplicating product modes for every execution strategy.
 
@@ -678,5 +678,5 @@ Current non-goals:
 - Which current UI copy over-promises safety?
 - What is the first Example Bank file layout?
 - Which validators are required before Quest broad-write MVP?
-- Should `.aster` remain supported as a legacy extension, or should `.as` become canonical immediately?
+- Should `.varg` remain supported as a legacy extension, or should `.as` become canonical immediately?
 - What should be the threshold for promoting Editor AI work into a Quest?

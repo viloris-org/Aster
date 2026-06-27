@@ -1,6 +1,6 @@
 [package]
 name = "engine-render-2d"
-description = "Aster 2D rendering pipeline"
+description = "Varg 2D rendering pipeline"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

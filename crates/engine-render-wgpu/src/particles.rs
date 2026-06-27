@@ -37,16 +37,16 @@ pub(crate) struct GpuParticlePipeline {
 impl GpuParticlePipeline {
     pub(crate) fn new(device: &wgpu::Device, camera_uniform: &wgpu::Buffer) -> Self {
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster gpu particle compute shader"),
+            label: Some("varg gpu particle compute shader"),
             source: wgpu::ShaderSource::Wgsl(PARTICLE_COMPUTE_SHADER.into()),
         });
         let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster gpu particle render shader"),
+            label: Some("varg gpu particle render shader"),
             source: wgpu::ShaderSource::Wgsl(PARTICLE_RENDER_SHADER.into()),
         });
         let compute_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster gpu particle compute layout"),
+                label: Some("varg gpu particle compute layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -71,12 +71,12 @@ impl GpuParticlePipeline {
                 ],
             });
         let compute_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster gpu particle compute pipeline layout"),
+            label: Some("varg gpu particle compute pipeline layout"),
             bind_group_layouts: &[Some(&compute_bind_group_layout)],
             immediate_size: 0,
         });
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("aster gpu particle compute pipeline"),
+            label: Some("varg gpu particle compute pipeline"),
             layout: Some(&compute_layout),
             module: &compute_shader,
             entry_point: Some("main"),
@@ -85,7 +85,7 @@ impl GpuParticlePipeline {
         });
 
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("aster gpu particle camera layout"),
+            label: Some("varg gpu particle camera layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
@@ -98,7 +98,7 @@ impl GpuParticlePipeline {
             }],
         });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster gpu particle camera bind group"),
+            label: Some("varg gpu particle camera bind group"),
             layout: &camera_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -106,12 +106,12 @@ impl GpuParticlePipeline {
             }],
         });
         let render_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster gpu particle render pipeline layout"),
+            label: Some("varg gpu particle render pipeline layout"),
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster gpu particle render pipeline"),
+            label: Some("varg gpu particle render pipeline"),
             layout: Some(&render_layout),
             vertex: wgpu::VertexState {
                 module: &render_shader,
@@ -284,7 +284,7 @@ impl GpuParticlePipeline {
             return;
         }
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("aster gpu particle simulation"),
+            label: Some("varg gpu particle simulation"),
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.compute_pipeline);
@@ -306,7 +306,7 @@ impl GpuParticlePipeline {
             return;
         }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("aster gpu particle render"),
+            label: Some("varg gpu particle render"),
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
                     view: color,
@@ -363,7 +363,7 @@ impl GpuParticlePipeline {
 
 fn create_emitter_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aster gpu particle emitters"),
+        label: Some("varg gpu particle emitters"),
         size: (capacity.max(1) * std::mem::size_of::<GpuParticleEmitter>()) as u64,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
@@ -372,7 +372,7 @@ fn create_emitter_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer
 
 fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aster gpu particle instances"),
+        label: Some("varg gpu particle instances"),
         size: (capacity.max(1) * std::mem::size_of::<GpuParticleInstance>()) as u64,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::VERTEX,
         mapped_at_creation: false,
@@ -386,7 +386,7 @@ fn create_compute_bind_group(
     instances: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("aster gpu particle compute bind group"),
+        label: Some("varg gpu particle compute bind group"),
         layout,
         entries: &[
             wgpu::BindGroupEntry {

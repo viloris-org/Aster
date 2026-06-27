@@ -1,55 +1,55 @@
 # Editor Viewport Zero-Copy Presentation Plan
 
-状态：Draft  
-目标版本：分阶段交付  
-最后更新：2026-06-23
+Status: Draft  
+Target version: phased delivery  
+Last updated: 2026-06-23
 
 ## Problem Statement
 
-Aster Editor 的 Scene View 需要低延迟、高刷新、可预测布局的显示路径。当前稳定 fallback 是 WebView canvas readback：WGPU 离屏渲染后读回 CPU，再通过 Tauri IPC 发送给前端 canvas。这条路径可靠、容易和 React 布局对齐，但不满足性能目标：
+Varg Editor's Scene View needs a low-latency, high-refresh, predictably laid-out presentation path. The current stable fallback is WebView canvas readback: WGPU renders offscreen, reads the result back to the CPU, then sends it to the frontend canvas through Tauri IPC. This path is reliable and easy to align with React layout, but it does not meet the performance target:
 
-- GPU 输出经过 CPU staging buffer 和 IPC，带来额外 copy、同步等待和内存带宽消耗。
-- 视口越大、刷新率越高，readback 成本越明显。
-- 读回路径会把渲染、传输和 WebView compositing 串在一起，难以达到低延迟目标。
-- Web UI overlay、dock panel、透明窗口和不同平台 compositor 行为让“直接把 native child surface 塞进 DOM 位置”变得不稳定。
+- GPU output passes through a CPU staging buffer and IPC, adding extra copies, synchronization waits, and memory bandwidth cost.
+- The larger the viewport and the higher the refresh rate, the more visible the readback cost becomes.
+- The readback path serializes rendering, transfer, and WebView compositing, making low latency difficult.
+- Web UI overlays, dock panels, transparent windows, and platform compositor behavior make "put a native child surface directly at a DOM position" unstable.
 
-本计划补充 ADR 0001。ADR 记录架构决策；本文定义可落地的跨平台技术方案、能力语义和交付顺序。
+This plan supplements ADR 0001. The ADR records the architectural decision; this document defines the cross-platform technical plan, capability semantics, and delivery order.
 
 ## Terminology
 
-不要只用一个 `zero_copy: bool` 描述 editor viewport。实际显示路径至少需要区分这些能力：
+Do not describe the editor viewport with only a single `zero_copy: bool`. The real presentation path needs to distinguish at least these capabilities:
 
-- `cpu_readback`: 是否从 GPU texture/buffer 读回 CPU。
-- `gpu_native_surface`: Scene View 是否直接渲染到平台 native GPU surface 或 compositor-imported buffer。
-- `gpu_composited`: Scene View 和 Web UI 是否由系统 compositor / native view tree 在 GPU 侧合成。
-- `direct_scanout_possible`: 当前帧是否理论上可由 display controller 直接扫描输出。
+- `cpu_readback`: whether GPU texture/buffer data is read back to the CPU.
+- `gpu_native_surface`: whether Scene View renders directly to a platform-native GPU surface or compositor-imported buffer.
+- `gpu_composited`: whether Scene View and Web UI are composited on the GPU by the system compositor / native view tree.
+- `direct_scanout_possible`: whether the current frame could theoretically be scanned out directly by the display controller.
 
-推荐产品口径：
+Recommended product terminology:
 
-- **No CPU readback**：Aster 必须保证的 editor 性能目标。
-- **GPU-native composition**：跨平台 editor host 的常规目标。
-- **Direct scanout**：机会性优化，不作为 UI 覆盖场景下的稳定承诺。
+- **No CPU readback**: the editor performance target Varg must guarantee.
+- **GPU-native composition**: the normal goal for the cross-platform editor host.
+- **Direct scanout**: an opportunistic optimization, not a stable promise when UI overlays are present.
 
-原因是 editor 通常有 Web UI、overlays、selection gizmos、dock panels 和透明区域。只要有覆盖、裁剪、缩放、圆角、alpha 或格式不匹配，系统就可能退回 GPU composition。即使没有 CPU copy，也不等于每帧都能 direct scanout。
+The reason is that the editor usually has Web UI, overlays, selection gizmos, dock panels, and transparent regions. Any overlay, clipping, scaling, rounded corner, alpha, or format mismatch can make the system fall back to GPU composition. No CPU copy does not mean every frame can use direct scanout.
 
 ## Target Architecture
 
-目标架构是 native host owns root：
+The target architecture is native host owns root:
 
-1. 原生 host window/view 拥有顶层 editor presentation。
-2. Scene View 是 host 管理的 WGPU native surface 或 compositor-imported render buffer。
-3. Web UI 作为 panel、dock view、overlay 或 input layer 嵌入 host。
-4. React 负责布局意图、editor 状态和输入语义，不负责最终 root surface ownership。
-5. 平台 adapter 负责把 Scene View 和 Web UI 放入同一个 native composition tree。
+1. The native host window/view owns the top-level editor presentation.
+2. Scene View is a host-managed WGPU native surface or compositor-imported render buffer.
+3. Web UI is embedded into the host as panels, dock views, overlays, or input layers.
+4. React owns layout intent, editor state, and input semantics, not final root-surface ownership.
+5. The platform adapter places Scene View and Web UI into the same native composition tree.
 
-这避免两个失败模式：
+This avoids two failure modes:
 
-- WebView root 和 native child surface 属于不同 compositor/lifecycle，导致 resize、DPI 和 DOM rect 跟踪竞态。
-- canvas readback 可靠但高成本，无法作为最终性能路径。
+- WebView root and native child surface belong to different compositors/lifecycles, causing resize, DPI, and DOM-rect tracking races.
+- Canvas readback is reliable but expensive, so it cannot be the final performance path.
 
 ## Capability Model
 
-Editor viewport presentation capability 应从当前布尔模型扩展为结构化状态：
+Editor viewport presentation capability should expand from the current boolean model to structured state:
 
 ```rust
 pub struct ViewportPresentationAdapter {
@@ -169,14 +169,14 @@ Risks:
 - Treat the GTK/X11 host-root path as the first usable no-readback path.
 - Verify resize, DPI, panel overlay, focus, input and scene restart behavior.
 - Add telemetry showing active adapter, surface size, viewport rect and CPU readback status.
-- Keep canvas readback as fallback when native presentation is explicitly disabled with `ASTER_EDITOR_COMPOSITOR=0` or native host setup fails.
+- Keep canvas readback as fallback when native presentation is explicitly disabled with `VARG_EDITOR_COMPOSITOR=0` or native host setup fails.
 
 ### Phase 1.5: Split Web UI Panels
 
 - Split the current single React/WebView shell into hosted panel WebViews or native-hosted panel surfaces.
 - Route Web UI as explicit hosted panels/overlays in the GTK root instead of depending on full-window WebView transparency.
 - Keep the main workspace WebView as the compatibility/control layer until all editor surfaces have resize, DPI, input, focus, and restart parity as hosted views.
-- Split WebView panels are enabled by default on the X11 native-host-window path. Set `ASTER_NATIVE_PANEL_WEBVIEWS=0` to disable them for diagnostics.
+- Split WebView panels are enabled by default on the X11 native-host-window path. Set `VARG_NATIVE_PANEL_WEBVIEWS=0` to disable them for diagnostics.
 - The toolbar, hierarchy, inspector, and statusbar routes render real editor data and editing controls while the main WebView keeps the central Scene View and non-panel workspace surfaces.
 
 ### Phase 2: Native Wayland Deferral
@@ -223,7 +223,7 @@ Each adapter must pass these checks before it can become default:
 
 ## Open Questions
 
-- Can WGPU expose enough platform-specific surface control for DirectComposition composition swapchains, or does Aster need a lower-level Windows presentation adapter?
+- Can WGPU expose enough platform-specific surface control for DirectComposition composition swapchains, or does Varg need a lower-level Windows presentation adapter?
 - What user-facing check should report missing Xwayland/`DISPLAY` before native presentation is requested?
 - How should selection/gizmo overlays split between native renderer and Web UI to minimize transparent WebView requirements?
 - What is the minimal telemetry needed to prove a frame used no CPU readback?

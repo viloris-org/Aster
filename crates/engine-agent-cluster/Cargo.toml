@@ -1,6 +1,6 @@
 [package]
 name = "engine-agent-cluster"
-description = "Aster AI Editor Copilot Agent Cluster: Manager, Workers, Reviewers, task workspace"
+description = "Varg AI Editor Copilot Agent Cluster: Manager, Workers, Reviewers, task workspace"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

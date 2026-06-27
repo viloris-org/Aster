@@ -154,7 +154,7 @@ pub fn install_host_root_on_main_thread(
         .as_raw();
     match native_host_route(native_host_window_backend(handle)) {
         NativeHostRoute::LinuxHostRoot(NativeHostBackend::X11) => {
-            ensure_x11_host_surface_on_main_thread(app)?;
+            install_linux_x11_host_root_on_main_thread(app)?;
             Ok(NativeHostLayoutMode::HostOwnedRoot)
         }
         NativeHostRoute::LinuxHostRoot(NativeHostBackend::Wayland) => Err(native_wayland_error()),
@@ -169,6 +169,20 @@ pub fn install_host_root_on_main_thread(
             "native host window Scene View does not support this desktop backend yet: {handle:?}"
         )),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_x11_host_root_on_main_thread(
+    app: &tauri::AppHandle,
+) -> Result<scene_window::SceneRawSurface, String> {
+    ensure_x11_host_surface_on_main_thread(app)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn install_linux_x11_host_root_on_main_thread(
+    _app: &tauri::AppHandle,
+) -> Result<scene_window::SceneRawSurface, String> {
+    Err("Linux X11 native host adapter can only run on Linux.".to_owned())
 }
 
 fn native_host_window_backend(handle: RawWindowHandle) -> NativeHostWindowBackend {
@@ -337,26 +351,10 @@ fn create_linux_host_surface(
 }
 
 #[cfg(not(target_os = "linux"))]
-fn ensure_linux_host_root_on_main_thread(
-    _app: &tauri::AppHandle,
-    _backend: NativeHostBackend,
-) -> Result<NativeHostLayoutMode, String> {
-    Err("native host window adapter is not implemented on this platform yet".to_owned())
-}
-
-#[cfg(not(target_os = "linux"))]
 fn create_linux_host_surface(
     _app: tauri::AppHandle,
     _backend: NativeHostBackend,
 ) -> Result<NativeHostSceneTarget, String> {
-    Err("native host window adapter is not implemented on this platform yet".to_owned())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn ensure_linux_host_surface(
-    _app: tauri::AppHandle,
-    _backend: NativeHostBackend,
-) -> Result<NativeHostLayoutMode, String> {
     Err("native host window adapter is not implemented on this platform yet".to_owned())
 }
 
@@ -440,9 +438,9 @@ fn resize_linux_host_surface_on_main_thread(
 }
 
 #[cfg(target_os = "linux")]
-const HOST_ROOT_NAME: &str = "aster-native-host-root";
+const HOST_ROOT_NAME: &str = "varg-native-host-root";
 #[cfg(target_os = "linux")]
-const HOST_DRAWING_NAME: &str = "aster-native-host-scene-surface";
+const HOST_DRAWING_NAME: &str = "varg-native-host-scene-surface";
 #[cfg(target_os = "linux")]
 thread_local! {
     static X11_HOST_SURFACE: std::cell::RefCell<Option<X11HostSurface>> = const { std::cell::RefCell::new(None) };

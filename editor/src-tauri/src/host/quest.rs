@@ -833,7 +833,7 @@ impl EditorHost {
             .record
             .project
             .path
-            .join(".aster")
+            .join(".varg")
             .join("quests")
             .join(id);
         std::fs::create_dir_all(&export_root).map_err(|source| EngineError::Filesystem {
@@ -851,7 +851,7 @@ impl EditorHost {
                 })?;
             }
         }
-        let relative_export = format!(".aster/quests/{id}");
+        let relative_export = format!(".varg/quests/{id}");
         let detail = self.quest_store.record_decision(
             id,
             "export",

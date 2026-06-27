@@ -152,7 +152,7 @@ pub(crate) fn to_wgpu_buffer_usage(usage: BufferUsage, host_visible: bool) -> wg
 
 pub(crate) fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("aster instance buffer"),
+        label: Some("varg instance buffer"),
         size: (capacity.max(1) * std::mem::size_of::<Instance>()) as u64,
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,

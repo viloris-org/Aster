@@ -37,12 +37,12 @@ impl BenchConfig {
     fn from_env() -> Self {
         let defaults = Self::default();
         Self {
-            frames: env_u64("ASTER_PHYSICS_BENCH_FRAMES", defaults.frames),
-            static_grid: env_u32("ASTER_PHYSICS_STATIC_GRID", defaults.static_grid),
-            dynamic_bodies: env_u32("ASTER_PHYSICS_DYNAMIC_BODIES", defaults.dynamic_bodies),
-            trigger_grid: env_u32("ASTER_PHYSICS_TRIGGER_GRID", defaults.trigger_grid),
-            query_count: env_u32("ASTER_PHYSICS_QUERY_COUNT", defaults.query_count),
-            dt: env_f32("ASTER_PHYSICS_DT", defaults.dt),
+            frames: env_u64("VARG_PHYSICS_BENCH_FRAMES", defaults.frames),
+            static_grid: env_u32("VARG_PHYSICS_STATIC_GRID", defaults.static_grid),
+            dynamic_bodies: env_u32("VARG_PHYSICS_DYNAMIC_BODIES", defaults.dynamic_bodies),
+            trigger_grid: env_u32("VARG_PHYSICS_TRIGGER_GRID", defaults.trigger_grid),
+            query_count: env_u32("VARG_PHYSICS_QUERY_COUNT", defaults.query_count),
+            dt: env_f32("VARG_PHYSICS_DT", defaults.dt),
         }
     }
 }

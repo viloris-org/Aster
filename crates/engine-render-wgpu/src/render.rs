@@ -43,7 +43,7 @@ impl WgpuRenderDevice {
                 })
                 .unwrap_or(&self._skybox_default_cubemap_view);
             self.skybox_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("aster skybox bind group"),
+                label: Some("varg skybox bind group"),
                 layout: &self.skybox_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -412,7 +412,7 @@ impl WgpuRenderDevice {
             world,
             handle,
             tw as f32 / th.max(1) as f32,
-            "aster offscreen render world encoder",
+            "varg offscreen render world encoder",
             "default wgpu target is missing",
         )
     }
@@ -427,7 +427,7 @@ impl WgpuRenderDevice {
             world,
             handle,
             tw as f32 / th.max(1) as f32,
-            "aster game offscreen render world encoder",
+            "varg game offscreen render world encoder",
             "game wgpu target is missing",
         )
     }
@@ -440,7 +440,7 @@ impl WgpuRenderDevice {
             world,
             handle,
             tw as f32 / th.max(1) as f32,
-            "aster preview offscreen render world encoder",
+            "varg preview offscreen render world encoder",
             "preview wgpu target is missing",
         )
     }
@@ -482,7 +482,7 @@ impl WgpuRenderDevice {
         if self.readback_staging_dims != (w, h) {
             let validation = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
             self.readback_staging = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("aster viewport readback staging"),
+                label: Some("varg viewport readback staging"),
                 size: total_bytes,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
@@ -501,7 +501,7 @@ impl WgpuRenderDevice {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("aster viewport readback encoder"),
+                label: Some("varg viewport readback encoder"),
             });
 
         encoder.copy_texture_to_buffer(
@@ -974,7 +974,7 @@ impl WgpuRenderDevice {
             return;
         }
         let depth = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster surface depth"),
+            label: Some("varg surface depth"),
             size: wgpu::Extent3d {
                 width: config.width.max(1),
                 height: config.height.max(1),
@@ -1003,7 +1003,7 @@ impl WgpuRenderDevice {
         if need_create {
             let color_format = wgpu::TextureFormat::Rgba16Float;
             let color = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster hdr color"),
+                label: Some("varg hdr color"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,
@@ -1019,7 +1019,7 @@ impl WgpuRenderDevice {
             });
             let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
             let depth = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster hdr depth"),
+                label: Some("varg hdr depth"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,
@@ -1054,7 +1054,7 @@ impl WgpuRenderDevice {
                 },
             });
             let normal = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster hdr normal roughness"),
+                label: Some("varg hdr normal roughness"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,
@@ -1072,7 +1072,7 @@ impl WgpuRenderDevice {
                 Some(normal.create_view(&wgpu::TextureViewDescriptor::default()));
             self.hdr_normal_texture = Some(normal);
             let albedo = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster hdr albedo metallic"),
+                label: Some("varg hdr albedo metallic"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,
@@ -1090,7 +1090,7 @@ impl WgpuRenderDevice {
                 Some(albedo.create_view(&wgpu::TextureViewDescriptor::default()));
             self.hdr_albedo_texture = Some(albedo);
             let motion = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster hdr motion vectors"),
+                label: Some("varg hdr motion vectors"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,

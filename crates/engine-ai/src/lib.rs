@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! AI agent service bridging LLMs with the Aster engine.
+//! AI agent service bridging LLMs with the Varg engine.
 //!
 //! Provides the [`AgentSession`] type that serializes project context,
 //! sends it to an AI model, parses the response into [`AgentOperation`]s,
@@ -318,7 +318,7 @@ pub enum AgentOperation {
         #[serde(default)]
         summary: Option<String>,
     },
-    /// Update the project memory file (.aster/project.md).
+    /// Update the project memory file (.varg/project.md).
     UpdateProjectMemory {
         /// New content for the project memory, or a section to append.
         content: String,
@@ -3508,10 +3508,10 @@ fn recovery_hint_for_success(operation: &AgentOperation) -> &'static str {
             "No recovery needed; completion does not mutate the project."
         }
         AgentOperation::UpdateProjectMemory { .. } => {
-            "Revert by editing .aster/project.md or using version control."
+            "Revert by editing .varg/project.md or using version control."
         }
         AgentOperation::UpdateUserMemory { .. } => {
-            "Remove the entry from .aster/memory.md to revert."
+            "Remove the entry from .varg/memory.md to revert."
         }
         AgentOperation::QueryDependencyGraph { .. } => {
             "No recovery needed; this operation only read project data."
@@ -3573,7 +3573,7 @@ fn recovery_hint_for_failure(operation: &AgentOperation) -> &'static str {
             "No recovery needed; completion does not mutate the project."
         }
         AgentOperation::UpdateProjectMemory { .. } | AgentOperation::UpdateUserMemory { .. } => {
-            "Check file permissions for .aster/ directory."
+            "Check file permissions for .varg/ directory."
         }
         AgentOperation::QueryDependencyGraph { .. } => {
             "Check that the query type and target are valid."
@@ -4424,7 +4424,7 @@ pub fn agent_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "update_project_memory".into(),
-            description: "Update the project memory file (.aster/project.md).".into(),
+            description: "Update the project memory file (.varg/project.md).".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -4566,7 +4566,7 @@ mod tests {
     #[test]
     fn agent_session_initializes_with_project() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let project_root = manifest_dir.join("../engine-editor/../../examples/project");
+        let project_root = manifest_dir.join("../engine-editor/../../examples/project/fps_arena");
 
         let ctx = ProjectContext::open(&project_root).unwrap();
         let session = AgentSession::new(ctx).unwrap();
@@ -4937,7 +4937,7 @@ mod tests {
     #[test]
     fn build_component_creates_known_types() {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let project_root = manifest_dir.join("../engine-editor/../../examples/project");
+        let project_root = manifest_dir.join("../engine-editor/../../examples/project/fps_arena");
         let ctx = ProjectContext::open(&project_root).unwrap();
         let session = AgentSession::new(ctx).unwrap();
 
@@ -5073,7 +5073,7 @@ mod tests {
         let ctx = temp_project_context();
         let mut session = AgentSession::new(ctx).unwrap();
         let model =
-            StubModel::new("I will create a player.\n```aster_operations\n[{invalid json}]\n```");
+            StubModel::new("I will create a player.\n```varg_operations\n[{invalid json}]\n```");
 
         let result = session.plan(
             &model,

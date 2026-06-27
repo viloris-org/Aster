@@ -127,7 +127,7 @@ impl RenderDevice for WgpuRenderDevice {
                 enable_ssgi,
                 ssgi_intensity,
                 enable_bloom,
-                "aster surface",
+                "varg surface",
             );
             self.update_render_submission_stats(
                 &batches,
@@ -140,7 +140,7 @@ impl RenderDevice for WgpuRenderDevice {
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("aster surface render world encoder"),
+                    label: Some("varg surface render world encoder"),
                 });
             let gpu_timestamps = self.encode_gpu_timestamps_begin(&mut encoder);
             self.encode_frame_pipeline(
@@ -171,7 +171,7 @@ impl RenderDevice for WgpuRenderDevice {
 
             self.queue.submit(std::iter::once(encoder.finish()));
             self.schedule_gpu_timestamp_readback(gpu_timestamps);
-            self.finish_validation_scope(validation, "aster surface")?;
+            self.finish_validation_scope(validation, "varg surface")?;
             surface_frame.present();
             self.submitted_worlds = self.submitted_worlds.saturating_add(1);
             let (hybrid_deferred, active_gi_probes, virtual_shadow_pages) =
@@ -250,7 +250,7 @@ impl RenderDevice for WgpuRenderDevice {
             enable_ssgi,
             Self::screen_space_gi_intensity(world),
             enable_bloom,
-            "aster offscreen",
+            "varg offscreen",
         );
         self.update_render_submission_stats(
             &batches,
@@ -270,7 +270,7 @@ impl RenderDevice for WgpuRenderDevice {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("aster render world encoder"),
+                label: Some("varg render world encoder"),
             });
         let gpu_timestamps = self.encode_gpu_timestamps_begin(&mut encoder);
         self.encode_frame_pipeline(
@@ -289,7 +289,7 @@ impl RenderDevice for WgpuRenderDevice {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         self.schedule_gpu_timestamp_readback(gpu_timestamps);
-        self.finish_validation_scope(validation, "aster offscreen")?;
+        self.finish_validation_scope(validation, "varg offscreen")?;
         self.submitted_worlds = self.submitted_worlds.saturating_add(1);
         let (hybrid_deferred, active_gi_probes, virtual_shadow_pages) =
             self.lighting_mode_metrics(world, &plan);
@@ -331,7 +331,7 @@ impl RenderDevice for WgpuRenderDevice {
             world,
             target.handle,
             width as f32 / height.max(1) as f32,
-            "aster explicit target render world encoder",
+            "varg explicit target render world encoder",
             "explicit wgpu target is missing",
         )
     }
@@ -582,7 +582,7 @@ impl RenderDevice for WgpuRenderDevice {
         }
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let cube_view = texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("aster uploaded cubemap view"),
+            label: Some("varg uploaded cubemap view"),
             dimension: Some(wgpu::TextureViewDimension::Cube),
             ..Default::default()
         });
@@ -685,7 +685,7 @@ impl RenderDevice for WgpuRenderDevice {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("aster gui encoder"),
+                label: Some("varg gui encoder"),
             });
         let bind_groups = self.prepare_gui_draw_list(draw_list, width, height)?;
         let target = self
@@ -783,14 +783,14 @@ impl RenderDevice for WgpuRenderDevice {
         let vertex_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("aster skinned mesh vertices"),
+                label: Some("varg skinned mesh vertices"),
                 contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
         let index_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("aster skinned mesh indices"),
+                label: Some("varg skinned mesh indices"),
                 contents: bytemuck::cast_slice(indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
@@ -814,7 +814,7 @@ impl RenderDevice for WgpuRenderDevice {
         let buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("aster bone palette"),
+                label: Some("varg bone palette"),
                 contents: bytemuck::cast_slice(matrices),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
@@ -858,7 +858,7 @@ impl RenderDevice for WgpuRenderDevice {
             )));
         }
         let bone_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster bone palette bind group"),
+            label: Some("varg bone palette bind group"),
             layout: &self.skinned_bone_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -872,10 +872,10 @@ impl RenderDevice for WgpuRenderDevice {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("aster skinned mesh encoder"),
+                label: Some("varg skinned mesh encoder"),
             });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("aster skinned mesh pass"),
+            label: Some("varg skinned mesh pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &target.color_view,
                 depth_slice: None,
@@ -954,7 +954,7 @@ impl RenderDevice for WgpuRenderDevice {
         let occlusion_view = view_for(&textures.occlusion);
 
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("aster material bind group: {name}")),
+            label: Some(&format!("varg material bind group: {name}")),
             layout: &self.material_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -1004,7 +1004,7 @@ impl WgpuRenderDevice {
         if draw_list.vertices.len() > self.gui_vertex_capacity {
             self.gui_vertex_capacity = draw_list.vertices.len().next_power_of_two();
             self.gui_vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("aster gui vertices"),
+                label: Some("varg gui vertices"),
                 size: (self.gui_vertex_capacity * std::mem::size_of::<GpuGuiVertex>()) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
@@ -1013,7 +1013,7 @@ impl WgpuRenderDevice {
         if draw_list.indices.len() > self.gui_index_capacity {
             self.gui_index_capacity = draw_list.indices.len().next_power_of_two();
             self.gui_index_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("aster gui indices"),
+                label: Some("varg gui indices"),
                 size: (self.gui_index_capacity * std::mem::size_of::<u32>()) as u64,
                 usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
@@ -1053,7 +1053,7 @@ impl WgpuRenderDevice {
                 .and_then(|handle| self.images.get(handle))
                 .map_or(&self.default_texture_view, |image| &image.view);
             bind_groups.push(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("aster gui draw bind group"),
+                label: Some("varg gui draw bind group"),
                 layout: &self.gui_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -1086,7 +1086,7 @@ impl WgpuRenderDevice {
         viewport: Option<Option<SurfaceViewportRect>>,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("aster gui pass"),
+            label: Some("varg gui pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: output_view,
                 depth_slice: None,

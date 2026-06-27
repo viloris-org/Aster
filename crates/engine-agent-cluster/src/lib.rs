@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Agent Cluster orchestration for the Aster AI Editor Copilot.
+//! Agent Cluster orchestration for the Varg AI Editor Copilot.
 //!
 //! In Auto mode, a Manager decomposes user requests into bounded tasks,
 //! specialized Workers execute in parallel inside an isolated git-backed

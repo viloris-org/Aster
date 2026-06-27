@@ -44,7 +44,8 @@ jobs:
             libudev-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            libxdo-dev
+            libxdo-dev \
+            mold
       - name: Check formatting
         run: cargo fmt --check
       - name: Lint workspace

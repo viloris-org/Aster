@@ -766,9 +766,10 @@ mod tests {
 
     #[test]
     fn example_files_parse() {
-        let manifest = include_str!("../../../examples/project/Varg.toml");
-        let preferences = include_str!("../../../examples/project/editor.preferences.toml");
-        let build = include_str!("../../../examples/project/build.runtime-min.toml");
+        let manifest = include_str!("../../../examples/project/fps_arena/Varg.toml");
+        let preferences =
+            include_str!("../../../examples/project/fps_arena/editor.preferences.toml");
+        let build = include_str!("../../../examples/project/fps_arena/build.runtime-min.toml");
 
         let manifest = toml::from_str::<ProjectManifest>(manifest).unwrap();
         let preferences = toml::from_str::<EditorPreferences>(preferences).unwrap();
@@ -789,11 +790,11 @@ mod tests {
     #[test]
     fn loads_project_manifest_from_file() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let project_root = manifest_dir.join("../../examples/project");
+        let project_root = manifest_dir.join("../../examples/project/fps_arena");
 
         let manifest = ProjectManifest::load(&project_root).unwrap();
 
-        assert_eq!(manifest.name, "Varg Example");
+        assert_eq!(manifest.name, "FPS Arena");
         assert_eq!(manifest.asset_root, "assets");
         assert_eq!(manifest.script_roots, vec!["scripts".to_string()]);
         assert_eq!(manifest.build_config, "build.runtime-min.toml");

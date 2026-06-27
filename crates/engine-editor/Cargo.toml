@@ -1,6 +1,6 @@
 [package]
 name = "engine-editor"
-description = "Aster editor service layer"
+description = "Varg editor service layer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

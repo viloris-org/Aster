@@ -1,6 +1,6 @@
 [package]
 name = "engine-ai"
-description = "Aster AI agent service for LLM-assisted game development"
+description = "Varg AI agent service for LLM-assisted game development"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -59,7 +59,7 @@ impl RuntimeProfile {
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            app_name: "Aster".to_owned(),
+            app_name: "Varg".to_owned(),
             root_path: PathBuf::from("."),
             profile: RuntimeProfile::RuntimeMin,
         }

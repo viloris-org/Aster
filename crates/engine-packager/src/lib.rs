@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-//! Project build and package pipeline for Aster games.
+//! Project build and package pipeline for Varg games.
 
 use std::{
     env, fs,
@@ -209,7 +209,7 @@ impl PackageChannel {
 /// Package request shared by CLI and editor surfaces.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackageRequest {
-    /// Aster project root or manifest path.
+    /// Varg project root or manifest path.
     pub project: PathBuf,
     /// Repository root used for cargo builds.
     pub repo_root: PathBuf,
@@ -250,7 +250,7 @@ pub struct PackageOutput {
     pub asset_count: usize,
 }
 
-/// Builds and packages an Aster project.
+/// Builds and packages an Varg project.
 pub fn package_project(request: &PackageRequest) -> EngineResult<PackageOutput> {
     validate_target_support(request.target, request.format)?;
     if request.target.is_mobile() {
@@ -567,7 +567,7 @@ fn write_package_manifest(
         .strip_prefix(package_root)
         .unwrap_or(assets_manifest_path);
     let manifest = serde_json::json!({
-        "schema": "aster.package.v1",
+        "schema": "varg.package.v1",
         "project": project_name,
         "target": request.target.as_str(),
         "format": request.format.as_str(),
@@ -669,9 +669,9 @@ fn runtime_binary_file_name(target: PackageTarget) -> &'static str {
 
 fn packaged_runtime_file_name(target: PackageTarget) -> &'static str {
     if target == PackageTarget::WindowsX64 {
-        "aster-runtime.exe"
+        "varg-runtime.exe"
     } else {
-        "aster-runtime"
+        "varg-runtime"
     }
 }
 

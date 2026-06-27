@@ -11,7 +11,7 @@ fn main() {
     println!("{}", json);
 
     // Also write to file
-    let output_path = "schema/aster-behavior-schema.json";
+    let output_path = "schema/varg-behavior-schema.json";
     if let Some(parent) = std::path::Path::new(output_path).parent() {
         std::fs::create_dir_all(parent).expect("Failed to create schema directory");
     }

@@ -376,7 +376,7 @@ command_add_particle_emitter = "添加粒子发射器"
 command_add_script = "添加脚本"
 command_reset_layout = "重置布局"
 command_palette = "命令面板"
-command_about_aster = "关于 Varg"
+command_about_varg = "关于 Varg"
 
 # Command categories
 category_file = "文件"

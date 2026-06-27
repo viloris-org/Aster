@@ -161,7 +161,7 @@ impl ImageDesc {
             samples: 1,
             format,
             usage: ImageUsage::SAMPLED,
-            label: Some("aster cubemap"),
+            label: Some("varg cubemap"),
         }
     }
 
@@ -187,7 +187,7 @@ impl ImageDesc {
             samples: 1,
             format: ImageFormat::Rg16Float,
             usage: ImageUsage::SAMPLED.or(ImageUsage::COLOR_ATTACHMENT),
-            label: Some("aster motion vectors"),
+            label: Some("varg motion vectors"),
         }
     }
 }

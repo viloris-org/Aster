@@ -829,7 +829,7 @@ interface PlanApprovalCtx {
 
 const PlanApprovalContext = createContext<PlanApprovalCtx | null>(null);
 
-const approvalModeStorageKey = 'aster.aiApprovalMode';
+const approvalModeStorageKey = 'varg.aiApprovalMode';
 
 function readStoredApprovalMode(): ApprovalMode {
   try {
@@ -1165,7 +1165,7 @@ export default function AiPanel({
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<AiMessage[]>(() => {
     try {
-      const saved = localStorage.getItem('aster.aiMessages');
+      const saved = localStorage.getItem('varg.aiMessages');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
@@ -1222,7 +1222,7 @@ export default function AiPanel({
   // Persist messages to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('aster.aiMessages', JSON.stringify(messages));
+      localStorage.setItem('varg.aiMessages', JSON.stringify(messages));
     } catch { /* quota exceeded */ }
   }, [messages]);
 
@@ -1300,7 +1300,7 @@ export default function AiPanel({
       await rpc('copilot/clear_conversation');
     } catch { /* ignore */ }
     setMessages([]);
-    localStorage.removeItem('aster.aiMessages');
+    localStorage.removeItem('varg.aiMessages');
     setPlan(null);
     setApproved(new Set());
     setDenied(new Set());

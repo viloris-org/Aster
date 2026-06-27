@@ -1,6 +1,6 @@
 [package]
 name = "engine-physics"
-description = "Aster physics abstraction and null backend"
+description = "Varg physics abstraction and null backend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

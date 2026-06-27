@@ -1,249 +1,249 @@
-# Aster 游戏制作关键需求文档
+# Varg Critical Game-Making Requirements
 
-更新时间：2026-05-19
+Updated: 2026-05-19
 
-## 目标
+## Goal
 
-把当前 Aster 从“引擎模块骨架”推进到“可以制作、运行、调试一个小型可玩游戏”的状态。本文只整理当前项目里最影响做游戏的事项，并按阻塞程度排序。
+Move the current Varg project from an engine-module skeleton to a state where contributors can create, run, and debug a small playable game. This document only captures the items that most affect game creation in the current project, ordered by how blocking they are.
 
-## 当前判断
+## Current Assessment
 
-项目已经具备比较清晰的 crate 边界、场景/Prefab 数据格式、ECS 生命周期、资源注册表、渲染抽象、编辑器 UI 壳、物理/音频抽象和 CLI smoke 路径。但核心运行链路仍停在占位或 headless 层：
+The project already has fairly clear crate boundaries, scene/Prefab data formats, ECS lifecycle support, an asset registry, rendering abstractions, an editor UI shell, physics/audio abstractions, and CLI smoke paths. The core runtime flow is still mostly placeholder or headless:
 
-- `runtime-min` 只 tick headless renderer，没有真实窗口、输入、资源加载、脚本、物理、音频或游戏循环集成。
-- `engine-render` 有 RenderDevice/RenderGraph 抽象，但默认是 `HeadlessRenderDevice`，不能把场景真正画出来。
-- Tauri 编辑器已有 Hub/Shell UI，但 Scene View/Game View、Hierarchy 和 Project 仍需继续绑定真实项目与场景能力。
-- `engine-assets` 有数据库、manifest、导入队列、CPU/GPU 缓存概念，但缺少真实导入器、文件监听、运行时加载和渲染/音频/场景引用闭环。
-- `engine-physics` 和 `engine-audio` 目前是完整 trait + null backend，接口方向对，但游戏功能不可用。
-- 示例项目只有 manifest、scene、prefab、preferences 和 build 配置，没有可玩的资源、脚本入口或构建产物。
+- `runtime-min` only ticks the headless renderer. It has no real window, input, asset loading, scripting, physics, audio, or integrated game loop.
+- `engine-render` has RenderDevice/RenderGraph abstractions, but defaults to `HeadlessRenderDevice` and cannot render a scene visibly.
+- The Tauri editor already has Hub/Shell UI, but Scene View/Game View, Hierarchy, and Project still need to bind to real project and scene capabilities.
+- `engine-assets` has database, manifest, import queue, and CPU/GPU cache concepts, but lacks real importers, file watching, runtime loading, and closed reference loops for rendering/audio/scenes.
+- `engine-physics` and `engine-audio` currently provide complete traits plus null backends. The interface direction is sound, but game functionality is not usable yet.
+- The example project only has manifest, scene, prefab, preferences, and build configuration. It has no playable assets, script entry point, or build artifact.
 
-## P0：不做就无法“做游戏”
+## P0: Required Before Varg Can Make Games
 
-### 1. 可运行的游戏 Runtime
+### 1. Runnable Game Runtime
 
-**问题**
+**Problem**
 
-当前 `runtime-min::RuntimeServices::tick` 只执行 render graph 和 frame counter，场景生命周期、输入、固定步长、资源加载、物理、音频、窗口事件都没有被组合成一个游戏循环。
+`runtime-min::RuntimeServices::tick` currently only runs the render graph and frame counter. Scene lifecycle, input, fixed timestep, asset loading, physics, audio, and window events have not been composed into a game loop.
 
-**需求**
+**Requirements**
 
-- 提供 `runtime-game` 运行器，能加载项目配置、默认场景并进入持续帧循环。
-- 每帧顺序明确：输入采集 -> fixed update 累积 -> physics fixed update -> scene fixed lifecycle -> scene update/late update -> audio update -> render submit -> deferred destroy。
-- 支持暂停、单步、退出、窗口 resize 和基础错误上报。
-- `aster` 增加类似 `run <project>` 的命令，能直接运行 `examples/project`。
+- Provide a `runtime-game` runner that can load project configuration, load the default scene, and enter a continuous frame loop.
+- Define a clear per-frame order: input collection -> fixed update accumulation -> physics fixed update -> scene fixed lifecycle -> scene update/late update -> audio update -> render submit -> deferred destroy.
+- Support pause, single-step, quit, window resize, and basic error reporting.
+- Add an `varg` command similar to `run <project>` that can directly run `examples/project`.
 
-**验收**
+**Acceptance**
 
-- `cargo run -p aster -- run examples/project` 可以打开窗口并持续运行默认场景。
-- Player 对象上的组件/脚本能收到 start/update/fixed_update。
-- 关闭窗口或按 Escape 能稳定退出。
+- `cargo run -p varg -- run examples/project` opens a window and continuously runs the default scene.
+- Components/scripts on the Player object receive start/update/fixed_update.
+- Closing the window or pressing Escape exits reliably.
 
-### 2. 真实渲染路径和 Game View
+### 2. Real Rendering Path and Game View
 
-**问题**
+**Problem**
 
-渲染层目前主要是抽象和 headless/stub。没有从 Scene 到可见画面的实体提取、相机、mesh/material/texture 绑定、swapchain 呈现或编辑器 viewport texture。
+The rendering layer is currently mostly abstraction plus headless/stub behavior. There is no entity extraction from Scene to visible frames, no camera, no mesh/material/texture binding, no swapchain presentation, and no editor viewport texture.
 
-**需求**
+**Requirements**
 
-- 先选定一个首发后端。建议优先 `wgpu`，因为 Tauri 编辑器的视口读回路径已使用该后端；
-- 定义最小渲染组件：Camera、MeshRenderer、Light、MaterialRef。
-- 打通 Scene -> RenderWorld/RenderQueue -> RenderDevice 的提交流程。
-- Game View 和 Scene View 使用真实 offscreen target，而不是 placeholder。
-- 内置 debug material、基础 mesh、默认 shader，保证没有资产时也能渲染测试对象。
+- Choose an initial backend. Prefer `wgpu`, because the Tauri editor viewport readback path already uses it.
+- Define minimal rendering components: Camera, MeshRenderer, Light, MaterialRef.
+- Connect the submission flow from Scene -> RenderWorld/RenderQueue -> RenderDevice.
+- Make Game View and Scene View use real offscreen targets instead of placeholders.
+- Provide a built-in debug material, basic mesh, and default shader so test objects can render even without assets.
 
-**验收**
+**Acceptance**
 
-- 示例场景打开后能看到相机视角中的一个几何体。
-- Scene View/Game View 都显示真实渲染结果。
-- resize 不崩溃，资源销毁延迟队列可验证。
+- Opening the sample scene shows a geometric object from the camera view.
+- Scene View and Game View both show real rendering output.
+- Resize does not crash, and the deferred resource-destruction queue can be verified.
 
-### 3. 输入系统和玩家控制
+### 3. Input System and Player Control
 
-**问题**
+**Problem**
 
-`engine-platform::input` 只有少量事件枚举，没有输入状态、轴映射、鼠标按钮、滚轮、手柄，也没有接入 runtime update。
+`engine-platform::input` only has a small set of event enums. It has no input state, axis mapping, mouse buttons, wheel, gamepad support, or runtime update integration.
 
-**需求**
+**Requirements**
 
-- 建立 `InputState`：pressed/released/down、mouse delta、wheel、cursor position。
-- 支持动作映射：例如 `MoveForward = W/Up/GamepadLeftY`。
-- winit 事件转换到引擎输入事件，并在每帧 reset transient 状态。
-- Runtime 和脚本/组件能查询输入。
+- Create `InputState`: pressed/released/down, mouse delta, wheel, and cursor position.
+- Support action mappings, such as `MoveForward = W/Up/GamepadLeftY`.
+- Convert winit events to engine input events and reset transient state every frame.
+- Runtime and scripts/components can query input.
 
-**验收**
+**Acceptance**
 
-- 示例 Player 可用 WASD 或方向键移动。
-- 输入状态在帧边界正确更新，按下/释放只触发一帧。
+- The sample Player can move with WASD or arrow keys.
+- Input state updates correctly at frame boundaries, and press/release only trigger for one frame.
 
-### 4. 场景组件序列化和 Inspector 编辑
+### 4. Scene Component Serialization and Inspector Editing
 
-**问题**
+**Problem**
 
-Scene 文件目前保存 GameObject 元数据、Transform、脚本 proxy，但普通组件、渲染组件、物理组件、音频组件没有统一序列化/反序列化机制。编辑器 Inspector 也没有真实属性编辑。
+Scene files currently save GameObject metadata, Transform, and script proxies, but regular components, rendering components, physics components, and audio components do not have a unified serialization/deserialization mechanism. The editor Inspector also does not provide real property editing.
 
-**需求**
+**Requirements**
 
-- 定义组件 schema/registry：组件类型 ID、字段元数据、默认值、序列化格式、迁移策略。
-- Scene/Prefab 文件支持组件列表，并能实例化到 ECS。
-- Inspector 根据 schema 显示和编辑 Transform、Camera、MeshRenderer、Rigidbody、Collider、AudioSource、Script。
-- Play Mode 使用编辑态拷贝，退出后不污染编辑态。
+- Define a component schema/registry: component type ID, field metadata, default values, serialization format, and migration policy.
+- Scene/Prefab files support component lists and can instantiate them into ECS.
+- Inspector displays and edits Transform, Camera, MeshRenderer, Rigidbody, Collider, AudioSource, and Script based on schema.
+- Play Mode uses an edit-state copy and does not contaminate the edit state after exit.
 
-**验收**
+**Acceptance**
 
-- 在 JSON 场景里声明 MeshRenderer/Camera/Rigidbody 后，运行时能恢复组件。
-- Inspector 修改 Transform 后，Scene View 立即反映。
-- Prefab 实例化保留组件数据。
+- MeshRenderer/Camera/Rigidbody declared in a JSON scene are restored at runtime.
+- Inspector changes to Transform are reflected immediately in Scene View.
+- Prefab instantiation preserves component data.
 
-### 5. 资源导入、加载和热更新闭环
+### 5. Asset Import, Loading, and Hot-Reload Loop
 
-**问题**
+**Problem**
 
-资产层的数据结构已存在，但缺少实际导入器和运行时加载流程。游戏制作必须能把图片、模型、材质、音频、shader 从磁盘变成可用资源。
+The asset layer data structures already exist, but the project lacks real importers and runtime loading flow. Game creation requires images, models, materials, audio, and shaders to become usable resources from disk.
 
-**需求**
+**Requirements**
 
-- 最小支持：PNG/JPEG texture、glTF model、material JSON/TOML、WGSL 或 GLSL shader、WAV/OGG audio。
-- 项目扫描生成/维护 `.meta` 和 manifest。
-- ImportQueue 实际读取文件，产出 CPU resource，并排队 GPU upload。
-- 编辑器 Project 面板显示资产树、导入状态、错误诊断和缩略图。
-- 文件修改后标记 stale，并触发重导入/重上传。
+- Minimal support: PNG/JPEG texture, glTF model, material JSON/TOML, WGSL or GLSL shader, and WAV/OGG audio.
+- Project scanning generates and maintains `.meta` files and the manifest.
+- ImportQueue actually reads files, produces CPU resources, and queues GPU uploads.
+- The editor Project panel shows the asset tree, import state, error diagnostics, and thumbnails.
+- File changes mark assets stale and trigger reimport/reupload.
 
-**验收**
+**Acceptance**
 
-- 把一张图片放进项目 assets 后，Project 面板能显示并预览。
-- 材质引用 texture 后，示例 mesh 能使用该材质渲染。
-- 修改图片文件后无需重启即可刷新。
+- Dropping an image into project assets makes it visible and previewable in the Project panel.
+- After a material references a texture, the sample mesh renders with that material.
+- Changing the image file refreshes without restarting.
 
-## P1：决定游戏是否可用、可调试
+## P1: Determines Whether Games Are Usable and Debuggable
 
-### 6. 物理后端和 ECS 同步
+### 6. Physics Backend and ECS Synchronization
 
-**问题**
+**Problem**
 
-物理已有 trait、Collider/Rigidbody 描述和 null backend，但不能模拟、碰撞或查询。
+Physics already has traits, Collider/Rigidbody descriptions, and a null backend, but it cannot simulate, collide, or query.
 
-**需求**
+**Requirements**
 
-- 接入一个真实后端，建议 Rapier 作为首个实现。
-- Rigidbody/Collider 组件和 PhysicsWorld 之间建立创建、销毁、同步、事件分发。
-- 支持 raycast、overlap、trigger enter/exit、collision enter/exit。
+- Integrate a real backend. Rapier is the recommended first implementation.
+- Establish create, destroy, sync, and event-dispatch flows between Rigidbody/Collider components and PhysicsWorld.
+- Support raycast, overlap, trigger enter/exit, and collision enter/exit.
 
-**验收**
+**Acceptance**
 
-- Player 可在地面上移动并被碰撞体阻挡。
-- trigger 区域能触发事件。
+- Player can move on the ground and be blocked by colliders.
+- Trigger regions can emit events.
 
-### 7. 脚本或游戏逻辑扩展
+### 7. Scripting or Game-Logic Extension
 
-**问题**
+**Problem**
 
-Scene 中已有 Varg-first `ScriptComponent`，但脚本能力仍然很薄。只靠 Rust 原生组件对使用者门槛较高，也不利于编辑器工作流。
+Scene already has a Varg-first `ScriptComponent`, but scripting capabilities are still thin. Relying only on native Rust components creates a high barrier for users and does not fit editor workflows well.
 
-**需求**
+**Requirements**
 
-- 深化 Varg 脚本方案，不把 Python、Rhai 或其他 backend 暴露成用户可选项。
-- 脚本组件能接收 lifecycle、输入、Transform、spawn/destroy、资源访问和物理查询。
-- 脚本错误进入 Console，并能定位到文件/行。
+- Deepen the Varg scripting approach without exposing Python, Rhai, or other backends as user-selectable options.
+- Script components can receive lifecycle events, input, Transform access, spawn/destroy, resource access, and physics queries.
+- Script errors appear in Console and can point to file/line locations.
 
-**验收**
+**Acceptance**
 
-- 示例 `player_controller` 能驱动 Player。
-- 脚本错误不会让编辑器崩溃，Console 能展示诊断。
+- The sample `player_controller` can drive Player.
+- Script errors do not crash the editor, and Console shows diagnostics.
 
-### 8. 编辑器打开项目和保存场景
+### 8. Editor Project Opening and Scene Saving
 
-**问题**
+**Problem**
 
-Hub 和 Shell 已有状态/UI，但 `open` 目前只显示 Hub，LaunchEditor action 未真正切换/加载项目；Project/Hierarchy/Inspector 多数是空状态。
+Hub and Shell already have state/UI, but `open` currently only shows Hub. The LaunchEditor action does not really switch to or load a project, and Project/Hierarchy/Inspector are mostly empty states.
 
-**需求**
+**Requirements**
 
-- Hub 新建/打开项目后进入 Editor screen。
-- EditorShell 持有当前 ProjectContext、Scene、AssetDatabase。
-- Hierarchy 绑定 Scene 对象树；Project 绑定 assets；Console 绑定诊断；Toolbar 的 Play/Pause/Stop 调用 Scene play mode。
-- 保存/另存场景，保存 editor preferences。
+- Hub enters the Editor screen after creating or opening a project.
+- EditorShell owns the current ProjectContext, Scene, and AssetDatabase.
+- Hierarchy binds to the Scene object tree; Project binds to assets; Console binds to diagnostics; Toolbar Play/Pause/Stop calls Scene play mode.
+- Save/save-as scenes and save editor preferences.
 
-**验收**
+**Acceptance**
 
-- 从 Hub 打开 `examples/project` 后，Hierarchy 显示 Main Camera 和 Player。
-- 修改对象名或 Transform 后保存，再打开仍保留。
+- Opening `examples/project` from Hub shows Main Camera and Player in Hierarchy.
+- Renaming an object or editing Transform persists after saving and reopening.
 
-### 9. 构建和打包最小游戏
+### 9. Build and Package a Minimal Game
 
-**问题**
+**Problem**
 
-CLI 有 smoke/profiles，`xtask` 入口存在，但还没有面向项目的 build/package 流程。
+The CLI has smoke/profiles and an `xtask` entry point, but there is no project-oriented build/package flow yet.
 
-**需求**
+**Requirements**
 
-- `build.runtime-min.toml` 升级为可执行的 build config。
-- 产出目标目录：runtime binary、assets manifest、import cache、默认场景。
-- 支持 debug/release、目标平台、资源拷贝和基础版本信息。
+- Upgrade `build.runtime-min.toml` into an executable build config.
+- Produce a target directory containing runtime binary, assets manifest, import cache, and default scene.
+- Support debug/release, target platform, resource copying, and basic version information.
 
-**验收**
+**Acceptance**
 
-- 一条命令能把 `examples/project` 打成可运行目录。
-- 在不依赖源码树路径的情况下启动成功。
+- One command can package `examples/project` into a runnable directory.
+- The packaged game starts successfully without relying on source-tree paths.
 
-## P2：提升制作效率和稳定性
+## P2: Improves Creation Efficiency and Stability
 
-### 10. 调试和诊断体验
+### 10. Debugging and Diagnostics
 
-- Frame time、draw call、resource count、entity count、physics step time。
-- Console 支持来源、过滤、跳转、清空、复制。
-- Render/asset/script/physics 错误统一进入 diagnostics。
+- Frame time, draw call, resource count, entity count, and physics step time.
+- Console supports source, filtering, jump-to-source, clear, and copy.
+- Render/asset/script/physics errors all flow into diagnostics.
 
-### 11. 编辑器交互能力
+### 11. Editor Interaction
 
-- Scene picking、outline、transform gizmo 连接真实场景和渲染。
-- Undo/Redo 命令栈。
-- Prefab create/apply/revert。
-- 多选、复制、删除、拖拽资产到场景。
+- Scene picking, outlines, and transform gizmo are connected to the real scene and renderer.
+- Undo/Redo command stack.
+- Prefab create/apply/revert.
+- Multi-select, duplicate, delete, and drag assets into the scene.
 
-### 12. 自动化验证
+### 12. Automated Verification
 
-- Runtime smoke 从 headless 扩展到 windowless scene simulation。
-- Scene save/load golden tests 覆盖组件。
-- Importer fixture tests 覆盖 texture/material/model/audio。
-- Editor state tests 覆盖 open project、save scene、play mode。
+- Runtime smoke expands from headless to windowless scene simulation.
+- Scene save/load golden tests cover components.
+- Importer fixture tests cover texture/material/model/audio.
+- Editor state tests cover open project, save scene, and play mode.
 
-## 推荐里程碑
+## Recommended Milestones
 
-### M1：可看见、可输入、可退出
+### M1: Visible, Controllable, Exitable
 
-- `runtime-game` 持续帧循环。
-- winit 窗口和输入状态。
-- 一个真实渲染后端能画 debug mesh。
-- CLI `run examples/project`。
+- Continuous `runtime-game` frame loop.
+- winit window and input state.
+- A real rendering backend can draw a debug mesh.
+- CLI `run examples/project`.
 
-### M2：可编辑、可保存、可重开
+### M2: Editable, Saveable, Reopenable
 
-- Editor 打开项目。
-- Hierarchy/Inspector/Project 绑定真实数据。
-- Scene 组件序列化。
-- 保存场景和偏好。
+- Editor opens projects.
+- Hierarchy/Inspector/Project bind to real data.
+- Scene component serialization.
+- Save scenes and preferences.
 
-### M3：可导入资源、可做一个小 demo
+### M3: Import Assets and Build a Small Demo
 
-- texture/material/model 导入。
-- MeshRenderer/Camera/Light。
-- Project 面板资源树和缩略图。
-- 示例场景显示 textured mesh。
+- texture/material/model import.
+- MeshRenderer/Camera/Light.
+- Project panel asset tree and thumbnails.
+- Sample scene shows a textured mesh.
 
-### M4：可玩性基础
+### M4: Gameplay Foundations
 
-- 输入动作映射。
-- 脚本或游戏逻辑 backend。
-- 物理后端和碰撞事件。
-- 示例 Player controller。
+- Input action mappings.
+- Scripting or game-logic backend.
+- Physics backend and collision events.
+- Sample Player controller.
 
-### M5：可分发
+### M5: Distributable
 
-- 项目 build/package。
-- 资源 manifest 随包加载。
-- 基础性能和诊断面板。
+- Project build/package.
+- Asset manifest loads from the package.
+- Basic performance and diagnostics panel.
 
-## 优先级结论
+## Priority Conclusion
 
-最影响做游戏的不是单个模块缺失，而是缺少端到端闭环。建议先集中做 M1：`runtime-game + 窗口输入 + 真实渲染 + CLI run`。只要这个闭环跑通，后续编辑器、资产、物理、脚本都能围绕同一条可验证路径迭代，避免继续堆抽象但没有可玩结果。
+The biggest blocker to making games is not one missing module, but the lack of an end-to-end loop. Focus first on M1: `runtime-game + window input + real rendering + CLI run`. Once that loop works, the editor, assets, physics, and scripting can all iterate around the same verifiable path instead of adding more abstraction without playable results.

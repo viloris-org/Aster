@@ -1,6 +1,6 @@
 [package]
 name = "engine-render"
-description = "Aster render abstraction boundary"
+description = "Varg render abstraction boundary"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

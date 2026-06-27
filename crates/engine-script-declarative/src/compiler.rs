@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn compiler_caches_compiled_trees() {
-        let dir = std::env::temp_dir().join("aster_test_compiler_cache");
+        let dir = std::env::temp_dir().join("varg_test_compiler_cache");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test.json");
 

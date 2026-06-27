@@ -1,6 +1,6 @@
 [package]
 name = "engine-script-declarative"
-description = "Aster declarative behavior scripting backend optimized for LLM code generation"
+description = "Varg declarative behavior scripting backend optimized for LLM code generation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -122,7 +122,7 @@
       "type": "object"
     }
   },
-  "description": "Declarative behavior tree schema for Aster game engine",
+  "description": "Declarative behavior tree schema for Varg game engine",
   "properties": {
     "behaviors": {
       "description": "Root behavior nodes",
@@ -145,6 +145,6 @@
     "entity",
     "behaviors"
   ],
-  "title": "AsterBehaviorSchema",
+  "title": "VargBehaviorSchema",
   "type": "object"
 }

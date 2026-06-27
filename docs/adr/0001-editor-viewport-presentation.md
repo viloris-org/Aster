@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-Aster's editor needs a high-quality, low-latency Scene View. The current native embedding experiment creates a GTK/GDK child surface, presents WGPU directly into that surface, and moves it to match the React Scene View element measured through `getBoundingClientRect()`.
+Varg's editor needs a high-quality, low-latency Scene View. The current native embedding experiment creates a GTK/GDK child surface, presents WGPU directly into that surface, and moves it to match the React Scene View element measured through `getBoundingClientRect()`.
 
 That experiment preserves zero-copy presentation, but it is not deterministic enough to be the default editor viewport. The WebView and the native child surface are owned by different compositor stacks. Resize, DPI conversion, Wayland/X11 behavior, GTK allocation, WebView layout, and React updates can race. When that race loses, the Scene View surface can drift over the inspector or bottom panels.
 
@@ -63,8 +63,8 @@ Negative:
 ## Implementation plan
 
 1. Keep `canvas-readback` as the stable fallback when native host presentation is explicitly disabled or unavailable.
-2. Make the X11 `native-host-window` GTK host root the default no-CPU-readback presentation on Linux X11/Xwayland when it is available. Native Wayland Scene View embedding is not supported; Linux users should start the editor under Xwayland. `ASTER_EDITOR_COMPOSITOR=0` can force the fallback for diagnostics.
-3. Keep `embedded-native-experimental` behind `ASTER_ENABLE_EXPERIMENTAL_CHILD_SURFACE=1` for diagnostics only.
+2. Make the X11 `native-host-window` GTK host root the default no-CPU-readback presentation on Linux X11/Xwayland when it is available. Native Wayland Scene View embedding is not supported; Linux users should start the editor under Xwayland. `VARG_EDITOR_COMPOSITOR=0` can force the fallback for diagnostics.
+3. Keep `embedded-native-experimental` behind `VARG_ENABLE_EXPERIMENTAL_CHILD_SURFACE=1` for diagnostics only.
 4. Add backend/frontend presentation-mode APIs around viewport ownership.
 5. Implement the native host window on Linux first:
    - create the top-level native host window before/around WebView creation;

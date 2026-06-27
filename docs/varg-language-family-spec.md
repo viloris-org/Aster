@@ -4,7 +4,7 @@
 
 Draft. This document defines the target language direction for the Varg engine scripting and authoring rewrite.
 
-This rewrite is intentionally incompatible with the current Aster script stack. Existing `.aster`, Rhai, Python, and JSON behavior assets are treated as legacy implementation artifacts, not compatibility constraints.
+This rewrite is intentionally incompatible with the current Varg script stack. Existing `.varg`, Rhai, Python, and JSON behavior assets are treated as legacy implementation artifacts, not compatibility constraints.
 
 ## Goals
 
@@ -24,7 +24,7 @@ Varg does not aim to implement Swift. Swift is syntax inspiration, not a compati
 
 Varg does not expose JavaScript or three.js as the scripting language. The scene model can feel familiar to three.js users, but the file syntax remains Varg.
 
-Varg does not preserve the old Aster script API, Rhai file format, Python subprocess script model, or JSON behavior format.
+Varg does not preserve the old Varg script API, Rhai file format, Python subprocess script model, or JSON behavior format.
 
 Varg scene files are not general-purpose programs. They should be parseable, diffable, visually editable, and deterministic.
 

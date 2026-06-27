@@ -2166,7 +2166,7 @@ static NEXT_GENERATED_GUID: AtomicU64 = AtomicU64::new(1);
 
 fn generate_asset_guid(path: &Path) -> AssetGuid {
     let mut entropy = std::collections::hash_map::DefaultHasher::new();
-    "aster-asset-guid-v2".hash(&mut entropy);
+    "varg-asset-guid-v2".hash(&mut entropy);
     path.hash(&mut entropy);
     std::process::id().hash(&mut entropy);
     let entropy = entropy.finish() as u128;
@@ -3667,7 +3667,7 @@ mod tests {
             .upsert_meta(ResourceMetaFormat {
                 version: CURRENT_SCHEMA_VERSION,
                 guid: guid(1),
-                source_path: PathBuf::from("materials/player.aster_material.json"),
+                source_path: PathBuf::from("materials/player.varg_material.json"),
                 kind: ResourceKind::Material,
                 importer: "material-json".to_string(),
                 dependencies: vec![guid(2)],
@@ -3676,7 +3676,7 @@ mod tests {
 
         assert_eq!(
             database.resolve_guid(guid(1)).unwrap().to_utf8().unwrap(),
-            "materials/player.aster_material.json"
+            "materials/player.varg_material.json"
         );
         assert_eq!(database.dependencies().dependencies(guid(1)), vec![guid(2)]);
         assert_eq!(database.dependencies().dependents(guid(2)), vec![guid(1)]);
@@ -3756,7 +3756,7 @@ mod tests {
 
     #[test]
     fn scans_and_imports_supported_assets() {
-        let root = std::env::temp_dir().join(format!("aster-assets-test-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("varg-assets-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("textures")).unwrap();
         std::fs::write(root.join("textures/player.png"), [1_u8, 2, 3, 4]).unwrap();
@@ -3798,7 +3798,7 @@ mod tests {
     #[test]
     fn imports_png_as_decoded_texture_payload() {
         let root =
-            std::env::temp_dir().join(format!("aster-texture-decode-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-texture-decode-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("textures")).unwrap();
         std::fs::write(root.join("textures/white.png"), one_pixel_png()).unwrap();
@@ -3839,7 +3839,7 @@ mod tests {
     #[test]
     fn imports_cubemap_manifest_as_decoded_cube_payload() {
         let root =
-            std::env::temp_dir().join(format!("aster-cubemap-decode-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-cubemap-decode-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("textures/cube")).unwrap();
         for name in ["px", "nx", "py", "ny", "pz", "nz"] {
@@ -3900,7 +3900,7 @@ mod tests {
     #[test]
     fn material_scan_records_shader_and_texture_dependencies() {
         let root =
-            std::env::temp_dir().join(format!("aster-material-deps-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-material-deps-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("materials")).unwrap();
         std::fs::write(
@@ -3945,7 +3945,7 @@ mod tests {
     #[test]
     fn scan_preserves_guid_from_moved_meta_file() {
         let root =
-            std::env::temp_dir().join(format!("aster-assets-meta-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-assets-meta-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("textures")).unwrap();
         std::fs::write(root.join("textures/player.png"), [1_u8, 2, 3, 4]).unwrap();
@@ -3978,7 +3978,7 @@ mod tests {
 
     #[test]
     fn scan_registers_files_with_correct_resource_kinds() {
-        let root = std::env::temp_dir().join(format!("aster-scan-test-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("varg-scan-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         // Create subdirectories
         std::fs::create_dir_all(root.join("textures")).unwrap();
@@ -4051,7 +4051,7 @@ mod tests {
             database
                 .entry_for_path(Path::new("scripts/player.py"))
                 .is_none(),
-            "Python files are not Aster script assets"
+            "Python files are not Varg script assets"
         );
         assert_eq!(
             database
@@ -4100,7 +4100,7 @@ mod tests {
     #[test]
     fn scan_removes_deleted_files() {
         let root =
-            std::env::temp_dir().join(format!("aster-scan-delete-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-scan-delete-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("textures")).unwrap();
         std::fs::write(root.join("textures/a.png"), one_pixel_png()).unwrap();
@@ -4131,8 +4131,7 @@ mod tests {
 
     #[test]
     fn scan_preserves_existing_guid_on_rescan() {
-        let root =
-            std::env::temp_dir().join(format!("aster-scan-guid-test-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("varg-scan-guid-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("textures")).unwrap();
         std::fs::write(root.join("textures/player.png"), one_pixel_png()).unwrap();
@@ -4162,7 +4161,7 @@ mod tests {
     #[test]
     fn png_importer_imports_valid_png_with_mips() {
         let root =
-            std::env::temp_dir().join(format!("aster-png-importer-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-png-importer-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4189,7 +4188,7 @@ mod tests {
     #[test]
     fn png_importer_to_registry_stores_texture_resource() {
         let root =
-            std::env::temp_dir().join(format!("aster-png-registry-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-png-registry-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4237,7 +4236,7 @@ mod tests {
     #[test]
     fn png_importer_handles_invalid_png() {
         let root =
-            std::env::temp_dir().join(format!("aster-png-invalid-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-png-invalid-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4305,7 +4304,7 @@ mod tests {
     #[test]
     fn gltf_importer_imports_valid_gltf_with_mesh() {
         let root =
-            std::env::temp_dir().join(format!("aster-gltf-importer-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-gltf-importer-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4327,7 +4326,7 @@ mod tests {
     #[test]
     fn gltf_importer_to_registry_stores_model_resource() {
         let root =
-            std::env::temp_dir().join(format!("aster-gltf-registry-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-gltf-registry-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4376,7 +4375,7 @@ mod tests {
     #[test]
     fn gltf_importer_handles_invalid_gltf() {
         let root =
-            std::env::temp_dir().join(format!("aster-gltf-invalid-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-gltf-invalid-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4401,7 +4400,7 @@ mod tests {
     #[test]
     fn gltf_importer_fills_default_normals_when_missing() {
         let root =
-            std::env::temp_dir().join(format!("aster-gltf-normals-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-gltf-normals-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4619,7 +4618,7 @@ mod tests {
     #[test]
     fn gltf_importer_extracts_pbr_material() {
         let root =
-            std::env::temp_dir().join(format!("aster-gltf-material-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg-gltf-material-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4659,10 +4658,8 @@ mod tests {
 
     #[test]
     fn gltf_importer_creates_default_material_when_none() {
-        let root = std::env::temp_dir().join(format!(
-            "aster-gltf-no-material-test-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("varg-gltf-no-material-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -4904,7 +4901,7 @@ depth = 0.04
         use std::time::Duration;
 
         // Create a temporary directory with a test PNG
-        let temp_dir = std::env::temp_dir().join("aster_import_worker_test");
+        let temp_dir = std::env::temp_dir().join("varg_import_worker_test");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -4956,7 +4953,7 @@ depth = 0.04
         use std::time::Duration;
 
         // Create a temporary directory with an invalid PNG
-        let temp_dir = std::env::temp_dir().join("aster_import_worker_invalid_test");
+        let temp_dir = std::env::temp_dir().join("varg_import_worker_invalid_test");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -5032,7 +5029,7 @@ depth = 0.04
 
         // Create a temporary directory
         let temp_dir =
-            std::env::temp_dir().join(format!("aster_watcher_test_{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg_watcher_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -5075,10 +5072,8 @@ depth = 0.04
     fn file_watcher_debounces_modified_events() {
         use std::time::Duration;
 
-        let temp_dir = std::env::temp_dir().join(format!(
-            "aster_watcher_debounce_test_{}",
-            std::process::id()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("varg_watcher_debounce_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -5121,7 +5116,7 @@ depth = 0.04
 
     #[test]
     fn asset_database_handle_event_marks_modified_as_stale() {
-        let root = std::env::temp_dir().join(format!("aster_db_event_test_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("varg_db_event_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -5154,8 +5149,7 @@ depth = 0.04
 
     #[test]
     fn asset_database_handle_event_adds_created_asset() {
-        let root =
-            std::env::temp_dir().join(format!("aster_db_create_test_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("varg_db_create_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -5179,8 +5173,7 @@ depth = 0.04
 
     #[test]
     fn asset_database_handle_event_removes_deleted_asset() {
-        let root =
-            std::env::temp_dir().join(format!("aster_db_remove_test_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("varg_db_remove_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -5214,7 +5207,7 @@ depth = 0.04
     #[test]
     fn hot_reload_coordinator_processes_file_events_and_enqueues_imports() {
         let root =
-            std::env::temp_dir().join(format!("aster_hot_reload_test_{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg_hot_reload_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -5365,7 +5358,7 @@ depth = 0.04
         use std::time::Duration;
 
         let root =
-            std::env::temp_dir().join(format!("aster_hot_reload_full_{}", std::process::id()));
+            std::env::temp_dir().join(format!("varg_hot_reload_full_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 
@@ -5449,7 +5442,7 @@ depth = 0.04
 
     #[test]
     fn asset_database_handle_event_returns_guid_for_modified() {
-        let root = std::env::temp_dir().join(format!("aster_db_guid_test_{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("varg_db_guid_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
 

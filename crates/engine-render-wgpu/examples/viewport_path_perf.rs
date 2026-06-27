@@ -8,10 +8,10 @@
 //! `cargo run -p engine-render-wgpu --release --example viewport_path_perf`
 //!
 //! Useful environment variables:
-//! - `ASTER_VIEWPORT_PERF_WIDTH`, default `1280`
-//! - `ASTER_VIEWPORT_PERF_HEIGHT`, default `720`
-//! - `ASTER_VIEWPORT_PERF_FRAMES`, default `180`
-//! - `ASTER_VIEWPORT_PERF_WARMUP`, default `16`
+//! - `VARG_VIEWPORT_PERF_WIDTH`, default `1280`
+//! - `VARG_VIEWPORT_PERF_HEIGHT`, default `720`
+//! - `VARG_VIEWPORT_PERF_FRAMES`, default `180`
+//! - `VARG_VIEWPORT_PERF_WARMUP`, default `16`
 
 use std::time::{Duration, Instant};
 
@@ -46,10 +46,10 @@ struct PathResult {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = BenchConfig {
-        width: env_u32("ASTER_VIEWPORT_PERF_WIDTH", 1280),
-        height: env_u32("ASTER_VIEWPORT_PERF_HEIGHT", 720),
-        frames: env_u64("ASTER_VIEWPORT_PERF_FRAMES", 180),
-        warmup: env_u64("ASTER_VIEWPORT_PERF_WARMUP", 16),
+        width: env_u32("VARG_VIEWPORT_PERF_WIDTH", 1280),
+        height: env_u32("VARG_VIEWPORT_PERF_HEIGHT", 720),
+        frames: env_u64("VARG_VIEWPORT_PERF_FRAMES", 180),
+        warmup: env_u64("VARG_VIEWPORT_PERF_WARMUP", 16),
     };
     let world = benchmark_world();
 
@@ -207,7 +207,7 @@ fn measure_native_surface(config: BenchConfig, world: &RenderWorld) -> PathResul
     };
     let window = match event_loop.create_window(
         WindowAttributes::default()
-            .with_title("Aster viewport path benchmark")
+            .with_title("Varg viewport path benchmark")
             .with_visible(false)
             .with_inner_size(PhysicalSize::new(config.width, config.height)),
     ) {

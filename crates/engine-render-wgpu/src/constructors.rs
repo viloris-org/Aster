@@ -34,7 +34,7 @@ impl Default for WgpuOffscreenConfig {
 impl WgpuRenderDevice {
     fn requested_device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
         let mut descriptor = wgpu::DeviceDescriptor {
-            label: Some("aster wgpu device"),
+            label: Some("varg wgpu device"),
             ..Default::default()
         };
         let timestamp_features =
@@ -378,18 +378,18 @@ impl WgpuRenderDevice {
             wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
         let timestamp_resources = device.features().contains(timestamp_features).then(|| {
             let query = device.create_query_set(&wgpu::QuerySetDescriptor {
-                label: Some("aster frame timestamp query"),
+                label: Some("varg frame timestamp query"),
                 ty: wgpu::QueryType::Timestamp,
                 count: 2,
             });
             let resolve = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("aster frame timestamp resolve"),
+                label: Some("varg frame timestamp resolve"),
                 size: 16,
                 usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
             let readback = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("aster frame timestamp readback"),
+                label: Some("varg frame timestamp readback"),
                 size: 16,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
@@ -411,7 +411,7 @@ impl WgpuRenderDevice {
                 with_depth: true,
                 samples: 1,
                 kind: ViewKind::SceneView,
-                label: Some("aster default offscreen target"),
+                label: Some("varg default offscreen target"),
             },
         )?;
         let game_target = create_target(
@@ -428,7 +428,7 @@ impl WgpuRenderDevice {
                 with_depth: true,
                 samples: 1,
                 kind: ViewKind::GameView,
-                label: Some("aster game offscreen target"),
+                label: Some("varg game offscreen target"),
             },
         )?;
         let preview_target = create_target(
@@ -445,16 +445,16 @@ impl WgpuRenderDevice {
                 with_depth: true,
                 samples: 1,
                 kind: ViewKind::Preview,
-                label: Some("aster camera preview offscreen target"),
+                label: Some("varg camera preview offscreen target"),
             },
         )?;
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster forward shader"),
+            label: Some("varg forward shader"),
             source: wgpu::ShaderSource::Wgsl(FORWARD_SHADER.into()),
         });
         let camera_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster camera uniform"),
+            label: Some("varg camera uniform"),
             contents: bytemuck::bytes_of(&CameraUniform {
                 view_projection: IDENTITY_MAT4,
                 camera_position: [0.0, 0.0, 5.0, 1.0],
@@ -463,7 +463,7 @@ impl WgpuRenderDevice {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let temporal_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster temporal uniform"),
+            label: Some("varg temporal uniform"),
             contents: bytemuck::bytes_of(&TemporalUniform {
                 previous_view_projection: IDENTITY_MAT4,
                 current_view_projection: IDENTITY_MAT4,
@@ -473,17 +473,17 @@ impl WgpuRenderDevice {
         });
         let gpu_particles = crate::particles::GpuParticlePipeline::new(&device, &camera_uniform);
         let lighting_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster lighting uniform"),
+            label: Some("varg lighting uniform"),
             contents: bytemuck::bytes_of(&LightingUniform::default()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let gi_probe_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster gi probe uniform"),
+            label: Some("varg gi probe uniform"),
             contents: bytemuck::bytes_of(&GiProbeUniform::default()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let gi_probe_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster gi probe buffer"),
+            label: Some("varg gi probe buffer"),
             contents: bytemuck::cast_slice(
                 &[GiProbe {
                     irradiance: [0.0; 4],
@@ -492,7 +492,7 @@ impl WgpuRenderDevice {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
         let default_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster default white texture"),
+            label: Some("varg default white texture"),
             size: wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -527,7 +527,7 @@ impl WgpuRenderDevice {
             },
         );
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster default sampler"),
+            label: Some("varg default sampler"),
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
@@ -541,7 +541,7 @@ impl WgpuRenderDevice {
         let mut csm_depth_views = Vec::with_capacity(CSM_CASCADE_COUNT);
         for i in 0..CSM_CASCADE_COUNT {
             let tex = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(&format!("aster csm cascade {i} depth")),
+                label: Some(&format!("varg csm cascade {i} depth")),
                 size: wgpu::Extent3d {
                     width: CSM_SHADOW_RESOLUTION,
                     height: CSM_SHADOW_RESOLUTION,
@@ -564,7 +564,7 @@ impl WgpuRenderDevice {
         let csm_depth_views: [wgpu::TextureView; CSM_CASCADE_COUNT] =
             csm_depth_views.try_into().unwrap();
         let csm_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster csm sampler"),
+            label: Some("varg csm sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -575,7 +575,7 @@ impl WgpuRenderDevice {
             ..Default::default()
         });
         let csm_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster csm uniform"),
+            label: Some("varg csm uniform"),
             contents: bytemuck::bytes_of(&CsmUniform {
                 cascade_vps: [IDENTITY_MAT4; CSM_CASCADE_COUNT],
                 cascade_splits: [0.0; 4],
@@ -587,7 +587,7 @@ impl WgpuRenderDevice {
         let mut csm_cascade_uniforms = Vec::with_capacity(CSM_CASCADE_COUNT);
         for i in 0..CSM_CASCADE_COUNT {
             let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("aster csm cascade {i} uniform")),
+                label: Some(&format!("varg csm cascade {i} uniform")),
                 contents: bytemuck::bytes_of(&ShadowUniform {
                     light_view_projection: IDENTITY_MAT4,
                 }),
@@ -601,7 +601,7 @@ impl WgpuRenderDevice {
         // Group 0: camera + lighting + CSM + IBL
         let scene_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster scene bind group layout"),
+                label: Some("varg scene bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -769,7 +769,7 @@ impl WgpuRenderDevice {
             });
         // IBL resources
         let ibl_irradiance_map = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster ibl irradiance map"),
+            label: Some("varg ibl irradiance map"),
             size: wgpu::Extent3d {
                 width: IBL_IRRADIANCE_RES,
                 height: IBL_IRRADIANCE_RES,
@@ -785,12 +785,12 @@ impl WgpuRenderDevice {
             view_formats: &[],
         });
         let ibl_irradiance_view = ibl_irradiance_map.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("aster ibl irradiance cube view"),
+            label: Some("varg ibl irradiance cube view"),
             dimension: Some(wgpu::TextureViewDimension::Cube),
             ..Default::default()
         });
         let ibl_prefilter_map = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster ibl prefilter map"),
+            label: Some("varg ibl prefilter map"),
             size: wgpu::Extent3d {
                 width: IBL_PREFILTER_RES,
                 height: IBL_PREFILTER_RES,
@@ -807,14 +807,14 @@ impl WgpuRenderDevice {
         });
         let ibl_prefilter_views =
             vec![ibl_prefilter_map.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("aster ibl prefilter cube view"),
+                label: Some("varg ibl prefilter cube view"),
                 dimension: Some(wgpu::TextureViewDimension::Cube),
                 base_mip_level: 0,
                 mip_level_count: Some(5),
                 ..Default::default()
             })];
         let ibl_brdf_lut = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster ibl brdf lut"),
+            label: Some("varg ibl brdf lut"),
             size: wgpu::Extent3d {
                 width: IBL_BRDF_LUT_RES,
                 height: IBL_BRDF_LUT_RES,
@@ -829,7 +829,7 @@ impl WgpuRenderDevice {
         });
         let ibl_brdf_lut_view = ibl_brdf_lut.create_view(&wgpu::TextureViewDescriptor::default());
         let ibl_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster ibl sampler"),
+            label: Some("varg ibl sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -840,7 +840,7 @@ impl WgpuRenderDevice {
         });
         // IBL baking scratch texture (max resolution shared by irradiance and prefilter)
         let ibl_scratch_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster ibl scratch"),
+            label: Some("varg ibl scratch"),
             size: wgpu::Extent3d {
                 width: IBL_PREFILTER_RES,
                 height: IBL_PREFILTER_RES,
@@ -867,7 +867,7 @@ impl WgpuRenderDevice {
             ssao_noise[i * 4 + 3] = 255u8;
         }
         let ssao_noise_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster ssao noise"),
+            label: Some("varg ssao noise"),
             size: wgpu::Extent3d {
                 width: SSAO_NOISE_RES,
                 height: SSAO_NOISE_RES,
@@ -902,7 +902,7 @@ impl WgpuRenderDevice {
             },
         );
         let ssao_linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster ssao linear sampler"),
+            label: Some("varg ssao linear sampler"),
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
@@ -928,12 +928,12 @@ impl WgpuRenderDevice {
             ssao_kernel[i * 4 + 3] = 0.0;
         }
         let ssao_samples_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster ssao samples"),
+            label: Some("varg ssao samples"),
             contents: bytemuck::cast_slice(&ssao_kernel),
             usage: wgpu::BufferUsages::STORAGE,
         });
         let bloom_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster bloom sampler"),
+            label: Some("varg bloom sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -943,7 +943,7 @@ impl WgpuRenderDevice {
             ..Default::default()
         });
         let fog_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster fog uniform"),
+            label: Some("varg fog uniform"),
             contents: bytemuck::bytes_of(&FogUniform {
                 density: 0.0,
                 _pad: [0.0; 3],
@@ -954,7 +954,7 @@ impl WgpuRenderDevice {
         });
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster scene bind group"),
+            label: Some("varg scene bind group"),
             layout: &scene_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -1031,7 +1031,7 @@ impl WgpuRenderDevice {
         // Group 1: material textures
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster material bind group layout"),
+                label: Some("varg material bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -1094,7 +1094,7 @@ impl WgpuRenderDevice {
 
         // Default normal map (flat normal 128,128,255,255 = (0,0,1) in tangent space)
         let default_normal_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster default normal texture"),
+            label: Some("varg default normal texture"),
             size: wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -1132,7 +1132,7 @@ impl WgpuRenderDevice {
         // Neutral packed material texture. Shader factors are multiplied by these
         // channels, so all channels must be one when no texture is supplied.
         let default_mra_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster default MRA texture"),
+            label: Some("varg default MRA texture"),
             size: wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -1168,7 +1168,7 @@ impl WgpuRenderDevice {
         );
 
         let default_material_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster default material bind group"),
+            label: Some("varg default material bind group"),
             layout: &material_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -1199,7 +1199,7 @@ impl WgpuRenderDevice {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster forward pipeline layout"),
+            label: Some("varg forward pipeline layout"),
             bind_group_layouts: &[
                 Some(&scene_bind_group_layout),
                 Some(&material_bind_group_layout),
@@ -1207,7 +1207,7 @@ impl WgpuRenderDevice {
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster forward pipeline"),
+            label: Some("varg forward pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -1284,7 +1284,7 @@ impl WgpuRenderDevice {
             cache: None,
         });
         let transparent_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster transparent pipeline"),
+            label: Some("varg transparent pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -1361,12 +1361,12 @@ impl WgpuRenderDevice {
             cache: None,
         });
         let skinned_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster skinned mesh shader"),
+            label: Some("varg skinned mesh shader"),
             source: wgpu::ShaderSource::Wgsl(SKINNED_SHADER.into()),
         });
         let skinned_camera_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster skinned camera layout"),
+                label: Some("varg skinned camera layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -1380,7 +1380,7 @@ impl WgpuRenderDevice {
             });
         let skinned_bone_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster skinned bone layout"),
+                label: Some("varg skinned bone layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -1393,7 +1393,7 @@ impl WgpuRenderDevice {
                 }],
             });
         let skinned_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster skinned camera bind group"),
+            label: Some("varg skinned camera bind group"),
             layout: &skinned_camera_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -1402,7 +1402,7 @@ impl WgpuRenderDevice {
         });
         let skinned_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("aster skinned pipeline layout"),
+                label: Some("varg skinned pipeline layout"),
                 bind_group_layouts: &[
                     Some(&skinned_camera_layout),
                     Some(&skinned_bone_bind_group_layout),
@@ -1410,7 +1410,7 @@ impl WgpuRenderDevice {
                 immediate_size: 0,
             });
         let skinned_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster skinned mesh pipeline"),
+            label: Some("varg skinned mesh pipeline"),
             layout: Some(&skinned_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &skinned_shader,
@@ -1451,12 +1451,12 @@ impl WgpuRenderDevice {
 
         // --- Grid pipeline ---
         let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster grid shader"),
+            label: Some("varg grid shader"),
             source: wgpu::ShaderSource::Wgsl(GRID_SHADER.into()),
         });
         let grid_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster grid bind group layout"),
+                label: Some("varg grid bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -1469,7 +1469,7 @@ impl WgpuRenderDevice {
                 }],
             });
         let grid_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster grid bind group"),
+            label: Some("varg grid bind group"),
             layout: &grid_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -1477,13 +1477,13 @@ impl WgpuRenderDevice {
             }],
         });
         let grid_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster grid pipeline layout"),
+            label: Some("varg grid pipeline layout"),
             bind_group_layouts: &[Some(&grid_bind_group_layout)],
             immediate_size: 0,
         });
         let grid_color_format = wgpu::TextureFormat::Rgba16Float;
         let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster grid pipeline"),
+            label: Some("varg grid pipeline"),
             layout: Some(&grid_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &grid_shader,
@@ -1534,7 +1534,7 @@ impl WgpuRenderDevice {
         });
         let grid_vertices = generate_grid();
         let grid_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster grid vertices"),
+            label: Some("varg grid vertices"),
             contents: bytemuck::cast_slice(&grid_vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
@@ -1542,12 +1542,12 @@ impl WgpuRenderDevice {
 
         // Shadow pipeline
         let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster shadow shader"),
+            label: Some("varg shadow shader"),
             source: wgpu::ShaderSource::Wgsl(SHADOW_SHADER.into()),
         });
         let shadow_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster shadow bind group layout"),
+                label: Some("varg shadow bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -1561,12 +1561,12 @@ impl WgpuRenderDevice {
             });
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("aster shadow pipeline layout"),
+                label: Some("varg shadow pipeline layout"),
                 bind_group_layouts: &[Some(&shadow_bind_group_layout)],
                 immediate_size: 0,
             });
         let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster shadow pipeline"),
+            label: Some("varg shadow pipeline"),
             layout: Some(&shadow_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shadow_shader,
@@ -1625,7 +1625,7 @@ impl WgpuRenderDevice {
         let mut csm_cascade_bind_groups = Vec::with_capacity(CSM_CASCADE_COUNT);
         for i in 0..CSM_CASCADE_COUNT {
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("aster csm cascade {i} bind group")),
+                label: Some(&format!("varg csm cascade {i} bind group")),
                 layout: &shadow_bind_group_layout,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
@@ -1639,11 +1639,11 @@ impl WgpuRenderDevice {
 
         // Skybox pipeline
         let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster skybox shader"),
+            label: Some("varg skybox shader"),
             source: wgpu::ShaderSource::Wgsl(SKYBOX_SHADER.into()),
         });
         let skybox_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster skybox uniform"),
+            label: Some("varg skybox uniform"),
             contents: bytemuck::bytes_of(&SkyboxUniform {
                 view_rotation_only: IDENTITY_MAT4,
                 zenith_color: [0.15, 0.35, 0.65, 1.0],
@@ -1654,7 +1654,7 @@ impl WgpuRenderDevice {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let skybox_default_cubemap = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster skybox default cubemap"),
+            label: Some("varg skybox default cubemap"),
             size: wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -1694,12 +1694,12 @@ impl WgpuRenderDevice {
         }
         let skybox_default_cubemap_view =
             skybox_default_cubemap.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("aster skybox default cubemap view"),
+                label: Some("varg skybox default cubemap view"),
                 dimension: Some(wgpu::TextureViewDimension::Cube),
                 ..Default::default()
             });
         let skybox_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster skybox sampler"),
+            label: Some("varg skybox sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -1710,7 +1710,7 @@ impl WgpuRenderDevice {
         });
         let skybox_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster skybox bind group layout"),
+                label: Some("varg skybox bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -1741,7 +1741,7 @@ impl WgpuRenderDevice {
                 ],
             });
         let skybox_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster skybox bind group"),
+            label: Some("varg skybox bind group"),
             layout: &skybox_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -1760,13 +1760,13 @@ impl WgpuRenderDevice {
         });
         let skybox_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("aster skybox pipeline layout"),
+                label: Some("varg skybox pipeline layout"),
                 bind_group_layouts: &[Some(&skybox_bind_group_layout)],
                 immediate_size: 0,
             });
         let skybox_color_format = wgpu::TextureFormat::Rgba16Float;
         let skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster skybox pipeline"),
+            label: Some("varg skybox pipeline"),
             layout: Some(&skybox_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &skybox_shader,
@@ -1803,12 +1803,12 @@ impl WgpuRenderDevice {
 
         // --- Post-process pipeline (fullscreen quad) ---
         let post_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster post shader"),
+            label: Some("varg post shader"),
             source: wgpu::ShaderSource::Wgsl(POST_SHADER.into()),
         });
         let post_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster post bind group layout"),
+                label: Some("varg post bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -1899,7 +1899,7 @@ impl WgpuRenderDevice {
                 ],
             });
         let post_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster post uniform"),
+            label: Some("varg post uniform"),
             contents: bytemuck::bytes_of(&PostProcessUniform {
                 render_width: width as f32,
                 render_height: height as f32,
@@ -1925,12 +1925,12 @@ impl WgpuRenderDevice {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let taa_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster taa resolve shader"),
+            label: Some("varg taa resolve shader"),
             source: wgpu::ShaderSource::Wgsl(TAA_SHADER.into()),
         });
         let taa_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster taa bind group layout"),
+                label: Some("varg taa bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -1991,12 +1991,12 @@ impl WgpuRenderDevice {
                 ],
             });
         let taa_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster taa pipeline layout"),
+            label: Some("varg taa pipeline layout"),
             bind_group_layouts: &[Some(&taa_bind_group_layout)],
             immediate_size: 0,
         });
         let taa_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("aster taa resolve pipeline"),
+            label: Some("varg taa resolve pipeline"),
             layout: Some(&taa_pipeline_layout),
             module: &taa_shader,
             entry_point: Some("cs_main"),
@@ -2004,12 +2004,12 @@ impl WgpuRenderDevice {
             cache: None,
         });
         let post_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster post pipeline layout"),
+            label: Some("varg post pipeline layout"),
             bind_group_layouts: &[Some(&post_bind_group_layout)],
             immediate_size: 0,
         });
         let post_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster post pipeline"),
+            label: Some("varg post pipeline"),
             layout: Some(&post_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &post_shader,
@@ -2041,7 +2041,7 @@ impl WgpuRenderDevice {
             cache: None,
         });
         let ibl_brdf_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("aster ibl brdf bgl"),
+            label: Some("varg ibl brdf bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -2054,18 +2054,18 @@ impl WgpuRenderDevice {
             }],
         });
         let ibl_brdf_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster ibl brdf shader"),
+            label: Some("varg ibl brdf shader"),
             source: wgpu::ShaderSource::Wgsl(IBL_BRDF_LUT_SHADER.into()),
         });
         let ibl_brdf_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("aster ibl brdf pipeline layout"),
+                label: Some("varg ibl brdf pipeline layout"),
                 bind_group_layouts: &[Some(&ibl_brdf_bgl)],
                 immediate_size: 0,
             });
         let ibl_brdf_compute = Some(device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("aster ibl brdf compute"),
+                label: Some("varg ibl brdf compute"),
                 layout: Some(&ibl_brdf_pipeline_layout),
                 module: &ibl_brdf_shader,
                 entry_point: Some("main"),
@@ -2075,7 +2075,7 @@ impl WgpuRenderDevice {
         ));
         // IBL baking: bind group layout shared by irradiance and prefilter compute pipelines
         let ibl_bake_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("aster ibl bake bgl"),
+            label: Some("varg ibl bake bgl"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -2116,17 +2116,17 @@ impl WgpuRenderDevice {
             ],
         });
         let ibl_bake_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster ibl bake pipeline layout"),
+            label: Some("varg ibl bake pipeline layout"),
             bind_group_layouts: &[Some(&ibl_bake_bgl)],
             immediate_size: 0,
         });
         let ibl_irradiance_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster ibl irradiance shader"),
+            label: Some("varg ibl irradiance shader"),
             source: wgpu::ShaderSource::Wgsl(IBL_IRRADIANCE_SHADER.into()),
         });
         let ibl_irradiance_compute = Some(device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("aster ibl irradiance compute"),
+                label: Some("varg ibl irradiance compute"),
                 layout: Some(&ibl_bake_pl_layout),
                 module: &ibl_irradiance_shader,
                 entry_point: Some("main"),
@@ -2135,12 +2135,12 @@ impl WgpuRenderDevice {
             },
         ));
         let ibl_prefilter_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster ibl prefilter shader"),
+            label: Some("varg ibl prefilter shader"),
             source: wgpu::ShaderSource::Wgsl(IBL_PREFILTER_SHADER.into()),
         });
         let ibl_prefilter_compute = Some(device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("aster ibl prefilter compute"),
+                label: Some("varg ibl prefilter compute"),
                 layout: Some(&ibl_bake_pl_layout),
                 module: &ibl_prefilter_shader,
                 entry_point: Some("main"),
@@ -2150,7 +2150,7 @@ impl WgpuRenderDevice {
         ));
         // SSAO compute pipeline
         let ssao_compute_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("aster ssao compute bgl"),
+            label: Some("varg ssao compute bgl"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -2205,17 +2205,17 @@ impl WgpuRenderDevice {
             ],
         });
         let ssao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster ssao shader"),
+            label: Some("varg ssao shader"),
             source: wgpu::ShaderSource::Wgsl(SSAO_SHADER.into()),
         });
         let ssao_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster ssao pipeline layout"),
+            label: Some("varg ssao pipeline layout"),
             bind_group_layouts: &[Some(&ssao_compute_bgl)],
             immediate_size: 0,
         });
         let ssao_compute_pipeline = Some(device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("aster ssao compute"),
+                label: Some("varg ssao compute"),
                 layout: Some(&ssao_pipeline_layout),
                 module: &ssao_shader,
                 entry_point: Some("main"),
@@ -2225,7 +2225,7 @@ impl WgpuRenderDevice {
         ));
         // SSGI compute pipeline
         let ssgi_compute_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("aster ssgi compute bgl"),
+            label: Some("varg ssgi compute bgl"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -2316,17 +2316,17 @@ impl WgpuRenderDevice {
             ],
         });
         let ssgi_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster ssgi shader"),
+            label: Some("varg ssgi shader"),
             source: wgpu::ShaderSource::Wgsl(SSGI_SHADER.into()),
         });
         let ssgi_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster ssgi pipeline layout"),
+            label: Some("varg ssgi pipeline layout"),
             bind_group_layouts: &[Some(&ssgi_compute_bgl)],
             immediate_size: 0,
         });
         let ssgi_compute_pipeline = Some(device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("aster ssgi compute"),
+                label: Some("varg ssgi compute"),
                 layout: Some(&ssgi_pipeline_layout),
                 module: &ssgi_shader,
                 entry_point: Some("main"),
@@ -2336,7 +2336,7 @@ impl WgpuRenderDevice {
         ));
         // Bloom compute pipelines
         let bloom_compute_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("aster bloom compute bgl"),
+            label: Some("varg bloom compute bgl"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -2377,22 +2377,22 @@ impl WgpuRenderDevice {
             ],
         });
         let bloom_down_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster bloom downsample shader"),
+            label: Some("varg bloom downsample shader"),
             source: wgpu::ShaderSource::Wgsl(BLOOM_DOWNSAMPLE_SHADER.into()),
         });
         let bloom_up_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster bloom upsample shader"),
+            label: Some("varg bloom upsample shader"),
             source: wgpu::ShaderSource::Wgsl(BLOOM_UPSAMPLE_SHADER.into()),
         });
         let bloom_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("aster bloom pipeline layout"),
+                label: Some("varg bloom pipeline layout"),
                 bind_group_layouts: &[Some(&bloom_compute_bgl)],
                 immediate_size: 0,
             });
         let bloom_compute_down = Some(device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("aster bloom downsample compute"),
+                label: Some("varg bloom downsample compute"),
                 layout: Some(&bloom_pipeline_layout),
                 module: &bloom_down_shader,
                 entry_point: Some("main"),
@@ -2402,7 +2402,7 @@ impl WgpuRenderDevice {
         ));
         let bloom_compute_up = Some(device.create_compute_pipeline(
             &wgpu::ComputePipelineDescriptor {
-                label: Some("aster bloom upsample compute"),
+                label: Some("varg bloom upsample compute"),
                 layout: Some(&bloom_pipeline_layout),
                 module: &bloom_up_shader,
                 entry_point: Some("main"),
@@ -2411,7 +2411,7 @@ impl WgpuRenderDevice {
             },
         ));
         let bloom_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster bloom uniform"),
+            label: Some("varg bloom uniform"),
             contents: bytemuck::bytes_of(&BloomUniform {
                 intensity: 0.04,
                 threshold: 1.0,
@@ -2421,7 +2421,7 @@ impl WgpuRenderDevice {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let ssao_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster ssao uniform"),
+            label: Some("varg ssao uniform"),
             contents: bytemuck::bytes_of(&SsaoUniform {
                 radius: SSAO_RADIUS,
                 bias: SSAO_BIAS,
@@ -2435,7 +2435,7 @@ impl WgpuRenderDevice {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let ssgi_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster ssgi uniform"),
+            label: Some("varg ssgi uniform"),
             contents: bytemuck::bytes_of(&SsgiUniform {
                 width: width as f32,
                 height: height as f32,
@@ -2454,12 +2454,12 @@ impl WgpuRenderDevice {
         });
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster cube vertices"),
+            label: Some("varg cube vertices"),
             contents: bytemuck::cast_slice(CUBE_VERTICES),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster cube indices"),
+            label: Some("varg cube indices"),
             contents: bytemuck::cast_slice(CUBE_INDICES),
             usage: wgpu::BufferUsages::INDEX,
         });
@@ -2518,7 +2518,7 @@ impl WgpuRenderDevice {
 
         // Dummy 1x1 textures for initial post bind group
         let dummy_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster dummy 1x1"),
+            label: Some("varg dummy 1x1"),
             size: wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -2533,7 +2533,7 @@ impl WgpuRenderDevice {
         });
         let dummy_tex_view = dummy_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster post dummy depth"),
+            label: Some("varg post dummy depth"),
             size: wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -2548,7 +2548,7 @@ impl WgpuRenderDevice {
         });
         let dummy_depth_view = dummy_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let post_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster post bind group"),
+            label: Some("varg post bind group"),
             layout: &post_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -2591,12 +2591,12 @@ impl WgpuRenderDevice {
         });
 
         let gui_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("aster gui shader"),
+            label: Some("varg gui shader"),
             source: wgpu::ShaderSource::Wgsl(GUI_SHADER.into()),
         });
         let gui_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("aster gui bind group layout"),
+                label: Some("varg gui bind group layout"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -2627,12 +2627,12 @@ impl WgpuRenderDevice {
                 ],
             });
         let gui_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("aster gui pipeline layout"),
+            label: Some("varg gui pipeline layout"),
             bind_group_layouts: &[Some(&gui_bind_group_layout)],
             immediate_size: 0,
         });
         let gui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster gui pipeline"),
+            label: Some("varg gui pipeline"),
             layout: Some(&gui_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &gui_shader,
@@ -2669,7 +2669,7 @@ impl WgpuRenderDevice {
             cache: None,
         });
         let surface_gui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("aster surface gui pipeline"),
+            label: Some("varg surface gui pipeline"),
             layout: Some(&gui_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &gui_shader,
@@ -2706,7 +2706,7 @@ impl WgpuRenderDevice {
             cache: None,
         });
         let gui_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("aster gui sampler"),
+            label: Some("varg gui sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
@@ -2714,7 +2714,7 @@ impl WgpuRenderDevice {
             ..Default::default()
         });
         let gui_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster gui uniform"),
+            label: Some("varg gui uniform"),
             contents: bytemuck::bytes_of(&GuiUniform {
                 screen_size: [width.max(1) as f32, height.max(1) as f32],
                 _pad: [0.0; 2],
@@ -2724,13 +2724,13 @@ impl WgpuRenderDevice {
         let gui_vertex_capacity = 4;
         let gui_index_capacity = 6;
         let gui_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("aster gui vertices"),
+            label: Some("varg gui vertices"),
             size: (gui_vertex_capacity * std::mem::size_of::<GpuGuiVertex>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let gui_index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("aster gui indices"),
+            label: Some("varg gui indices"),
             size: (gui_index_capacity * std::mem::size_of::<u32>()) as u64,
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,

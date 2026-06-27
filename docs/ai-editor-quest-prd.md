@@ -1,4 +1,4 @@
-# Aster Quest Detailed Specification
+# Varg Quest Detailed Specification
 
 Status: Draft detailed sub-spec
 Parent: [`docs/ai-agent-unified-spec.md`](./ai-agent-unified-spec.md)
@@ -6,7 +6,7 @@ Last updated: 2026-06-21
 
 ## Purpose
 
-This document defines the detailed behavior for **Quest**, Aster's persistent AI task system for durable autonomous game-making work.
+This document defines the detailed behavior for **Quest**, Varg's persistent AI task system for durable autonomous game-making work.
 
 Quest is the primary AI-native product direction. It exists for work that needs persistent intent, autonomous execution, artifacts, validation, review evidence, recovery, and apply decisions. Local temporary assistance belongs in Editor AI, defined in [`docs/ai-editor-copilot-prd.md`](./ai-editor-copilot-prd.md).
 
@@ -404,7 +404,7 @@ prefix_rule(pattern=["cargo", "check"], decision="allow")
 prefix_rule(pattern=["flutter", "analyze"], decision="allow")
 ```
 
-Aster rules should additionally record:
+Varg rules should additionally record:
 
 - scope: once, session, or permanent;
 - cwd scope;

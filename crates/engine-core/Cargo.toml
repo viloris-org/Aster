@@ -1,6 +1,6 @@
 [package]
 name = "engine-core"
-description = "Aster engine core runtime primitives"
+description = "Varg engine core runtime primitives"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

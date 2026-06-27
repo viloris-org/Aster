@@ -117,7 +117,7 @@ const WINDOW_BACKGROUND: &str = "#181818";
 const SOLO_REPAIR_LIMIT: usize = 1;
 
 fn editor_compositor_requested() -> bool {
-    match std::env::var("ASTER_EDITOR_COMPOSITOR") {
+    match std::env::var("VARG_EDITOR_COMPOSITOR") {
         Ok(value) => match value.to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => true,
             "0" | "false" | "no" | "off" => false,
@@ -2368,7 +2368,7 @@ fn push_created_asset_console(console: &mut ConsoleService, kind: &str, full_pat
     });
 }
 
-fn aster_repo_root() -> PathBuf {
+fn varg_repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -3603,7 +3603,7 @@ mod tests {
     }
 
     #[test]
-    fn quest_export_publishes_selected_artifacts_under_project_local_aster_directory() {
+    fn quest_export_publishes_selected_artifacts_under_project_local_varg_directory() {
         let temp = tempfile::tempdir().unwrap();
         let project_root = temp.path().join("project");
         fs::create_dir_all(&project_root).unwrap();
@@ -3625,7 +3625,7 @@ mod tests {
             )
             .unwrap();
         let export_root = project_root
-            .join(".aster")
+            .join(".varg")
             .join("quests")
             .join(created.record.id);
 

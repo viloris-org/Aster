@@ -44,11 +44,11 @@ impl WgpuRenderDevice {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("aster ibl bake encoder"),
+                label: Some("varg ibl bake encoder"),
             });
 
         let brdf_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aster ibl brdf bg"),
+            label: Some("varg ibl brdf bg"),
             layout: self.ibl_brdf_bgl.as_ref().unwrap(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -60,7 +60,7 @@ impl WgpuRenderDevice {
                 return;
             };
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("aster ibl brdf pass"),
+                label: Some("varg ibl brdf pass"),
                 timestamp_writes: None,
             });
             cpass.set_pipeline(brdf_pipeline);
@@ -104,12 +104,12 @@ impl WgpuRenderDevice {
 
         // Bake irradiance cubemap (32x32, 6 faces)
         for face in 0u32..6 {
-            let resources = create_bake_resources("aster ibl irradiance params", [face, 0, 0, 0]);
+            let resources = create_bake_resources("varg ibl irradiance params", [face, 0, 0, 0]);
             bake_resources.push(resources);
             let (_, bg) = bake_resources.last().unwrap();
             {
                 let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("aster ibl irradiance pass"),
+                    label: Some("varg ibl irradiance pass"),
                     timestamp_writes: None,
                 });
                 cpass.set_pipeline(irradiance_pipeline);
@@ -151,14 +151,14 @@ impl WgpuRenderDevice {
             let roughness = mip as f32 / 4.0;
             for face in 0u32..6 {
                 let resources = create_bake_resources(
-                    "aster ibl prefilter params",
+                    "varg ibl prefilter params",
                     [face, roughness.to_bits(), res, 0],
                 );
                 bake_resources.push(resources);
                 let (_, bg) = bake_resources.last().unwrap();
                 {
                     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("aster ibl prefilter pass"),
+                        label: Some("varg ibl prefilter pass"),
                         timestamp_writes: None,
                     });
                     cpass.set_pipeline(prefilter_pipeline);

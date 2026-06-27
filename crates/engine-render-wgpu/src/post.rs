@@ -20,7 +20,7 @@ impl WgpuRenderDevice {
         self.taa_history_texture = None;
 
         let resolved = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster taa resolved hdr"),
+            label: Some("varg taa resolved hdr"),
             size: wgpu::Extent3d {
                 width: w,
                 height: h,
@@ -40,7 +40,7 @@ impl WgpuRenderDevice {
         self.taa_resolved_texture = Some(resolved);
 
         let history = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("aster taa history hdr"),
+            label: Some("varg taa history hdr"),
             size: wgpu::Extent3d {
                 width: w,
                 height: h,
@@ -63,7 +63,7 @@ impl WgpuRenderDevice {
     pub(crate) fn ensure_taa_bind_group(&mut self) -> Arc<wgpu::BindGroup> {
         if self.taa_bind_group.is_none() {
             let bg = Arc::new(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("aster taa bind group frame"),
+                label: Some("varg taa bind group frame"),
                 layout: &self.taa_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -115,7 +115,7 @@ impl WgpuRenderDevice {
         let w = self.post_target_width.max(1);
         let h = self.post_target_height.max(1);
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("aster taa resolve"),
+            label: Some("varg taa resolve"),
             timestamp_writes: None,
         });
         cpass.set_pipeline(&self.taa_pipeline);
@@ -155,7 +155,7 @@ impl WgpuRenderDevice {
             let hdr = self.hdr_target.as_ref().unwrap();
             let depth_view = hdr.depth_view.as_ref().unwrap();
             let bg = Arc::new(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("aster ssao compute bg"),
+                label: Some("varg ssao compute bg"),
                 layout: bgl,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -212,7 +212,7 @@ impl WgpuRenderDevice {
         let w = self.post_target_width.max(1);
         let h = self.post_target_height.max(1);
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("aster ssao compute"),
+            label: Some("varg ssao compute"),
             timestamp_writes: None,
         });
         cpass.set_pipeline(pipeline);
@@ -229,7 +229,7 @@ impl WgpuRenderDevice {
             let hdr = self.hdr_target.as_ref().unwrap();
             let depth_view = hdr.depth_view.as_ref().unwrap();
             let bg = Arc::new(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("aster ssgi compute bg"),
+                label: Some("varg ssgi compute bg"),
                 layout: bgl,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -302,7 +302,7 @@ impl WgpuRenderDevice {
         let w = self.post_target_width.max(1);
         let h = self.post_target_height.max(1);
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("aster ssgi compute"),
+            label: Some("varg ssgi compute"),
             timestamp_writes: None,
         });
         cpass.set_pipeline(pipeline);
@@ -349,7 +349,7 @@ impl WgpuRenderDevice {
                 };
                 let dst = &self.bloom_mip_views[i];
                 let bg = Arc::new(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("aster bloom down bg"),
+                    label: Some("varg bloom down bg"),
                     layout: bcl,
                     entries: &[
                         wgpu::BindGroupEntry {
@@ -376,7 +376,7 @@ impl WgpuRenderDevice {
                 let src = &self.bloom_mip_views[i];
                 let dst = &self.bloom_mip_views[i - 1];
                 let bg = Arc::new(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("aster bloom up bg"),
+                    label: Some("varg bloom up bg"),
                     layout: bcl,
                     entries: &[
                         wgpu::BindGroupEntry {
@@ -414,7 +414,7 @@ impl WgpuRenderDevice {
         // Downsample
         for i in 0..self.bloom_mip_views.len() {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("aster bloom down"),
+                label: Some("varg bloom down"),
                 timestamp_writes: None,
             });
             cpass.set_pipeline(self.bloom_compute_down.as_ref().unwrap());
@@ -427,7 +427,7 @@ impl WgpuRenderDevice {
         // Upsample
         for (up_idx, i) in (1..self.bloom_mip_views.len()).rev().enumerate() {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("aster bloom up"),
+                label: Some("varg bloom up"),
                 timestamp_writes: None,
             });
             cpass.set_pipeline(self.bloom_compute_up.as_ref().unwrap());
@@ -471,7 +471,7 @@ impl WgpuRenderDevice {
                 .map(|v| v as &wgpu::TextureView)
                 .unwrap_or(&self.ssao_noise_view);
             let bg = Arc::new(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("aster post bind group frame"),
+                label: Some("varg post bind group frame"),
                 layout: &self.post_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -545,7 +545,7 @@ impl WgpuRenderDevice {
             |_| wgpu::LoadOp::Load,
         );
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("aster post composite pass"),
+            label: Some("varg post composite pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: output_view,
                 depth_slice: None,
@@ -593,7 +593,7 @@ impl WgpuRenderDevice {
         let mut mh = h;
         for _ in 0..MAX_BLOOM_MIPS {
             let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster bloom mip"),
+                label: Some("varg bloom mip"),
                 size: wgpu::Extent3d {
                     width: mw.max(1),
                     height: mh.max(1),
@@ -630,7 +630,7 @@ impl WgpuRenderDevice {
             self.ssao_output_view = None;
             self.ssao_output_texture = None;
             let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster ssao output"),
+                label: Some("varg ssao output"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,
@@ -664,7 +664,7 @@ impl WgpuRenderDevice {
             self.ssgi_history_view = None;
             self.ssgi_history_texture = None;
             let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster ssgi output"),
+                label: Some("varg ssgi output"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,
@@ -683,7 +683,7 @@ impl WgpuRenderDevice {
             self.ssgi_output_texture = Some(tex);
             self.ssgi_output_view = Some(view);
             let history = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("aster ssgi history"),
+                label: Some("varg ssgi history"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,

@@ -32,9 +32,9 @@ pub enum UpscalerKind {
     /// No upscaling.
     #[default]
     Native,
-    /// Aster's portable spatial fallback.
+    /// Varg's portable spatial fallback.
     BuiltInSpatial,
-    /// Aster's portable temporal path.
+    /// Varg's portable temporal path.
     BuiltInTemporal,
     /// AMD FidelityFX Super Resolution.
     Fsr,
@@ -336,7 +336,7 @@ pub struct RenderScalingCapabilities {
 }
 
 impl RenderScalingCapabilities {
-    /// Portable capabilities guaranteed by Aster's base renderer.
+    /// Portable capabilities guaranteed by Varg's base renderer.
     pub fn built_in() -> Self {
         Self {
             upscalers: vec![

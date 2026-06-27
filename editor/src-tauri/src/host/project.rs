@@ -1048,7 +1048,7 @@ impl EditorHost {
 
         let output = package_project(&PackageRequest {
             project: project_root,
-            repo_root: aster_repo_root(),
+            repo_root: varg_repo_root(),
             target: PackageTarget::parse(target)?,
             format: PackageFormat::parse(format)?,
             channel: PackageChannel::parse(channel)?,

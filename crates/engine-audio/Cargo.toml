@@ -1,6 +1,6 @@
 [package]
 name = "engine-audio"
-description = "Aster audio abstraction and null backend"
+description = "Varg audio abstraction and null backend"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

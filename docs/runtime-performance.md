@@ -1,6 +1,6 @@
 # Runtime Performance Contract
 
-Aster's native runtime is designed to output up to 3840×2160 at high refresh
+Varg's native runtime is designed to output up to 3840×2160 at high refresh
 rates when the selected adapter, display, scene, and quality budget permit it.
 This is an output capability, not an unconditional frame-rate guarantee.
 
@@ -18,12 +18,12 @@ The native runtime defaults to:
 Environment overrides:
 
 ```text
-ASTER_OUTPUT_WIDTH=3840
-ASTER_OUTPUT_HEIGHT=2160
-ASTER_PRESENT_MODE=low-latency|uncapped|vsync
-ASTER_TARGET_FPS=120
-ASTER_RENDER_SCALE=1.0
-ASTER_DYNAMIC_RESOLUTION=true|false
+VARG_OUTPUT_WIDTH=3840
+VARG_OUTPUT_HEIGHT=2160
+VARG_PRESENT_MODE=low-latency|uncapped|vsync
+VARG_TARGET_FPS=120
+VARG_RENDER_SCALE=1.0
+VARG_DYNAMIC_RESOLUTION=true|false
 ```
 
 Dynamic resolution preserves the native output dimensions while scaling the
@@ -78,12 +78,12 @@ The default scenario creates:
 Environment overrides:
 
 ```text
-ASTER_PHYSICS_BENCH_FRAMES=240
-ASTER_PHYSICS_STATIC_GRID=32
-ASTER_PHYSICS_DYNAMIC_BODIES=768
-ASTER_PHYSICS_TRIGGER_GRID=16
-ASTER_PHYSICS_QUERY_COUNT=512
-ASTER_PHYSICS_DT=0.016666667
+VARG_PHYSICS_BENCH_FRAMES=240
+VARG_PHYSICS_STATIC_GRID=32
+VARG_PHYSICS_DYNAMIC_BODIES=768
+VARG_PHYSICS_TRIGGER_GRID=16
+VARG_PHYSICS_QUERY_COUNT=512
+VARG_PHYSICS_DT=0.016666667
 ```
 
 Interpretation:

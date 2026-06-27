@@ -63,12 +63,12 @@ impl WgpuRenderDevice {
         indices: &[u32],
     ) -> MeshBuffers {
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster mesh vertices"),
+            label: Some("varg mesh vertices"),
             contents: bytemuck::cast_slice(vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("aster mesh indices"),
+            label: Some("varg mesh indices"),
             contents: bytemuck::cast_slice(indices),
             usage: wgpu::BufferUsages::INDEX,
         });

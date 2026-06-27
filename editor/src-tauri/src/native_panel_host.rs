@@ -95,7 +95,7 @@ pub struct NativePanelHost {
 
 impl NativePanelHost {
     pub fn enabled() -> bool {
-        native_panel_host_enabled_from_env(std::env::var("ASTER_NATIVE_PANEL_WEBVIEWS").ok())
+        native_panel_host_enabled_from_env(std::env::var("VARG_NATIVE_PANEL_WEBVIEWS").ok())
     }
 
     pub fn status(&self) -> NativePanelHostStatus {
@@ -137,10 +137,9 @@ impl NativePanelHost {
                 "index.html?native-panel={}",
                 kind.id()
             )));
+            let _ = transparent;
             let webview = window.add_child(
-                WebviewBuilder::from_config(&config)
-                    .transparent(transparent)
-                    .background_color(background),
+                WebviewBuilder::from_config(&config).background_color(background),
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(1.0, 1.0),
             )?;

@@ -16,7 +16,7 @@ pub struct WindowDescriptor {
 impl Default for WindowDescriptor {
     fn default() -> Self {
         Self {
-            title: "Aster".to_owned(),
+            title: "Varg".to_owned(),
             width: 1280,
             height: 720,
         }

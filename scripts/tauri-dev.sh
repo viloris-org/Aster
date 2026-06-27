@@ -10,7 +10,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
   export GDK_BACKEND=x11
   export WINIT_UNIX_BACKEND=x11
   # The X11 native host path uses split child WebView panels by default.
-  # Set ASTER_NATIVE_PANEL_WEBVIEWS=0 to disable them for diagnostics.
+  # Set VARG_NATIVE_PANEL_WEBVIEWS=0 to disable them for diagnostics.
 fi
 
 if "$repo_root/scripts/check-linux-inotify-capacity.py" --inotify-only --quiet; then

@@ -306,7 +306,7 @@ mod tests {
         let worktree = manager
             .create(
                 "/project",
-                "/tmp/aster-agent/project",
+                "/tmp/varg-agent/project",
                 "HEAD",
                 "agent-tools",
                 "agent-a",

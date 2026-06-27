@@ -1546,7 +1546,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("aster-{name}-{nonce}"))
+        std::env::temp_dir().join(format!("varg-{name}-{nonce}"))
     }
 
     fn test_shell(name: &str) -> (EditorShell, PathBuf) {

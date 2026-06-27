@@ -1,6 +1,6 @@
 [package]
 name = "engine-ui"
-description = "Aster runtime UI system"
+description = "Varg runtime UI system"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

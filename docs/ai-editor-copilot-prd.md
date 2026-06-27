@@ -1,4 +1,4 @@
-# Aster Editor AI Detailed Specification
+# Varg Editor AI Detailed Specification
 
 Status: Draft detailed sub-spec
 Parent: [`docs/ai-agent-unified-spec.md`](./ai-agent-unified-spec.md)
@@ -6,7 +6,7 @@ Last updated: 2026-06-21
 
 ## Purpose
 
-This document defines the detailed behavior for **Editor AI**, Aster's local AI assistance surface inside the editor.
+This document defines the detailed behavior for **Editor AI**, Varg's local AI assistance surface inside the editor.
 
 Editor AI is not the durable long-horizon task system. It is the immediate, user-driven assistant for explanation, inspection, small scoped edits, diagnostics, and local corrections. Persistent or broad work belongs in Quest, defined in [`docs/ai-editor-quest-prd.md`](./ai-editor-quest-prd.md).
 
@@ -18,7 +18,7 @@ Editor AI should let a user:
 
 - ask questions about the current editor state;
 - attach selected context explicitly;
-- generate or modify small Aster artifacts;
+- generate or modify small Varg artifacts;
 - preview proposed operations before writes;
 - approve, deny, or defer writes;
 - run low-friction read-only operations;
@@ -95,7 +95,7 @@ Context sent to the model should be labeled by source and trust level:
 - `PROJECT_FILE`: untrusted project content;
 - `DIAGNOSTIC`: validator or tool output;
 - `KNOWLEDGE`: user-approved or proposed memory;
-- `ASTER_EXAMPLE`: retrieved language example.
+- `VARG_EXAMPLE`: retrieved language example.
 
 ## Interaction Flow
 
@@ -221,7 +221,7 @@ Useful tool classes:
 - entity/component mutation;
 - file read;
 - file write under project roots;
-- Aster language validation;
+- Varg language validation;
 - Varg source validation;
 - asset reference query;
 - command registry execution;
@@ -230,9 +230,9 @@ Useful tool classes:
 
 Arbitrary command execution is not an MVP default. If exposed, it must be clearly classified and routed through implemented command controls.
 
-## Aster Language Generation
+## Varg Language Generation
 
-Editor AI must retrieve examples for new Aster languages.
+Editor AI must retrieve examples for new Varg languages.
 
 For `.varg`, `.vscene`, and `.vasset` generation:
 
@@ -326,7 +326,7 @@ Editor AI MVP is acceptable when:
 
 - read-only questions work without write approval;
 - selected entity context can be attached and summarized;
-- a small generated Aster file can be previewed, approved, written, and validated;
+- a small generated Varg file can be previewed, approved, written, and validated;
 - a selected component field can be previewed, approved, changed, and undone where supported;
 - denied operations do not execute;
 - unsupported operations are refused with a clear message;
@@ -344,7 +344,7 @@ Required tests:
 - denied operation does not execute;
 - approved write executes once;
 - trace entry is recorded for success and failure;
-- generated Aster examples pass relevant validators;
+- generated Varg examples pass relevant validators;
 - prompt construction includes relevant examples without including unrelated bulk context.
 
 ## Open Questions

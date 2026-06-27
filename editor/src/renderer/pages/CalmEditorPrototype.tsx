@@ -1162,19 +1162,19 @@ export default function CalmEditorPrototype({
   const [contextualRequest, setContextualRequest] = useState<{ id: number; prompt: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [leftDashboardWidth, setLeftDashboardWidth] = useState(() => storedPanelSize(
-    'aster.calmEditor.leftDashboardWidth',
+    'varg.calmEditor.leftDashboardWidth',
     leftDashboardMinWidth,
     leftDashboardMaxWidth,
     leftDashboardDefaultWidth,
   ));
   const [rightDashboardWidth, setRightDashboardWidth] = useState(() => storedPanelSize(
-    'aster.calmEditor.rightDashboardWidth',
+    'varg.calmEditor.rightDashboardWidth',
     rightDashboardMinWidth,
     rightDashboardMaxWidth,
     rightDashboardDefaultWidth,
   ));
   const [bottomDashboardHeight, setBottomDashboardHeight] = useState(() => storedPanelSize(
-    'aster.calmEditor.bottomDashboardHeight',
+    'varg.calmEditor.bottomDashboardHeight',
     bottomDashboardMinHeight,
     bottomDashboardMaxHeight,
     bottomDashboardDefaultHeight,
@@ -1614,15 +1614,15 @@ export default function CalmEditorPrototype({
   ];
 
   useEffect(() => {
-    window.localStorage.setItem('aster.calmEditor.leftDashboardWidth', String(leftDashboardWidth));
+    window.localStorage.setItem('varg.calmEditor.leftDashboardWidth', String(leftDashboardWidth));
   }, [leftDashboardWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem('aster.calmEditor.rightDashboardWidth', String(rightDashboardWidth));
+    window.localStorage.setItem('varg.calmEditor.rightDashboardWidth', String(rightDashboardWidth));
   }, [rightDashboardWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem('aster.calmEditor.bottomDashboardHeight', String(bottomDashboardHeight));
+    window.localStorage.setItem('varg.calmEditor.bottomDashboardHeight', String(bottomDashboardHeight));
   }, [bottomDashboardHeight]);
 
   useEffect(() => {

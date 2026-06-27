@@ -1,6 +1,6 @@
 [package]
 name = "engine-quest"
-description = "Aster Quest workspace validation and review primitives"
+description = "Varg Quest workspace validation and review primitives"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

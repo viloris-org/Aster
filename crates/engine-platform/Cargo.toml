@@ -1,6 +1,6 @@
 [package]
 name = "engine-platform"
-description = "Aster platform capability abstractions"
+description = "Varg platform capability abstractions"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

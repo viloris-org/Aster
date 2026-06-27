@@ -66,7 +66,7 @@ impl AudioStreamReader {
         let name = name.into();
         let (sender, receiver) = sync_channel(queued_blocks);
         std::thread::Builder::new()
-            .name("aster-audio-decode".to_string())
+            .name("varg-audio-decode".to_string())
             .spawn(move || {
                 let result = crate::decode::decode_packets(
                     &name,

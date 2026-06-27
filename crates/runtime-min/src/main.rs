@@ -6,7 +6,7 @@ use engine_core::EngineResult;
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("aster runtime error: {error}");
+        eprintln!("varg runtime error: {error}");
         std::process::exit(1);
     }
 }

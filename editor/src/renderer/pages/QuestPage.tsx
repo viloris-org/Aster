@@ -231,7 +231,7 @@ function cn(...classes: Array<string | false | null | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }
 
-const artifactPaneStorageKey = 'aster.quest.artifactPanePercent';
+const artifactPaneStorageKey = 'varg.quest.artifactPanePercent';
 const artifactPaneMinPercent = 28;
 const artifactPaneMaxPercent = 55;
 

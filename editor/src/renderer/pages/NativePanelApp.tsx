@@ -163,7 +163,7 @@ function useNativePanelData() {
 function ToolbarPanel({ shell, refresh }: { shell: ShellState | null; refresh: () => Promise<void> }) {
   return (
     <div className="native-panel-bar native-panel-toolbar">
-      <strong>{shell?.project_name ?? 'Aster'}</strong>
+      <strong>{shell?.project_name ?? 'Varg'}</strong>
       <span>{shell?.scene_dirty ? 'dirty' : 'saved'}</span>
       <button type="button" disabled={!shell?.scene_dirty} onClick={() => rpc('shell/save_scene').then(refresh)}>Save</button>
       <button type="button" disabled={!shell?.can_undo} onClick={() => rpc('shell/undo').then(refresh)}>Undo</button>

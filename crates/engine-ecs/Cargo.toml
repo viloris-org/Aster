@@ -1,6 +1,6 @@
 [package]
 name = "engine-ecs"
-description = "Aster atomic ECS and scene storage"
+description = "Varg atomic ECS and scene storage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

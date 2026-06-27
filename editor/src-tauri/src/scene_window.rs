@@ -56,6 +56,15 @@ pub enum SceneCommand {
     Shutdown,
 }
 
+fn xlib_window_handle(window: u64) -> Result<raw_window_handle::RawWindowHandle, String> {
+    let window = window
+        .try_into()
+        .map_err(|_| "Xlib window handle is too large".to_owned())?;
+    Ok(raw_window_handle::RawWindowHandle::Xlib(
+        raw_window_handle::XlibWindowHandle::new(window),
+    ))
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct SceneViewportRect {
     pub x: i32,
@@ -918,9 +927,7 @@ impl RawSceneApp {
                     Some(raw_window_handle::RawDisplayHandle::Xlib(
                         raw_window_handle::XlibDisplayHandle::new(Some(display), 0),
                     )),
-                    raw_window_handle::RawWindowHandle::Xlib(
-                        raw_window_handle::XlibWindowHandle::new(window),
-                    ),
+                    xlib_window_handle(window)?,
                 )
             }
             SceneRawSurface::Wayland { display, surface } => {

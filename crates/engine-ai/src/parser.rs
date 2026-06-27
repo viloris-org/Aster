@@ -21,7 +21,7 @@ pub fn parse_operations(raw: &str) -> EngineResult<Vec<AgentOperation>> {
         return Ok(ops);
     }
 
-    if let Some((message, operations)) = extract_aster_operations(trimmed)? {
+    if let Some((message, operations)) = extract_varg_operations(trimmed)? {
         let mut operations = operations;
         if !message.is_empty() {
             operations.push(AgentOperation::Complete {
@@ -42,14 +42,14 @@ pub fn parse_operations(raw: &str) -> EngineResult<Vec<AgentOperation>> {
         .map_err(|e| EngineError::other(format!("failed to parse operations: {e}")))
 }
 
-fn extract_aster_operations(text: &str) -> EngineResult<Option<(String, Vec<AgentOperation>)>> {
-    let Some(start) = text.find("```aster_operations") else {
+fn extract_varg_operations(text: &str) -> EngineResult<Option<(String, Vec<AgentOperation>)>> {
+    let Some(start) = text.find("```varg_operations") else {
         return Ok(None);
     };
-    let after_fence = &text[start + "```aster_operations".len()..];
+    let after_fence = &text[start + "```varg_operations".len()..];
     let end = after_fence
         .find("```")
-        .ok_or_else(|| EngineError::other("unterminated aster_operations block"))?;
+        .ok_or_else(|| EngineError::other("unterminated varg_operations block"))?;
     let json = after_fence[..end].trim();
     let operations = serde_json::from_str::<Vec<AgentOperation>>(json)
         .map_err(|error| EngineError::other(format!("failed to parse operations: {error}")))?;
@@ -161,7 +161,7 @@ That should do it."#;
         let ops = parse_operations(
             r#"I'll add a light to the scene.
 
-```aster_operations
+```varg_operations
 [{"action":"create_object","name":"Sun","components":[{"type":"Light"}]}]
 ```"#,
         )
