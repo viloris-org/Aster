@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { rpc } from '../api';
+import { safeJsonStringify } from '../safeJson';
 
 interface ShellState {
   has_project: boolean;
@@ -72,7 +73,7 @@ function formatInspectorValue(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) return value.map(item => formatInspectorValue(item)).join(', ');
   if (value === null || value === undefined) return '';
-  return JSON.stringify(value, null, 2);
+  return safeJsonStringify(value, 2);
 }
 
 function parseInspectorValue(raw: string, current: unknown): unknown {

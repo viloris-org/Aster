@@ -3,6 +3,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { safeJsonValue } from './safeJson';
 
 /**
  * Call an editor backend method via JSON-RPC-style dispatch.
@@ -11,7 +12,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
  * @param params  Optional parameters object
  */
 export function rpc<T = unknown>(method: string, params?: unknown): Promise<T> {
-  return invoke<T>('rpc', { method, params: params ?? {} });
+  return invoke<T>('rpc', { method, params: safeJsonValue(params ?? {}) });
 }
 
 let nextStreamRequestId = 1;
@@ -51,7 +52,7 @@ export function streamCopilotPlan<T>(
     });
 
     try {
-      await invoke('start_copilot_plan', { requestId, params });
+      await invoke('start_copilot_plan', { requestId, params: safeJsonValue(params) });
       await completed;
       return await invoke<T>('finish_copilot_plan', { requestId });
     } finally {

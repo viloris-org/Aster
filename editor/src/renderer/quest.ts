@@ -1,6 +1,7 @@
 import { rpc } from './api';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { safeJsonValue } from './safeJson';
 
 export type QuestStatus =
   | 'draft'
@@ -264,7 +265,7 @@ function streamQuestAiRequest<T>(
     });
 
     try {
-      await invoke('start_quest_ai_request', { requestId, kind, params });
+      await invoke('start_quest_ai_request', { requestId, kind, params: safeJsonValue(params) });
       await completed;
       return await invoke<T>('finish_quest_ai_request', { requestId });
     } finally {

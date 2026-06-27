@@ -53,6 +53,7 @@ import {
   createViewMatrix,
   projectToScreen,
 } from './gizmoMath';
+import { safeJsonStringify } from '../safeJson';
 
 const AiPanel = lazy(() => import('./AiPanel'));
 const ScriptEditor = lazy(() => import('./ScriptEditor'));
@@ -1122,7 +1123,7 @@ function ComponentField({
     <FieldRow label={name}>
       <textarea
         className="h-16 w-full resize-none rounded-[var(--radius-sm)] border border-[var(--border)] bg-[var(--bg-base)] px-2 py-1 font-mono text-[11px] text-[var(--text-secondary)] outline-none focus:border-[var(--brand)]"
-        value={JSON.stringify(value ?? null, null, 2)}
+        value={safeJsonStringify(value ?? null, 2)}
         spellCheck={false}
         aria-label={name}
         onChange={(event) => {
@@ -1981,7 +1982,7 @@ export default function CalmEditorPrototype({
             type="button"
             className="grid size-8 place-items-center rounded-[var(--radius-md)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             title="Open Quest"
-            onClick={onOpenQuest}
+            onClick={() => onOpenQuest?.()}
           >
             <IconSparkles />
           </button>

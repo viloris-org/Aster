@@ -6,6 +6,7 @@ import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { rpc, streamCopilotPlan } from '../api';
 import { useTranslation } from '../i18n';
 import { listKnowledge, promoteQuest, type KnowledgeEntry } from '../quest';
+import { safeJsonStringify } from '../safeJson';
 import {
   aiEntityContextCompBadgeClass,
   aiPlanBadgeClass,
@@ -218,7 +219,7 @@ function linePrefixStart(source: string, objectStart: number): number {
 
 function argumentsPreviewFromValue(value: unknown): string {
   if (typeof value === 'string') return value;
-  if (value && typeof value === 'object') return JSON.stringify(value);
+  if (value && typeof value === 'object') return safeJsonStringify(value);
   return '';
 }
 
@@ -244,7 +245,7 @@ function toolCallFromObject(value: unknown, fallbackIndex: number): ActiveToolCa
       return {
         id: `embedded-tool-${fallbackIndex}`,
         name: action,
-        argumentsPreview: JSON.stringify(record),
+        argumentsPreview: safeJsonStringify(record),
         complete: true,
       };
     }
@@ -722,10 +723,10 @@ function ToolCallIndicator({ toolCalls }: { toolCalls: ActiveToolCall[] }) {
                   const args = JSON.parse(tc.argumentsPreview);
                   const keys = Object.keys(args);
                   if (keys.length === 0) return null;
-                  const fullJson = JSON.stringify(args, null, 2);
+                  const fullJson = safeJsonStringify(args, 2);
                   const preview = keys.map(k => {
                     const v = args[k];
-                    const display = typeof v === 'string' ? `"${v.slice(0, 30)}${v.length > 30 ? '...' : ''}"` : JSON.stringify(v);
+                    const display = typeof v === 'string' ? `"${v.slice(0, 30)}${v.length > 30 ? '...' : ''}"` : safeJsonStringify(v);
                     return `${k}: ${display}`;
                   }).join(', ');
                   return <span className="text-[11px]" title={fullJson}>({preview})</span>;
@@ -1222,7 +1223,7 @@ export default function AiPanel({
   // Persist messages to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('varg.aiMessages', JSON.stringify(messages));
+      localStorage.setItem('varg.aiMessages', safeJsonStringify(messages));
     } catch { /* quota exceeded */ }
   }, [messages]);
 

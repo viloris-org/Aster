@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { safeJsonStringify } from '../safeJson';
 import {
   addQuestNote,
   branchQuest,
@@ -1024,7 +1025,7 @@ function hasEventDetails(details: unknown): boolean {
 
 function formatEventDetails(details: unknown): string {
   try {
-    return JSON.stringify(details, null, 2);
+    return safeJsonStringify(details, 2);
   } catch {
     return String(details);
   }
@@ -3314,7 +3315,7 @@ export default function QuestPage({
                       ? artifactContent
                       : artifact.kind === 'changed_file'
                         ? selected.review?.changed_files.find(file => file.path === artifact.path)?.diff ?? t('quest_no_diff')
-                        : JSON.stringify(
+                        : safeJsonStringify(
                           artifact.kind === 'trace'
                             ? selected.events
                             : artifact.kind === 'thinking'
@@ -3330,7 +3331,6 @@ export default function QuestPage({
                                         ?? selected.review?.unresolved_issues.find(issue => issue === artifact.label)
                                       : selected.artifact_links.find(link => link.path === artifact.path || link.label === artifact.label)
                                         ?? selected.review?.unresolved_issues.find(issue => issue === artifact.label),
-                          null,
                           2,
                         )}</pre>
                   </div>
