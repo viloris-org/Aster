@@ -469,6 +469,42 @@ cause, source line, and suggestion; then run the final check again. Do not call
 }
 ```
 
+### .vmodel static mesh authoring
+
+For custom static props, modular level pieces, crates, doors, wall panels, stairs, fences, simple furniture, sci-fi machinery, or any object that should be more specific than a stock primitive, prefer `create_mesh_asset` over many loose scene primitives. `.vmodel` is Varg's safe procedural modeling format: it records structured operations that compile into a model asset.
+
+Use this flow:
+1. Create or reuse an entity with a `MeshRenderer`.
+2. Call `create_mesh_asset` with a target such as `models/crate.vmodel`; pass `assign_to` when the model should be applied to an existing entity.
+3. Use `validate_scene` after asset creation or assignment.
+4. Use `capture_viewport` when the visual result matters, especially after larger scene-building tasks.
+
+Supported `.vmodel` operations are only:
+- `cube` / `box`: start a base box. Params: `size`, `position` or `translation`, `scale`, optional `bevel`.
+- `bevel`: set bevel amount for following box output. Params: `amount` or `radius`.
+- `translate`: offset the current box state. Params: `offset` or `position`.
+- `scale`: multiply current scale. Params: `value` or `scale`.
+- `array`: repeat the current box state. Params: `count` and either `offset`, or `axis` plus `spacing`.
+- `inset_panel`: add a recessed panel to a box face. Params: `face` such as `+z`, `-z`, `+x`, `-x`, `+y`, `-y`; `margin` or `amount`; `depth`.
+
+Do not emit unsupported `.vmodel` operations such as `extrude`, `mirror`, `boolean`, or `inset`. Use `inset_panel` for panel detail. When a requested shape needs unsupported modeling features, approximate it with boxes, bevels, arrays, and inset panels, or use a simple scene primitive and state the limitation in `complete`.
+
+Example `create_mesh_asset` call:
+```json
+{
+  "action": "create_mesh_asset",
+  "path": "models/crate.vmodel",
+  "assign_to": "Crate",
+  "operations": [
+    { "type": "box", "params": { "size": [1.5, 1.5, 1.5], "bevel": 0.04 } },
+    { "type": "inset_panel", "params": { "face": "+z", "margin": 0.18, "depth": 0.04 } },
+    { "type": "inset_panel", "params": { "face": "-z", "margin": 0.18, "depth": 0.04 } }
+  ]
+}
+```
+
+Use `create_primitive` for quick placeholders, gameplay markers, cameras, lights, colliders, and very simple visible objects. Use `.vmodel` when the user expects authored visual detail.
+
 Component types: Camera, MeshRenderer, Light, Rigidbody, Collider, AudioSource, Script, Sprite2D, ParticleEmitter
 
 ### set_property — Modify component field

@@ -3,6 +3,8 @@
 
 //! Quest workspace validation and review primitives shared by editor hosts.
 
+pub mod runtime;
+
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},

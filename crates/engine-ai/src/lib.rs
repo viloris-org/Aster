@@ -7,19 +7,25 @@
 //! sends it to an AI model, parses the response into [`AgentOperation`]s,
 //! and executes them through the editor command system.
 
+pub mod copilot;
+pub mod kernel;
 mod parser;
 pub mod providers;
 pub mod registry;
 pub mod skills;
 mod system_prompt;
+mod tool_runtime;
 pub mod tools;
 
+pub use copilot::{CopilotQuestPromotion, CopilotRuntime, CopilotSession};
+pub use kernel::AgentKernel;
 pub use parser::parse_operations;
 pub use registry::ModelRegistry;
 pub use skills::{
     SkillReadRequest, SkillReadResult, SkillRegistryConfig, SkillSearchQuery, SkillSearchResult,
     SkillSource, read_skill, search_skills,
 };
+use tool_runtime::{AgentToolInvocation, AgentToolSession};
 pub use tools::{
     CapabilityDecision, CapabilityDecisionResult, CapabilityRequest, CapabilityRequestResult,
     EvidenceKind, RiskClass, ToolExposure, ToolSearchQuery, ToolSearchResult, ToolStage, ToolType,
@@ -826,6 +832,8 @@ pub struct AgentSession {
     pub selection: SelectionService,
     /// Trace recorder for audited agent operations.
     pub trace: TraceRecorder,
+    /// Shared runtime kernel for local tool dispatch and policy defaults.
+    kernel: AgentKernel,
     /// Asset root path for script creation.
     asset_root: PathBuf,
     /// Permission policy currently being applied, used by capability preflight logs.
@@ -838,6 +846,11 @@ impl AgentSession {
     /// Initializes the script backend, command registry with AI commands,
     /// and supporting services.
     pub fn new(context: ProjectContext) -> EngineResult<Self> {
+        Self::with_kernel(context, AgentKernel::default())
+    }
+
+    /// Creates a new agent session from a project context and shared runtime kernel.
+    pub fn with_kernel(context: ProjectContext, kernel: AgentKernel) -> EngineResult<Self> {
         let mut commands = CommandRegistry::default();
         engine_editor::register_core_commands(&mut commands);
         engine_editor::register_ai_commands(&mut commands);
@@ -851,6 +864,7 @@ impl AgentSession {
             console: ConsoleService::default(),
             selection: SelectionService::default(),
             trace: TraceRecorder::default(),
+            kernel,
             asset_root,
             active_policy: PermissionPolicy::read_only(),
         })
@@ -1022,14 +1036,6 @@ impl AgentSession {
         }
     }
 
-    fn skill_registry_config(&self) -> SkillRegistryConfig {
-        SkillRegistryConfig::new(&self.context.root, default_global_varg_root())
-    }
-
-    fn current_policy_hint(&self) -> PermissionPolicy {
-        self.active_policy.clone()
-    }
-
     /// Parses and validates a completed provider response.
     pub fn plan_from_response(
         &mut self,
@@ -1168,6 +1174,21 @@ impl AgentSession {
 
     /// Internal execution with recursion depth tracking.
     fn execute_operation_inner(&mut self, op: &AgentOperation, depth: u32) -> EngineResult<()> {
+        let tool_runtimes = self.kernel.tool_runtimes().clone();
+        if let Some(runtime) = tool_runtimes.get(op.action_name()) {
+            return runtime.execute(
+                &AgentToolInvocation {
+                    operation: op,
+                    policy: &self.active_policy,
+                },
+                &mut AgentToolSession {
+                    project: &mut self.context,
+                    console: &mut self.console,
+                    selection: &mut self.selection,
+                },
+            );
+        }
+
         match op {
             AgentOperation::ExecuteCommand { command, .. } => {
                 let mut cmd_ctx = CommandContext {
@@ -1356,26 +1377,7 @@ impl AgentSession {
                 });
                 Ok(())
             }
-            AgentOperation::ReadFile { path } => {
-                let full_path = self.context.root.join(path);
-                let content = std::fs::read_to_string(&full_path).map_err(|source| {
-                    EngineError::Filesystem {
-                        path: full_path,
-                        source,
-                    }
-                })?;
-                self.console.push(ConsoleEntry {
-                    timestamp: "now".into(),
-                    level: ConsoleLevel::Info,
-                    source: ConsoleSource {
-                        subsystem: "ai-agent".into(),
-                        file: None,
-                        line: None,
-                    },
-                    message: content,
-                });
-                Ok(())
-            }
+            AgentOperation::ReadFile { .. } => unreachable!("read_file is routed tool runtime"),
             AgentOperation::CreateTask { id, title } => {
                 if id.trim().is_empty() || title.trim().is_empty() {
                     return Err(EngineError::config(
@@ -1560,121 +1562,22 @@ impl AgentSession {
                 rollback_on_failure,
             } => self.execute_batch_operation_inner(operations, *rollback_on_failure, depth),
             AgentOperation::QuerySceneSemantic { query } => self.execute_semantic_query(query),
-            AgentOperation::ToolSearch {
-                query,
-                types,
-                capabilities,
-                stage,
-                risk_max,
-                limit,
-            } => {
-                let results = tools::search_tools(&tools::ToolSearchQuery {
-                    query: query.clone(),
-                    types: types.clone(),
-                    capabilities: capabilities.clone(),
-                    stage: stage.clone(),
-                    risk_max: risk_max.clone(),
-                    limit: *limit,
-                })?;
-                let result_text = serde_json::to_string_pretty(&results)
-                    .map_err(|error| EngineError::other(error.to_string()))?;
-                self.console.push(ConsoleEntry {
-                    timestamp: "now".into(),
-                    level: ConsoleLevel::Info,
-                    source: ConsoleSource {
-                        subsystem: "ai-agent-tools".into(),
-                        file: None,
-                        line: None,
-                    },
-                    message: result_text,
-                });
-                Ok(())
+            AgentOperation::ToolSearch { .. } => unreachable!("tool_search is routed tool runtime"),
+            AgentOperation::SkillSearch { .. } => {
+                unreachable!("skill_search is routed tool runtime")
             }
-            AgentOperation::SkillSearch {
-                query,
-                source,
-                limit,
-            } => {
-                let results = skills::search_skills(
-                    &self.skill_registry_config(),
-                    &skills::SkillSearchQuery {
-                        query: query.clone(),
-                        source: source.clone(),
-                        limit: *limit,
-                    },
-                )?;
-                let result_text = serde_json::to_string_pretty(&results)
-                    .map_err(|error| EngineError::other(error.to_string()))?;
-                self.console.push(ConsoleEntry {
-                    timestamp: "now".into(),
-                    level: ConsoleLevel::Info,
-                    source: ConsoleSource {
-                        subsystem: "ai-agent-skills".into(),
-                        file: None,
-                        line: None,
-                    },
-                    message: result_text,
-                });
-                Ok(())
+            AgentOperation::SkillRead { .. } => unreachable!("skill_read is routed tool runtime"),
+            AgentOperation::RequestCapability { .. } => {
+                unreachable!("request_capability is routed tool runtime")
             }
-            AgentOperation::SkillRead { id, path } => {
-                let result = skills::read_skill(
-                    &self.skill_registry_config(),
-                    &skills::SkillReadRequest {
-                        id: id.clone(),
-                        path: path.clone(),
-                    },
-                )?;
-                self.console.push(ConsoleEntry {
-                    timestamp: "now".into(),
-                    level: ConsoleLevel::Info,
-                    source: ConsoleSource {
-                        subsystem: "ai-agent-skills".into(),
-                        file: None,
-                        line: None,
-                    },
-                    message: result.content,
-                });
-                Ok(())
+            AgentOperation::GetSceneInfo { .. } => {
+                unreachable!("get_scene_info is routed tool runtime")
             }
-            AgentOperation::RequestCapability {
-                capabilities,
-                tools,
-                reason,
-            } => {
-                let requested = resolve_requested_capabilities(capabilities, tools);
-                let result = capability_request_result(&requested, &self.current_policy_hint());
-                let message = serde_json::to_string_pretty(&serde_json::json!({
-                    "reason": reason,
-                    "requested": requested,
-                    "result": result,
-                    "note": "request_capability is a preflight only; it does not grant permission."
-                }))
-                .map_err(|error| EngineError::other(error.to_string()))?;
-                self.console.push(ConsoleEntry {
-                    timestamp: "now".into(),
-                    level: ConsoleLevel::Info,
-                    source: ConsoleSource {
-                        subsystem: "ai-agent-permissions".into(),
-                        file: None,
-                        line: None,
-                    },
-                    message,
-                });
-                Ok(())
+            AgentOperation::GetObjectInfo { .. } => {
+                unreachable!("get_object_info is routed tool runtime")
             }
-            AgentOperation::GetSceneInfo { include_components } => {
-                let info = self.scene_info_json(*include_components)?;
-                self.push_json_console("ai-agent-scene", info)
-            }
-            AgentOperation::GetObjectInfo { entity } => {
-                let parsed = self.resolve_entity(entity)?;
-                let info = self.object_info_json(parsed)?;
-                self.push_json_console("ai-agent-scene", info)
-            }
-            AgentOperation::GetAssetInfo { asset } => {
-                let info = self.asset_info_json(asset);
-                self.push_json_console("ai-agent-assets", info)
+            AgentOperation::GetAssetInfo { .. } => {
+                unreachable!("get_asset_info is routed tool runtime")
             }
             AgentOperation::CreatePrimitive {
                 name,
@@ -1708,13 +1611,11 @@ impl AgentSession {
                 target_path,
                 operations,
             } => self.execute_modify_mesh(source, target_path, operations),
-            AgentOperation::CaptureViewport {
-                entity,
-                output_path,
-            } => self.execute_capture_viewport(entity.as_deref(), output_path.as_deref()),
-            AgentOperation::ValidateScene { include_warnings } => {
-                let report = self.validate_scene_json(*include_warnings);
-                self.push_json_console("ai-agent-validation", report)
+            AgentOperation::CaptureViewport { .. } => {
+                unreachable!("capture_viewport is routed tool runtime")
+            }
+            AgentOperation::ValidateScene { .. } => {
+                unreachable!("validate_scene is routed tool runtime")
             }
             AgentOperation::AttachBehavior { entity, behavior } => {
                 self.execute_attach_behavior(entity, behavior)
@@ -1761,123 +1662,6 @@ impl AgentSession {
             message,
         });
         Ok(())
-    }
-
-    fn scene_info_json(&self, include_components: bool) -> EngineResult<serde_json::Value> {
-        let objects = self
-            .context
-            .scene
-            .objects()
-            .into_iter()
-            .map(|(entity, object)| {
-                let transform = self.context.scene.transforms().local(entity);
-                let parent = self.context.scene.transforms().parent(entity);
-                let components = if include_components {
-                    object
-                        .components
-                        .iter()
-                        .map(component_json)
-                        .collect::<Vec<_>>()
-                } else {
-                    object
-                        .components
-                        .iter()
-                        .map(|component| serde_json::json!({ "type": component.type_id() }))
-                        .collect::<Vec<_>>()
-                };
-                serde_json::json!({
-                    "id": entity_id_string(entity),
-                    "name": object.name,
-                    "tag": object.tag,
-                    "layer": object.layer,
-                    "active": object.active,
-                    "parent": parent.map(entity_id_string),
-                    "transform": transform.map(transform_json),
-                    "components": components,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        Ok(serde_json::json!({
-            "scene_path": self.context.scene_path,
-            "mode": format!("{:?}", self.context.scene.mode()),
-            "structure_version": self.context.scene.structure_version(),
-            "object_count": objects.len(),
-            "objects": objects,
-        }))
-    }
-
-    fn object_info_json(&self, entity: engine_ecs::Entity) -> EngineResult<serde_json::Value> {
-        let object = self
-            .context
-            .scene
-            .object(entity)
-            .ok_or_else(|| EngineError::config("object not found"))?;
-        let transform = self.context.scene.transforms().local(entity);
-        let mesh_renderer = object.components.iter().find_map(|component| {
-            if let engine_ecs::ComponentData::MeshRenderer(mesh) = component {
-                Some(mesh)
-            } else {
-                None
-            }
-        });
-
-        Ok(serde_json::json!({
-            "id": entity_id_string(entity),
-            "name": object.name,
-            "tag": object.tag,
-            "layer": object.layer,
-            "active": object.active,
-            "parent": self.context.scene.transforms().parent(entity).map(entity_id_string),
-            "transform": transform.map(transform_json),
-            "components": object.components.iter().map(component_json).collect::<Vec<_>>(),
-            "mesh": mesh_renderer.map(|mesh| serde_json::json!({
-                "asset": mesh.mesh.map(|id| id.as_u128().to_string()),
-                "builtin_mesh": mesh.builtin_mesh,
-            })),
-            "material": mesh_renderer.map(|mesh| serde_json::json!({
-                "asset": mesh.material.asset.map(|id| id.as_u128().to_string()),
-                "builtin": mesh.material.builtin,
-            })),
-            "bounds": transform.map(|t| serde_json::json!({
-                "center": [t.translation.x, t.translation.y, t.translation.z],
-                "extents": [
-                    t.scale.x.abs() * 0.5,
-                    t.scale.y.abs() * 0.5,
-                    t.scale.z.abs() * 0.5
-                ],
-            })),
-        }))
-    }
-
-    fn asset_info_json(&self, asset: &str) -> serde_json::Value {
-        let query = asset.trim();
-        let by_path = self
-            .context
-            .assets
-            .iter()
-            .find(|candidate| candidate.source_path.to_string_lossy() == query);
-        let by_guid = self
-            .context
-            .assets
-            .iter()
-            .find(|candidate| candidate.guid.to_string() == query);
-        let meta = by_path.or(by_guid);
-        let references = meta
-            .map(|meta| scene_references_to_asset(&self.context.scene, meta.guid.as_asset_id()))
-            .unwrap_or_default();
-
-        serde_json::json!({
-            "query": query,
-            "found": meta.is_some(),
-            "asset": meta.map(|meta| serde_json::json!({
-                "guid": meta.guid.to_string(),
-                "path": meta.source_path,
-                "kind": format!("{:?}", meta.kind),
-                "importer": meta.importer,
-            })),
-            "references": references,
-        })
     }
 
     fn execute_create_primitive(
@@ -2159,82 +1943,6 @@ impl AgentSession {
             ),
         });
         Ok(())
-    }
-
-    fn execute_capture_viewport(
-        &mut self,
-        entity: Option<&str>,
-        output_path: Option<&str>,
-    ) -> EngineResult<()> {
-        if let Some(entity) = entity {
-            self.selection
-                .select(engine_editor::Selection::Entity(entity.to_owned()));
-        }
-        if let Some(path) = output_path {
-            let _ = sanitize_project_relative_path(path)?;
-        }
-        self.push_json_console(
-            "ai-agent-viewport",
-            serde_json::json!({
-                "capture_requested": true,
-                "entity": entity,
-                "output_path": output_path,
-                "note": "Viewport capture is queued for the editor host; this operation records the requested evidence."
-            }),
-        )
-    }
-
-    fn validate_scene_json(&self, include_warnings: bool) -> serde_json::Value {
-        let mut diagnostics = Vec::new();
-        for (entity, object) in self.context.scene.objects() {
-            if object.name.trim().is_empty() {
-                diagnostics.push(serde_json::json!({
-                    "level": "error",
-                    "entity": entity_id_string(entity),
-                    "message": "object name is empty",
-                }));
-            }
-            for component in &object.components {
-                if let engine_ecs::ComponentData::MeshRenderer(mesh) = component {
-                    if mesh.mesh.is_none() && mesh.builtin_mesh.is_none() && include_warnings {
-                        diagnostics.push(serde_json::json!({
-                            "level": "warning",
-                            "entity": entity_id_string(entity),
-                            "message": "MeshRenderer has no mesh asset or built-in mesh",
-                        }));
-                    }
-                    if let Some(asset) = mesh.mesh
-                        && scene_asset_missing(&self.context, asset)
-                    {
-                        diagnostics.push(serde_json::json!({
-                            "level": "error",
-                            "entity": entity_id_string(entity),
-                            "message": "MeshRenderer references a missing mesh asset",
-                            "asset": asset.as_u128().to_string(),
-                        }));
-                    }
-                    if let Some(asset) = mesh.material.asset
-                        && scene_asset_missing(&self.context, asset)
-                    {
-                        diagnostics.push(serde_json::json!({
-                            "level": "error",
-                            "entity": entity_id_string(entity),
-                            "message": "MeshRenderer references a missing material asset",
-                            "asset": asset.as_u128().to_string(),
-                        }));
-                    }
-                }
-            }
-        }
-        let error_count = diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic["level"] == "error")
-            .count();
-        serde_json::json!({
-            "ok": error_count == 0,
-            "error_count": error_count,
-            "diagnostics": diagnostics,
-        })
     }
 
     /// Converts a `ComponentSpec` into a `ComponentData` variant.
@@ -2776,38 +2484,7 @@ impl AgentSession {
 
     /// Resolves an entity by name or ID.
     fn resolve_entity(&self, entity_name: &str) -> EngineResult<engine_ecs::Entity> {
-        // Try as entity ID first
-        if entity_name.contains(':') {
-            return parse_entity_id(entity_name);
-        }
-
-        // Try as name
-        self.context.scene.find_by_name(entity_name).ok_or_else(|| {
-            EngineError::config(format!(
-                "Entity '{}' not found. Available entities: {}",
-                entity_name,
-                self.list_entity_names()
-            ))
-        })
-    }
-
-    /// Lists all entity names in the scene (for error messages).
-    fn list_entity_names(&self) -> String {
-        let names: Vec<String> = self
-            .context
-            .scene
-            .iter_objects()
-            .map(|(_, go)| go.name.clone())
-            .take(10)
-            .collect();
-
-        if names.is_empty() {
-            "(no entities in scene)".to_string()
-        } else if names.len() == 10 {
-            format!("{}, ...", names.join(", "))
-        } else {
-            names.join(", ")
-        }
+        resolve_entity_in_project(&self.context, entity_name)
     }
 
     /// Attaches a behavior file to an entity.
@@ -2840,6 +2517,40 @@ impl AgentSession {
         });
 
         Ok(())
+    }
+}
+
+pub(crate) fn resolve_entity_in_project(
+    context: &ProjectContext,
+    entity_name: &str,
+) -> EngineResult<engine_ecs::Entity> {
+    if entity_name.contains(':') {
+        return parse_entity_id(entity_name);
+    }
+
+    context.scene.find_by_name(entity_name).ok_or_else(|| {
+        EngineError::config(format!(
+            "Entity '{}' not found. Available entities: {}",
+            entity_name,
+            list_entity_names(context)
+        ))
+    })
+}
+
+fn list_entity_names(context: &ProjectContext) -> String {
+    let names: Vec<String> = context
+        .scene
+        .iter_objects()
+        .map(|(_, go)| go.name.clone())
+        .take(10)
+        .collect();
+
+    if names.is_empty() {
+        "(no entities in scene)".to_string()
+    } else if names.len() == 10 {
+        format!("{}, ...", names.join(", "))
+    } else {
+        names.join(", ")
     }
 }
 
@@ -2916,7 +2627,7 @@ fn write_varg_script(asset_root: &Path, relative: &Path, source: &str) -> Engine
     Ok(full_path)
 }
 
-fn entity_id_string(entity: engine_ecs::Entity) -> String {
+pub(crate) fn entity_id_string(entity: engine_ecs::Entity) -> String {
     format!(
         "{}:{}",
         entity.handle().slot(),
@@ -2924,7 +2635,7 @@ fn entity_id_string(entity: engine_ecs::Entity) -> String {
     )
 }
 
-fn transform_json(transform: engine_core::math::Transform) -> serde_json::Value {
+pub(crate) fn transform_json(transform: engine_core::math::Transform) -> serde_json::Value {
     serde_json::json!({
         "position": [
             transform.translation.x,
@@ -2941,7 +2652,7 @@ fn transform_json(transform: engine_core::math::Transform) -> serde_json::Value 
     })
 }
 
-fn component_json(component: &engine_ecs::ComponentData) -> serde_json::Value {
+pub(crate) fn component_json(component: &engine_ecs::ComponentData) -> serde_json::Value {
     serde_json::to_value(component)
         .unwrap_or_else(|_| serde_json::json!({ "type": component.type_id() }))
 }
@@ -3069,7 +2780,7 @@ fn write_model_authoring_file(
     })
 }
 
-fn scene_references_to_asset(
+pub(crate) fn scene_references_to_asset(
     scene: &engine_ecs::Scene,
     asset: engine_core::AssetId,
 ) -> Vec<serde_json::Value> {
@@ -3102,7 +2813,7 @@ fn scene_references_to_asset(
     references
 }
 
-fn scene_asset_missing(context: &ProjectContext, asset: engine_core::AssetId) -> bool {
+pub(crate) fn scene_asset_missing(context: &ProjectContext, asset: engine_core::AssetId) -> bool {
     context
         .database
         .resolve_guid(engine_assets::AssetGuid::from_asset_id(asset))
@@ -4324,11 +4035,20 @@ fn material_schema() -> serde_json::Value {
 fn mesh_operations_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "array",
+        "description": ".vmodel authoring operations are evaluated in order. Start with cube/box, then layer transforms, bevels, arrays, and inset panels.",
         "items": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
-                "type": { "type": "string", "description": "Operation kind: cube, bevel, inset, extrude, mirror, boolean, array" },
-                "params": { "type": "object", "description": "Operation parameters" }
+                "type": {
+                    "type": "string",
+                    "enum": ["cube", "box", "bevel", "translate", "scale", "array", "inset_panel"],
+                    "description": "Supported .vmodel operation kind. Use inset_panel, not inset. Extrude, mirror, and boolean are not supported yet."
+                },
+                "params": {
+                    "type": "object",
+                    "description": "Operation parameters. cube/box: size, position/translation, scale, bevel. bevel: amount/radius. translate: offset/position. scale: value/scale. array: count plus offset, or axis and spacing. inset_panel: face, margin/amount, depth."
+                }
             },
             "required": ["type"]
         }
@@ -4878,6 +4598,29 @@ mod tests {
     }
 
     #[test]
+    fn copilot_runtime_uses_shared_kernel_and_promotes_to_quest() {
+        let kernel = AgentKernel::default();
+        let runtime = CopilotRuntime::new(kernel);
+        let mut session = runtime.start_session(temp_project_context()).unwrap();
+
+        session.record_exchange(
+            "Make the current scene easier to inspect",
+            "I can inspect the scene and propose small editor-scoped edits.",
+        );
+        let promotion = session
+            .promote_to_quest(
+                "Scene inspection upgrade",
+                "Persist the broader scene workflow",
+            )
+            .unwrap();
+
+        assert_eq!(promotion.title, "Scene inspection upgrade");
+        assert_eq!(promotion.history.len(), 2);
+        assert_eq!(promotion.project_root, session.agent.context.root);
+        assert_eq!(session.policy, PermissionPolicy::read_only());
+    }
+
+    #[test]
     fn parse_entity_id_handles_both_formats() {
         let entity = parse_entity_id("1:1").unwrap();
         assert_eq!(entity.handle().slot(), 1);
@@ -5093,6 +4836,36 @@ mod tests {
     }
 
     #[test]
+    fn mesh_operations_schema_matches_vmodel_compiler_surface() {
+        let schema = mesh_operations_schema();
+        let operation_types = schema
+            .pointer("/items/properties/type/enum")
+            .and_then(|value| value.as_array())
+            .expect("mesh operation type enum should be present");
+        let operation_types = operation_types
+            .iter()
+            .map(|value| value.as_str().expect("operation type should be string"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            operation_types,
+            vec![
+                "cube",
+                "box",
+                "bevel",
+                "translate",
+                "scale",
+                "array",
+                "inset_panel"
+            ]
+        );
+        assert!(!operation_types.contains(&"extrude"));
+        assert!(!operation_types.contains(&"mirror"));
+        assert!(!operation_types.contains(&"boolean"));
+        assert!(!operation_types.contains(&"inset"));
+    }
+
+    #[test]
     fn modeling_operations_create_scene_and_asset_evidence() {
         let root = std::env::temp_dir().join(format!("varg-ai-modeling-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -5249,6 +5022,157 @@ mod tests {
             plan.operations[0].operation,
             AgentOperation::Complete { .. }
         ));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_only_tools_execute_through_runtime_registry() {
+        let root =
+            std::env::temp_dir().join(format!("varg-ai-runtime-tools-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let ctx = temp_project_context_at(root.clone());
+        std::fs::write(root.join("NOTES.md"), "Runtime routed note.").unwrap();
+        let mut session = AgentSession::new(ctx).unwrap();
+        let entity = session.context.scene.create_object("RuntimeProbe").unwrap();
+        let entity_id = entity_id_string(entity);
+
+        let plan = AgentPlan {
+            operations: vec![
+                PlannedOperation {
+                    operation: AgentOperation::ReadFile {
+                        path: "NOTES.md".into(),
+                    },
+                    preview: "Read NOTES.md".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+                PlannedOperation {
+                    operation: AgentOperation::ToolSearch {
+                        query: "scene".into(),
+                        types: vec!["scene".into()],
+                        capabilities: Vec::new(),
+                        stage: None,
+                        risk_max: Some("low".into()),
+                        limit: Some(2),
+                    },
+                    preview: "Search tools".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+                PlannedOperation {
+                    operation: AgentOperation::RequestCapability {
+                        capabilities: vec!["scene.write.entity".into()],
+                        tools: Vec::new(),
+                        reason: Some("test preflight".into()),
+                    },
+                    preview: "Preflight capability".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+                PlannedOperation {
+                    operation: AgentOperation::GetSceneInfo {
+                        include_components: false,
+                    },
+                    preview: "Get scene info".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+                PlannedOperation {
+                    operation: AgentOperation::GetObjectInfo {
+                        entity: "RuntimeProbe".into(),
+                    },
+                    preview: "Get object info".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+                PlannedOperation {
+                    operation: AgentOperation::GetAssetInfo {
+                        asset: "missing.asset".into(),
+                    },
+                    preview: "Get asset info".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+                PlannedOperation {
+                    operation: AgentOperation::CaptureViewport {
+                        entity: Some(entity_id.clone()),
+                        output_path: Some("captures/runtime.png".into()),
+                    },
+                    preview: "Capture viewport".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+                PlannedOperation {
+                    operation: AgentOperation::ValidateScene {
+                        include_warnings: true,
+                    },
+                    preview: "Validate scene".into(),
+                    requires_write: false,
+                    capabilities: Vec::new(),
+                    capability_decisions: Vec::new(),
+                },
+            ],
+            read_only: true,
+            requires_write: false,
+            policy: PermissionPolicy::read_only(),
+        };
+
+        let outcome = session.apply_plan(&plan).unwrap();
+
+        assert_eq!(outcome.operations_performed, 8);
+        let messages = session
+            .console
+            .entries()
+            .iter()
+            .map(|entry| entry.message.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("Runtime routed note."))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("schema_loaded"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("request_capability is a preflight only"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("RuntimeProbe"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("\"found\": false"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("\"capture_requested\": true"))
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("\"ok\": true"))
+        );
+        assert_eq!(
+            session.selection.selected(),
+            Some(&engine_editor::Selection::Entity(entity_id))
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }
