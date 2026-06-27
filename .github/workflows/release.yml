@@ -78,7 +78,7 @@ jobs:
           while IFS= read -r -d '' artifact; do
             filename="$(basename "$artifact")"
             cp "$artifact" "release-assets/${{ matrix.platform }}/${{ matrix.platform }}-$filename"
-          done < <(find editor/src-tauri/target/release/bundle -type f -print0)
+          done < <(find target/release/bundle -type f -print0)
 
           find "release-assets/${{ matrix.platform }}" -maxdepth 1 -type f -print
 
@@ -86,6 +86,7 @@ jobs:
         with:
           name: varg-editor-${{ matrix.platform }}
           path: release-assets/${{ matrix.platform }}/*
+          if-no-files-found: error
 
   upload:
     name: Upload release assets
@@ -106,7 +107,7 @@ jobs:
         run: |
           case "$RELEASE_TAG" in
             *-beta | *-dev | *-canary)
-              gh release edit "$RELEASE_TAG" --prerelease
+              gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --prerelease
               ;;
             *)
               echo "$RELEASE_TAG is a stable release tag"
@@ -125,7 +126,7 @@ jobs:
             exit 1
           fi
 
-          gh release upload "$RELEASE_TAG" --clobber "${assets[@]}"
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}

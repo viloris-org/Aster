@@ -2327,6 +2327,7 @@ pub struct FileWatcher {
     _watcher: notify::RecommendedWatcher,
     receiver: Receiver<notify::Result<notify::Event>>,
     root: PathBuf,
+    canonical_root: PathBuf,
     debounce_buffer: HashMap<PathBuf, (FileEventKind, SystemTime)>,
     debounce_duration: std::time::Duration,
 }
@@ -2356,10 +2357,25 @@ impl FileWatcher {
         Ok(Self {
             _watcher: watcher,
             receiver,
+            canonical_root: asset_root
+                .canonicalize()
+                .unwrap_or_else(|_| asset_root.to_path_buf()),
             root: asset_root.to_path_buf(),
             debounce_buffer: HashMap::new(),
             debounce_duration: std::time::Duration::from_millis(200),
         })
+    }
+
+    fn relative_event_path(&self, path: &Path) -> Option<PathBuf> {
+        if let Ok(relative) = path.strip_prefix(&self.root) {
+            return Some(relative.to_path_buf());
+        }
+
+        let canonical_path = path.canonicalize().ok()?;
+        canonical_path
+            .strip_prefix(&self.canonical_root)
+            .ok()
+            .map(Path::to_path_buf)
     }
 
     /// Polls for file events, returning debounced events.
@@ -2378,9 +2394,9 @@ impl FileWatcher {
                     }
 
                     // Convert to relative path
-                    let relative = match path.strip_prefix(&self.root) {
-                        Ok(rel) => rel.to_path_buf(),
-                        Err(_) => continue,
+                    let relative = match self.relative_event_path(path) {
+                        Some(relative) => relative,
+                        None => continue,
                     };
 
                     let kind = match event.kind {
@@ -5072,6 +5088,43 @@ depth = 0.04
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_watcher_accepts_canonicalized_event_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "varg_watcher_root_test_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let symlink = std::env::temp_dir().join(format!(
+            "varg_watcher_link_test_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&symlink);
+        std::fs::create_dir_all(&root).unwrap();
+        std::os::unix::fs::symlink(&root, &symlink).unwrap();
+
+        let test_file = root.join("test.png");
+        std::fs::write(&test_file, b"fake png data").unwrap();
+        let watcher = FileWatcher::start(&symlink).unwrap();
+
+        assert_eq!(
+            watcher.relative_event_path(&test_file),
+            Some(PathBuf::from("test.png"))
+        );
+
+        let _ = std::fs::remove_file(&symlink);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
