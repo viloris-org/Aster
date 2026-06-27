@@ -5028,8 +5028,14 @@ depth = 0.04
         use std::time::Duration;
 
         // Create a temporary directory
-        let temp_dir =
-            std::env::temp_dir().join(format!("varg_watcher_test_{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "varg_watcher_test_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -5043,13 +5049,13 @@ depth = 0.04
         let test_file = temp_dir.join("test.png");
         std::fs::write(&test_file, b"fake png data").unwrap();
 
-        // Poll for events with timeout
+        // Poll until the native watcher delivers the event into the debounce buffer.
         let mut events = Vec::new();
-        for _ in 0..50 {
+        for _ in 0..200 {
             std::thread::sleep(Duration::from_millis(10));
             let mut polled = watcher.poll_events();
             events.append(&mut polled);
-            if !events.is_empty() {
+            if !events.is_empty() || watcher.debounce_buffer.contains_key(Path::new("test.png")) {
                 break;
             }
         }

@@ -49,16 +49,23 @@ jobs:
             libxdo-dev \
             mold
       - name: Check formatting
+        if: ${{ !cancelled() }}
         run: cargo fmt --check
       - name: Lint workspace
+        if: ${{ !cancelled() }}
         run: cargo clippy --workspace
       - name: Test workspace
+        if: ${{ !cancelled() }}
         run: cargo test --workspace
       - name: Build runtime-min (minimal profile)
+        if: ${{ !cancelled() }}
         run: cargo build -p runtime-min --no-default-features --features runtime-min
       - name: Build runtime-min (editor profile)
+        if: ${{ !cancelled() }}
         run: cargo xtask build-editor
       - name: Check Tauri editor backend compiles
+        if: ${{ !cancelled() }}
         run: cargo check -p varg-editor-tauri
       - name: Agent sandbox and worktree smoke tests
+        if: ${{ !cancelled() }}
         run: cargo xtask agent-smoke

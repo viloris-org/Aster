@@ -245,6 +245,12 @@ fn post_shader_uses_cubic_reconstruction_and_bounded_sharpening() {
 }
 
 #[test]
+fn post_shader_loads_depth_without_filtering_sampler() {
+    assert!(POST_SHADER.contains("return textureLoad(depth_tex, pixel, 0);"));
+    assert!(!POST_SHADER.contains("textureSample(depth_tex"));
+}
+
+#[test]
 fn taa_shader_reprojects_and_clamps_history_for_antialiasing() {
     assert!(TAA_SHADER.contains("var history_tex: texture_2d<f32>"));
     assert!(TAA_SHADER.contains("var motion_tex: texture_2d<f32>"));
