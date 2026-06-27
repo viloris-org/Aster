@@ -11,7 +11,24 @@ fn load_runtime_project_loads_example() {
 
     let project = load_runtime_project(&project_path).expect("load example project");
 
-    assert_eq!(project.manifest.name, "Varg Example");
+    assert_eq!(project.manifest.name, "Varg Examples");
+    assert_eq!(project.manifest.asset_root, "assets");
+    assert_eq!(project.manifest.default_scene, "scenes/example.vscene");
+    assert!(
+        !project.scene.objects().is_empty(),
+        "scene should have objects"
+    );
+}
+
+/// Verifies that nested example games can be loaded as independent projects.
+#[test]
+fn load_runtime_project_loads_jump_jump_example() {
+    let workspace_root = find_workspace_root();
+    let project_path = workspace_root.join("examples/project/jump_jump");
+
+    let project = load_runtime_project(&project_path).expect("load jump jump project");
+
+    assert_eq!(project.manifest.name, "Jump Jump");
     assert_eq!(project.manifest.asset_root, "assets");
     assert_eq!(project.manifest.default_scene, "scenes/jump_jump.vscene");
     assert!(

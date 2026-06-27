@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tauri::{Emitter, State};
@@ -12,6 +12,7 @@ pub(crate) fn rpc(
     method: String,
     params: Value,
 ) -> Result<Value, String> {
+    let started_at = Instant::now();
     state.with_host(|host| {
         let result = if method == "copilot/plan" {
             let request_id = params
@@ -38,6 +39,15 @@ pub(crate) fn rpc(
         } else {
             host.handle(&method, &params)
         };
+        let elapsed = started_at.elapsed();
+        if elapsed >= Duration::from_millis(10) {
+            tracing::info!(
+                target: "editor",
+                method = method.as_str(),
+                elapsed_ms = elapsed.as_millis() as u64,
+                "rpc timing"
+            );
+        }
         result.map_err(|error| error.to_string())
     })
 }

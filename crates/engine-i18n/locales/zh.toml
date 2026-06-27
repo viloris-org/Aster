@@ -468,9 +468,6 @@ copilot_plan_footer_hint = "更大或高风险的工作应升级为 Quest。"
 copilot_plan_selected = "已选择 {count} 个"
 
 # Inspector
-inspector_select_hint = "选择一个游戏对象进行检查"
-inspector_components = "组件"
-inspector_all_components_added = "已添加所有组件"
 
 # Project panel
 project_refresh = "刷新"

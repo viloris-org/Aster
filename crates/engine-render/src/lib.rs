@@ -186,6 +186,32 @@ pub struct RenderLight {
     pub range: f32,
     /// Spot cone angle in degrees for spot lights.
     pub spot_angle: f32,
+    /// Additional physically-oriented light controls.
+    pub settings: RenderLightSettings,
+}
+
+/// Renderer-facing controls for light quality and physically-inspired shading.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderLightSettings {
+    /// Whether this light may contribute to real-time shadow maps.
+    pub casts_shadow: bool,
+    /// Approximate emitter radius in world units for softer local lighting.
+    pub source_radius: f32,
+    /// Optional correlated color temperature in Kelvin. Values <= 0 use the light color.
+    pub temperature_kelvin: f32,
+    /// Contact-shadow strength hint for near-surface shadowing.
+    pub contact_shadow_strength: f32,
+}
+
+impl Default for RenderLightSettings {
+    fn default() -> Self {
+        Self {
+            casts_shadow: true,
+            source_radius: 0.0,
+            temperature_kelvin: 0.0,
+            contact_shadow_strength: 0.0,
+        }
+    }
 }
 
 /// Light category used by render backends.
@@ -546,6 +572,12 @@ impl RenderWorld {
                             intensity: light.intensity,
                             range: light.range,
                             spot_angle: light.spot_angle,
+                            settings: RenderLightSettings {
+                                casts_shadow: light.casts_shadow,
+                                source_radius: light.source_radius,
+                                temperature_kelvin: light.temperature_kelvin,
+                                contact_shadow_strength: light.contact_shadow_strength,
+                            },
                         });
                     }
                     engine_ecs::ComponentData::ParticleEmitter(emitter) => {

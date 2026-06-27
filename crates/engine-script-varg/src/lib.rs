@@ -665,6 +665,7 @@ enum RuntimeStatement {
         condition: ConditionExpression,
         body: Vec<RuntimeStatement>,
     },
+    CallFunction(String),
     Return(Expression),
     Break,
     Continue,
@@ -2271,6 +2272,10 @@ fn compile_light_component(block: &VsceneBlock) -> LightComponentData {
             .unwrap_or_else(|| "point".to_string()),
         range: number_property(block, "range").unwrap_or(10.0),
         spot_angle: number_property(block, "spotAngle").unwrap_or(30.0),
+        casts_shadow: bool_property(block, "castsShadow").unwrap_or(true),
+        source_radius: number_property(block, "sourceRadius").unwrap_or(0.0),
+        temperature_kelvin: number_property(block, "temperatureKelvin").unwrap_or(0.0),
+        contact_shadow_strength: number_property(block, "contactShadowStrength").unwrap_or(0.0),
     }
 }
 
@@ -3013,6 +3018,9 @@ impl RuntimeEnvironment<'_> {
                     }
                 }
                 self.should_break = false;
+            }
+            RuntimeStatement::CallFunction(name) => {
+                self.execute_function(name);
             }
             RuntimeStatement::Return(_) => {
                 self.should_return = true;
@@ -4016,10 +4024,26 @@ impl RuntimeEnvironment<'_> {
             .map(|arg| op(self.eval_number(arg)))
             .unwrap_or(0.0)
     }
+
+    fn execute_function(&mut self, name: &str) {
+        let Some(statements) = self.script.hooks.get(name).cloned() else {
+            return;
+        };
+        let was_returning = self.should_return;
+        self.should_return = false;
+        for statement in &statements {
+            self.execute(statement);
+            if self.should_return || self.should_break || self.should_continue {
+                break;
+            }
+        }
+        self.should_return = was_returning;
+    }
 }
 
 fn compile_runtime_blocks(source: &str, script: &mut VargScript) {
     let lines = source.lines().collect::<Vec<_>>();
+    let functions = collect_runtime_function_names(&lines);
     let mut index = 0usize;
     while index < lines.len() {
         let trimmed = strip_line_comment(lines[index]).trim();
@@ -4031,7 +4055,7 @@ fn compile_runtime_blocks(source: &str, script: &mut VargScript) {
         if let Some(signature) = parse_function_signature(trimmed) {
             let (body, next) = collect_block(&lines, index);
             let mut body_index = 0usize;
-            let statements = parse_runtime_statements(&body, &mut body_index);
+            let statements = parse_runtime_statements(&body, &mut body_index, &functions);
             script.hooks.insert(signature.name, statements);
             index = next;
             continue;
@@ -4042,6 +4066,7 @@ fn compile_runtime_blocks(source: &str, script: &mut VargScript) {
 
 fn diagnose_runtime_blocks(source: &str) -> Vec<VargDiagnostic> {
     let lines = source.lines().collect::<Vec<_>>();
+    let functions = collect_runtime_function_names(&lines);
     let mut diagnostics = Vec::new();
     let mut index = 0usize;
     while index < lines.len() {
@@ -4054,6 +4079,7 @@ fn diagnose_runtime_blocks(source: &str) -> Vec<VargDiagnostic> {
                 &mut body_index,
                 &mut diagnostics,
                 source,
+                &functions,
             );
             index = next;
             continue;
@@ -4063,9 +4089,13 @@ fn diagnose_runtime_blocks(source: &str) -> Vec<VargDiagnostic> {
     diagnostics
 }
 
-fn parse_runtime_statements(lines: &[RuntimeLine], index: &mut usize) -> Vec<RuntimeStatement> {
+fn parse_runtime_statements(
+    lines: &[RuntimeLine],
+    index: &mut usize,
+    functions: &std::collections::HashSet<String>,
+) -> Vec<RuntimeStatement> {
     let mut diagnostics = Vec::new();
-    parse_runtime_statements_with_diagnostics(lines, index, &mut diagnostics, "")
+    parse_runtime_statements_with_diagnostics(lines, index, &mut diagnostics, "", functions)
 }
 
 fn parse_runtime_statements_with_diagnostics(
@@ -4073,6 +4103,7 @@ fn parse_runtime_statements_with_diagnostics(
     index: &mut usize,
     diagnostics: &mut Vec<VargDiagnostic>,
     source: &str,
+    functions: &std::collections::HashSet<String>,
 ) -> Vec<RuntimeStatement> {
     let mut statements = Vec::new();
     while *index < lines.len() {
@@ -4094,12 +4125,14 @@ fn parse_runtime_statements_with_diagnostics(
                     &mut nested_index,
                     diagnostics,
                     source,
+                    functions,
                 ),
                 else_statements: parse_runtime_statements_with_diagnostics(
                     &else_nested,
                     &mut else_index,
                     diagnostics,
                     source,
+                    functions,
                 ),
             });
             continue;
@@ -4115,6 +4148,7 @@ fn parse_runtime_statements_with_diagnostics(
                     &mut body_index,
                     diagnostics,
                     source,
+                    functions,
                 ),
             });
             continue;
@@ -4129,11 +4163,12 @@ fn parse_runtime_statements_with_diagnostics(
                     &mut body_index,
                     diagnostics,
                     source,
+                    functions,
                 ),
             });
             continue;
         }
-        if let Some(statement) = parse_runtime_statement(trimmed) {
+        if let Some(statement) = parse_runtime_statement(trimmed, functions) {
             statements.push(statement);
         } else {
             diagnostics.push(unsupported_runtime_statement_diagnostic(
@@ -4147,7 +4182,18 @@ fn parse_runtime_statements_with_diagnostics(
     statements
 }
 
-fn parse_runtime_statement(line: &str) -> Option<RuntimeStatement> {
+fn collect_runtime_function_names(lines: &[&str]) -> std::collections::HashSet<String> {
+    lines
+        .iter()
+        .filter_map(|line| parse_function_signature(strip_line_comment(line).trim()))
+        .map(|signature| signature.name)
+        .collect()
+}
+
+fn parse_runtime_statement(
+    line: &str,
+    functions: &std::collections::HashSet<String>,
+) -> Option<RuntimeStatement> {
     if line.trim() == "break" {
         return Some(RuntimeStatement::Break);
     }
@@ -4165,6 +4211,11 @@ fn parse_runtime_statement(line: &str) -> Option<RuntimeStatement> {
     }
     if line.trim() == "entity.destroy()" || line.trim() == "destroySelf()" {
         return Some(RuntimeStatement::DestroySelf);
+    }
+    if let Some((name, args)) = parse_expression_call(line) {
+        if args.trim().is_empty() && functions.contains(name) {
+            return Some(RuntimeStatement::CallFunction(name.to_string()));
+        }
     }
     if let Some(content) = method_args(line, "scene.spawnBox") {
         let args = split_top_level_commas(content);
@@ -6152,6 +6203,100 @@ mod tests {
     }
 
     #[test]
+    fn runtime_supports_zero_arg_script_function_calls() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/function_calls.varg",
+            r#"script FunctionCalls {
+    var count: Int = 0
+
+    func update(_ dt: Float) {
+        increment()
+        increment()
+    }
+
+    func increment() {
+        count += 1
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 0.016,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+                scene: VargSceneContext::default(),
+            },
+        );
+
+        assert_eq!(
+            output.state.get("count").and_then(|value| value.as_f64()),
+            Some(2.0)
+        );
+    }
+
+    #[test]
+    fn runtime_w_key_moves_first_person_script_forward() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/fps_move_probe.varg",
+            r#"script FpsMoveProbe {
+    @export var moveSpeed: Float = 4.8
+
+    func update(_ dt: Float) {
+        let yawRad: Float = 0.0
+        let forwardX: Float = 0.0 - sin(yawRad)
+        let forwardZ: Float = cos(yawRad)
+        let rightX: Float = cos(yawRad)
+        let rightZ: Float = sin(yawRad)
+        let moveX: Float = Input.value("MoveX")
+        let moveZ: Float = Input.value("MoveY")
+        let strafeX: Float = rightX * moveX
+        let forwardMoveX: Float = forwardX * moveZ
+        let strafeZ: Float = rightZ * moveX
+        let forwardMoveZ: Float = forwardZ * moveZ
+        let deltaX: Float = strafeX + forwardMoveX
+        let deltaZ: Float = strafeZ + forwardMoveZ
+        position.x += deltaX * moveSpeed * dt
+        position.z += deltaZ * moveSpeed * dt
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        let mut input = engine_platform::InputState::default();
+        input.bind_default_player_actions();
+        input.apply_event(engine_platform::InputEvent::KeyDown(
+            engine_platform::KeyCode::Character('w'),
+        ));
+        let output = script.run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input,
+                delta_time: 1.0,
+                total_time: 1.0,
+                frame_index: 1,
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+                scene: VargSceneContext::default(),
+            },
+        );
+
+        assert!(output.transform.translation.z > 4.7);
+        assert!(output.transform.translation.x.abs() < 0.001);
+    }
+
+    #[test]
     fn runtime_emits_spawn_requests() {
         let (script, diagnostics) = compile_script_source(
             "scripts/spawner.varg",
@@ -6590,28 +6735,46 @@ mod tests {
                 include_str!("../../../examples/scripts/weapon_cooldown.varg"),
             ),
             (
-                "examples/project/scripts/player_controller.varg",
-                include_str!("../../../examples/project/scripts/player_controller.varg"),
+                "examples/project/fps_arena/scripts/fps_player.varg",
+                include_str!("../../../examples/project/fps_arena/scripts/fps_player.varg"),
             ),
             (
-                "examples/project/scripts/jump_player.varg",
-                include_str!("../../../examples/project/scripts/jump_player.varg"),
+                "examples/project/fps_arena/scripts/fps_camera.varg",
+                include_str!("../../../examples/project/fps_arena/scripts/fps_camera.varg"),
             ),
             (
-                "examples/project/scripts/first_person_camera.varg",
-                include_str!("../../../examples/project/scripts/first_person_camera.varg"),
+                "examples/project/fps_arena/scripts/target_drift.varg",
+                include_str!("../../../examples/project/fps_arena/scripts/target_drift.varg"),
             ),
             (
-                "examples/project/scripts/camera_follow.varg",
-                include_str!("../../../examples/project/scripts/camera_follow.varg"),
+                "examples/project/fps_arena/scripts/drone_part_drift.varg",
+                include_str!("../../../examples/project/fps_arena/scripts/drone_part_drift.varg"),
             ),
             (
-                "examples/project/scripts/bobber.varg",
-                include_str!("../../../examples/project/scripts/bobber.varg"),
+                "examples/project/jump_jump/scripts/jump_player.varg",
+                include_str!("../../../examples/project/jump_jump/scripts/jump_player.varg"),
             ),
             (
-                "examples/project/scripts/despawn_far.varg",
-                include_str!("../../../examples/project/scripts/despawn_far.varg"),
+                "examples/project/jump_jump/scripts/first_person_camera.varg",
+                include_str!(
+                    "../../../examples/project/jump_jump/scripts/first_person_camera.varg"
+                ),
+            ),
+            (
+                "examples/project/fps_arena/scripts/bobber.varg",
+                include_str!("../../../examples/project/fps_arena/scripts/bobber.varg"),
+            ),
+            (
+                "examples/project/fps_arena/scripts/despawn_far.varg",
+                include_str!("../../../examples/project/fps_arena/scripts/despawn_far.varg"),
+            ),
+            (
+                "examples/project/jump_jump/scripts/bobber.varg",
+                include_str!("../../../examples/project/jump_jump/scripts/bobber.varg"),
+            ),
+            (
+                "examples/project/jump_jump/scripts/despawn_far.varg",
+                include_str!("../../../examples/project/jump_jump/scripts/despawn_far.varg"),
             ),
         ] {
             let (script, diagnostics) = compile_script_source(path, source);

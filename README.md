@@ -5,7 +5,7 @@
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/Rust-1.96+-orange.svg)
 
-English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md)
 
 Varg is an AI-native game engine. Describe your game in natural language, and a cluster
 of autonomous agents builds it — scene, logic, UI, and all. A full visual editor is

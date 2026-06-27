@@ -1,4 +1,4 @@
-name = "Varg Example"
+name = "Jump Jump"
 asset_root = "assets"
 script_roots = ["scripts"]
 default_scene = "scenes/jump_jump.vscene"

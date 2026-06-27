@@ -148,13 +148,17 @@ impl ComponentSchemaRegistry {
         registry.register(ComponentSchema {
             type_id: "Light".to_string(),
             display_name: "Light".to_string(),
-            version: 2,
+            version: 3,
             fields: vec![
                 field("kind", ComponentFieldKind::String, "directional"),
                 field("color", ComponentFieldKind::Vec3, "1,1,1"),
                 field("intensity", ComponentFieldKind::F32, "1"),
                 field("range", ComponentFieldKind::F32, "10"),
                 field("spot_angle", ComponentFieldKind::F32, "30"),
+                field("casts_shadow", ComponentFieldKind::Bool, "true"),
+                field("source_radius", ComponentFieldKind::F32, "0"),
+                field("temperature_kelvin", ComponentFieldKind::F32, "0"),
+                field("contact_shadow_strength", ComponentFieldKind::F32, "0"),
             ],
             evolution: SchemaEvolution::default(),
         });

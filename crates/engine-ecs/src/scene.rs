@@ -233,6 +233,18 @@ pub struct LightComponentData {
     /// Spot inner cone angle in degrees (spot only).
     #[serde(default = "default_spot_angle")]
     pub spot_angle: f32,
+    /// Whether this light contributes to real-time shadow maps.
+    #[serde(default = "default_true")]
+    pub casts_shadow: bool,
+    /// Approximate emitter radius in world units for softer local lighting.
+    #[serde(default)]
+    pub source_radius: f32,
+    /// Optional correlated color temperature in Kelvin. Values <= 0 use `color`.
+    #[serde(default)]
+    pub temperature_kelvin: f32,
+    /// Contact-shadow strength hint for near-surface shadowing.
+    #[serde(default)]
+    pub contact_shadow_strength: f32,
 }
 
 fn default_light_range() -> f32 {
@@ -251,6 +263,10 @@ impl Default for LightComponentData {
             kind: "directional".to_string(),
             range: default_light_range(),
             spot_angle: default_spot_angle(),
+            casts_shadow: true,
+            source_radius: 0.0,
+            temperature_kelvin: 0.0,
+            contact_shadow_strength: 0.0,
         }
     }
 }

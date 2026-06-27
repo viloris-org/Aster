@@ -1,0 +1,15 @@
+script Bobber {
+    @export var amplitude: Float = 0.25
+    @export var speed: Float = 2.0
+    @export var offset: Float = 0.0
+
+    var baseY: Float = 0.0
+
+    func start() {
+        baseY = position.y
+    }
+
+    func update(_ dt: Float) {
+        position.y = baseY + sin(Time.time * speed + offset) * amplitude
+    }
+}

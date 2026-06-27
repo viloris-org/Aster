@@ -1,0 +1,26 @@
+script DronePartDrift {
+    @export var amplitude: Float = 0.7
+    @export var speed: Float = 1.4
+    @export var offset: Float = 0.0
+    @export var maxDistance: Float = 58.0
+
+    var baseX: Float = 0.0
+    var baseY: Float = 0.0
+    var baseZ: Float = 0.0
+
+    func start() {
+        baseX = position.x
+        baseY = position.y
+        baseZ = position.z
+    }
+
+    func update(_ dt: Float) {
+        position.x = baseX + sin(Time.time * speed + offset) * amplitude
+        position.y = baseY + sin(Time.time * speed * 0.65 + offset) * amplitude * 0.35
+        position.z = baseZ + cos(Time.time * speed + offset) * amplitude * 0.25
+
+        if playerDistance() > maxDistance {
+            entity.destroy()
+        }
+    }
+}

@@ -1,0 +1,1081 @@
+scene FpsArena {
+    camera "Main Camera" {
+        transform {
+            position: Vec3(0.0, 1.67, -7.5)
+            rotation: Vec3(-6, 0, 0)
+        }
+
+        perspective {
+            fov: 82
+            near: 0.01
+            far: 800
+        }
+
+        primary: true
+
+        script FpsCamera {
+            source: "scripts/fps_camera.varg"
+            eyeHeight: 0.82
+            mouseSensitivity: 0.08
+            gamepadLookSpeed: 86.0
+            minPitch: -55.0
+            maxPitch: 32.0
+        }
+    }
+
+    light "Arena Sun" {
+        kind: directional
+        intensity: 3.8
+        color: Vec3(1.0, 0.95, 0.84)
+        rotation: Vec3(-55, 28, 0)
+    }
+
+    light "Red Range Glow" {
+        kind: point
+        intensity: 2.4
+        range: 16.0
+        color: Vec3(1.0, 0.24, 0.16)
+        position: Vec3(-6.0, 4.2, 2.5)
+    }
+
+    light "Blue Backlight" {
+        kind: point
+        intensity: 1.8
+        range: 18.0
+        color: Vec3(0.18, 0.52, 1.0)
+        position: Vec3(6.5, 4.8, 8.0)
+    }
+
+    entity "Player" {
+        tag: "Player"
+
+        transform {
+            position: Vec3(0.0, 0.85, -7.5)
+        }
+
+        mesh: Capsule(radius: 0.34, height: 1.7)
+
+        material {
+            baseColor: Color("#202938")
+            roughness: 0.54
+            emissive: Vec3(0.02, 0.04, 0.07)
+        }
+
+        rigidbody {
+            mode: kinematic
+        }
+
+        collider {
+            shape: box
+            size: Vec3(0.72, 1.7, 0.72)
+        }
+
+        script FpsPlayer {
+            source: "scripts/fps_player.varg"
+            moveSpeed: 4.8
+            sprintMultiplier: 1.55
+            arenaLimitX: 8.5
+            arenaLimitZ: 10.5
+            fireRate: 0.16
+            reloadTime: 1.15
+            magazineSize: 24
+            hitRadius: 2.35
+            spawnAhead: 8.5
+            giIntensity: 1.2
+        }
+    }
+
+    entity "Training Floor" {
+        tag: "Arena"
+
+        transform {
+            position: Vec3(0.0, -0.08, 0.0)
+        }
+
+        mesh: Box(size: Vec3(19.0, 0.18, 24.0))
+
+        material {
+            baseColor: Color("#2b3238")
+            roughness: 0.78
+        }
+
+        collider {
+            shape: box
+            size: Vec3(19.0, 0.18, 24.0)
+        }
+    }
+
+    entity "Lane Stripe Center" {
+        transform {
+            position: Vec3(0.0, 0.03, 0.0)
+        }
+
+        mesh: Box(size: Vec3(0.12, 0.04, 22.0))
+
+        material {
+            baseColor: Color("#f05a28")
+            roughness: 0.36
+            emissive: Vec3(0.22, 0.06, 0.02)
+        }
+    }
+
+    entity "Lane Stripe Left" {
+        transform {
+            position: Vec3(-4.2, 0.03, 0.0)
+        }
+
+        mesh: Box(size: Vec3(0.08, 0.04, 22.0))
+
+        material {
+            baseColor: Color("#53616c")
+            roughness: 0.52
+        }
+    }
+
+    entity "Lane Stripe Right" {
+        transform {
+            position: Vec3(4.2, 0.03, 0.0)
+        }
+
+        mesh: Box(size: Vec3(0.08, 0.04, 22.0))
+
+        material {
+            baseColor: Color("#53616c")
+            roughness: 0.52
+        }
+    }
+
+    entity "Back Wall" {
+        tag: "Wall"
+
+        transform {
+            position: Vec3(0.0, 2.0, 11.9)
+        }
+
+        mesh: Box(size: Vec3(19.0, 4.0, 0.3))
+
+        material {
+            baseColor: Color("#3d444b")
+            roughness: 0.7
+        }
+
+        collider {
+            shape: box
+            size: Vec3(19.0, 4.0, 0.3)
+        }
+    }
+
+    entity "Left Wall" {
+        tag: "Wall"
+
+        transform {
+            position: Vec3(-9.35, 2.0, 0.0)
+        }
+
+        mesh: Box(size: Vec3(0.3, 4.0, 24.0))
+
+        material {
+            baseColor: Color("#242a30")
+            roughness: 0.74
+        }
+
+        collider {
+            shape: box
+            size: Vec3(0.3, 4.0, 24.0)
+        }
+    }
+
+    entity "Right Wall" {
+        tag: "Wall"
+
+        transform {
+            position: Vec3(9.35, 2.0, 0.0)
+        }
+
+        mesh: Box(size: Vec3(0.3, 4.0, 24.0))
+
+        material {
+            baseColor: Color("#242a30")
+            roughness: 0.74
+        }
+
+        collider {
+            shape: box
+            size: Vec3(0.3, 4.0, 24.0)
+        }
+    }
+
+    entity "Low Cover A" {
+        tag: "Cover"
+
+        transform {
+            position: Vec3(-4.7, 0.55, -1.8)
+            rotation: Vec3(0, 12, 0)
+        }
+
+        mesh: Box(size: Vec3(2.2, 1.1, 0.8))
+
+        material {
+            baseColor: Color("#59636e")
+            roughness: 0.62
+        }
+
+        collider {
+            shape: box
+            size: Vec3(2.2, 1.1, 0.8)
+        }
+    }
+
+    entity "Low Cover B" {
+        tag: "Cover"
+
+        transform {
+            position: Vec3(4.2, 0.55, 1.4)
+            rotation: Vec3(0, -16, 0)
+        }
+
+        mesh: Box(size: Vec3(2.0, 1.1, 0.8))
+
+        material {
+            baseColor: Color("#59636e")
+            roughness: 0.62
+        }
+
+        collider {
+            shape: box
+            size: Vec3(2.0, 1.1, 0.8)
+        }
+    }
+
+    entity "Center Pillar" {
+        tag: "Cover"
+
+        transform {
+            position: Vec3(0.0, 1.2, 2.8)
+        }
+
+        mesh: Cylinder(radius: 0.58, height: 2.4)
+
+        material {
+            baseColor: Color("#444d57")
+            roughness: 0.58
+        }
+
+        collider {
+            shape: box
+            size: Vec3(1.16, 2.4, 1.16)
+        }
+    }
+
+    entity "Range Beacon" {
+        transform {
+            position: Vec3(0.0, 3.2, 8.8)
+        }
+
+        mesh: Sphere(radius: 0.45)
+
+        material {
+            baseColor: Color("#ff4b2f")
+            roughness: 0.18
+            emissive: Vec3(0.55, 0.08, 0.02)
+        }
+
+        script Bobber {
+            source: "scripts/bobber.varg"
+            amplitude: 0.18
+            speed: 1.8
+            offset: 0.0
+        }
+    }
+
+    entity "Training Drone A" {
+        tag: "Target"
+
+        transform {
+            position: Vec3(-3.4, 1.65, 6.6)
+        }
+
+        mesh: Sphere(radius: 0.46)
+
+        material {
+            baseColor: Color("#ff6247")
+            roughness: 0.28
+            emissive: Vec3(0.42, 0.05, 0.02)
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.9
+            speed: 1.35
+            offset: 0.0
+        }
+    }
+
+    entity "Training Drone B" {
+        tag: "Target"
+
+        transform {
+            position: Vec3(2.9, 2.25, 8.6)
+        }
+
+        mesh: Sphere(radius: 0.42)
+
+        material {
+            baseColor: Color("#ffce4a")
+            roughness: 0.22
+            emissive: Vec3(0.38, 0.24, 0.0)
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.75
+            speed: 1.6
+            offset: 1.2
+        }
+    }
+
+    entity "Training Drone C" {
+        tag: "Target"
+
+        transform {
+            position: Vec3(5.8, 1.4, 4.8)
+        }
+
+        mesh: Sphere(radius: 0.4)
+
+        material {
+            baseColor: Color("#38d9ff")
+            roughness: 0.2
+            emissive: Vec3(0.0, 0.34, 0.48)
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.65
+            speed: 1.9
+            offset: 2.4
+        }
+    }
+
+    entity "View Rifle Receiver" {
+        transform {
+            position: Vec3(0.62, 1.18, -6.92)
+            rotation: Vec3(-5, -5, -3)
+        }
+
+        mesh: Box(size: Vec3(0.34, 0.24, 0.92))
+
+        material {
+            baseColor: Color("#20262d")
+            roughness: 0.5
+            metallic: 0.35
+        }
+    }
+
+    entity "View Rifle Barrel" {
+        transform {
+            position: Vec3(0.54, 1.2, -6.32)
+            rotation: Vec3(90, -5, 0)
+        }
+
+        mesh: Cylinder(radius: 0.055, height: 0.95)
+
+        material {
+            baseColor: Color("#12171d")
+            roughness: 0.42
+            metallic: 0.55
+        }
+    }
+
+    entity "View Rifle Muzzle Brake" {
+        transform {
+            position: Vec3(0.49, 1.22, -5.82)
+            rotation: Vec3(90, -5, 0)
+        }
+
+        mesh: Cylinder(radius: 0.09, height: 0.16)
+
+        material {
+            baseColor: Color("#2e3640")
+            roughness: 0.38
+            metallic: 0.5
+        }
+    }
+
+    entity "View Rifle Scope Body" {
+        transform {
+            position: Vec3(0.56, 1.42, -6.62)
+            rotation: Vec3(90, -5, 0)
+        }
+
+        mesh: Cylinder(radius: 0.12, height: 0.62)
+
+        material {
+            baseColor: Color("#11161b")
+            roughness: 0.34
+            metallic: 0.45
+        }
+    }
+
+    entity "View Rifle Scope Glass" {
+        transform {
+            position: Vec3(0.51, 1.43, -6.26)
+            rotation: Vec3(90, -5, 0)
+        }
+
+        mesh: Cylinder(radius: 0.105, height: 0.035)
+
+        material {
+            baseColor: Color("#38d9ff")
+            roughness: 0.08
+            metallic: 0.1
+            emissive: Vec3(0.0, 0.18, 0.24)
+        }
+    }
+
+    entity "View Rifle Magazine" {
+        transform {
+            position: Vec3(0.72, 0.93, -6.88)
+            rotation: Vec3(0, 0, -11)
+        }
+
+        mesh: Box(size: Vec3(0.22, 0.52, 0.34))
+
+        material {
+            baseColor: Color("#303945")
+            roughness: 0.62
+            metallic: 0.22
+        }
+    }
+
+    entity "View Rifle Grip" {
+        transform {
+            position: Vec3(0.82, 0.94, -7.28)
+            rotation: Vec3(-14, 0, -10)
+        }
+
+        mesh: Box(size: Vec3(0.2, 0.54, 0.22))
+
+        material {
+            baseColor: Color("#171d24")
+            roughness: 0.7
+        }
+    }
+
+    entity "View Left Glove" {
+        transform {
+            position: Vec3(0.33, 0.92, -6.55)
+            rotation: Vec3(-12, -4, 5)
+        }
+
+        mesh: Capsule(radius: 0.12, height: 0.42)
+
+        material {
+            baseColor: Color("#4b5563")
+            roughness: 0.66
+        }
+    }
+
+    entity "View Rifle Ammo Counter" {
+        transform {
+            position: Vec3(0.42, 1.28, -6.85)
+            rotation: Vec3(-7, -5, 0)
+        }
+
+        mesh: Box(size: Vec3(0.2, 0.055, 0.18))
+
+        material {
+            baseColor: Color("#76ff91")
+            roughness: 0.12
+            emissive: Vec3(0.1, 0.36, 0.12)
+        }
+    }
+
+    entity "Floor Plate A" {
+        transform {
+            position: Vec3(-4.8, 0.035, -5.6)
+        }
+
+        mesh: Box(size: Vec3(3.4, 0.035, 2.2))
+
+        material {
+            baseColor: Color("#323b43")
+            roughness: 0.68
+            metallic: 0.08
+        }
+    }
+
+    entity "Floor Plate B" {
+        transform {
+            position: Vec3(4.8, 0.035, -5.4)
+        }
+
+        mesh: Box(size: Vec3(3.4, 0.035, 2.2))
+
+        material {
+            baseColor: Color("#323b43")
+            roughness: 0.68
+            metallic: 0.08
+        }
+    }
+
+    entity "Floor Plate C" {
+        transform {
+            position: Vec3(-4.8, 0.035, 5.5)
+        }
+
+        mesh: Box(size: Vec3(3.4, 0.035, 2.2))
+
+        material {
+            baseColor: Color("#323b43")
+            roughness: 0.68
+            metallic: 0.08
+        }
+    }
+
+    entity "Floor Plate D" {
+        transform {
+            position: Vec3(4.8, 0.035, 5.5)
+        }
+
+        mesh: Box(size: Vec3(3.4, 0.035, 2.2))
+
+        material {
+            baseColor: Color("#323b43")
+            roughness: 0.68
+            metallic: 0.08
+        }
+    }
+
+    entity "Left Wall Rib 1" {
+        transform {
+            position: Vec3(-9.16, 2.08, -7.6)
+        }
+
+        mesh: Box(size: Vec3(0.18, 3.55, 0.28))
+
+        material {
+            baseColor: Color("#4f5963")
+            roughness: 0.58
+            metallic: 0.18
+        }
+    }
+
+    entity "Left Wall Rib 2" {
+        transform {
+            position: Vec3(-9.16, 2.08, -2.2)
+        }
+
+        mesh: Box(size: Vec3(0.18, 3.55, 0.28))
+
+        material {
+            baseColor: Color("#4f5963")
+            roughness: 0.58
+            metallic: 0.18
+        }
+    }
+
+    entity "Left Wall Rib 3" {
+        transform {
+            position: Vec3(-9.16, 2.08, 3.2)
+        }
+
+        mesh: Box(size: Vec3(0.18, 3.55, 0.28))
+
+        material {
+            baseColor: Color("#4f5963")
+            roughness: 0.58
+            metallic: 0.18
+        }
+    }
+
+    entity "Right Wall Rib 1" {
+        transform {
+            position: Vec3(9.16, 2.08, -7.6)
+        }
+
+        mesh: Box(size: Vec3(0.18, 3.55, 0.28))
+
+        material {
+            baseColor: Color("#4f5963")
+            roughness: 0.58
+            metallic: 0.18
+        }
+    }
+
+    entity "Right Wall Rib 2" {
+        transform {
+            position: Vec3(9.16, 2.08, -2.2)
+        }
+
+        mesh: Box(size: Vec3(0.18, 3.55, 0.28))
+
+        material {
+            baseColor: Color("#4f5963")
+            roughness: 0.58
+            metallic: 0.18
+        }
+    }
+
+    entity "Right Wall Rib 3" {
+        transform {
+            position: Vec3(9.16, 2.08, 3.2)
+        }
+
+        mesh: Box(size: Vec3(0.18, 3.55, 0.28))
+
+        material {
+            baseColor: Color("#4f5963")
+            roughness: 0.58
+            metallic: 0.18
+        }
+    }
+
+    entity "Back Wall Service Door" {
+        transform {
+            position: Vec3(0.0, 1.35, 11.72)
+        }
+
+        mesh: Box(size: Vec3(2.2, 2.5, 0.08))
+
+        material {
+            baseColor: Color("#232a31")
+            roughness: 0.64
+            metallic: 0.16
+        }
+    }
+
+    entity "Back Wall Door Seal" {
+        transform {
+            position: Vec3(0.0, 1.35, 11.66)
+        }
+
+        mesh: Box(size: Vec3(2.48, 2.78, 0.045))
+
+        material {
+            baseColor: Color("#f05a28")
+            roughness: 0.34
+            emissive: Vec3(0.18, 0.04, 0.01)
+        }
+    }
+
+    entity "Overhead Cable Left" {
+        transform {
+            position: Vec3(-3.6, 3.72, 1.4)
+            rotation: Vec3(90, 0, 0)
+        }
+
+        mesh: Cylinder(radius: 0.035, height: 18.0)
+
+        material {
+            baseColor: Color("#11161c")
+            roughness: 0.5
+            metallic: 0.2
+        }
+    }
+
+    entity "Overhead Cable Right" {
+        transform {
+            position: Vec3(3.6, 3.72, 1.4)
+            rotation: Vec3(90, 0, 0)
+        }
+
+        mesh: Cylinder(radius: 0.035, height: 18.0)
+
+        material {
+            baseColor: Color("#11161c")
+            roughness: 0.5
+            metallic: 0.2
+        }
+    }
+
+    entity "Overhead Light Strip" {
+        transform {
+            position: Vec3(0.0, 3.88, 2.6)
+        }
+
+        mesh: Box(size: Vec3(6.6, 0.08, 0.22))
+
+        material {
+            baseColor: Color("#d9f7ff")
+            roughness: 0.18
+            emissive: Vec3(0.32, 0.45, 0.5)
+        }
+    }
+
+    light "Ceiling Work Light" {
+        kind: point
+        intensity: 1.35
+        range: 12.0
+        color: Vec3(0.78, 0.92, 1.0)
+        position: Vec3(0.0, 3.65, 1.8)
+    }
+
+    entity "Cover A Armor Plate" {
+        transform {
+            position: Vec3(-4.7, 1.17, -1.8)
+            rotation: Vec3(0, 12, 0)
+        }
+
+        mesh: Box(size: Vec3(2.36, 0.16, 0.96))
+
+        material {
+            baseColor: Color("#75808b")
+            roughness: 0.48
+            metallic: 0.14
+        }
+    }
+
+    entity "Cover B Armor Plate" {
+        transform {
+            position: Vec3(4.2, 1.17, 1.4)
+            rotation: Vec3(0, -16, 0)
+        }
+
+        mesh: Box(size: Vec3(2.16, 0.16, 0.96))
+
+        material {
+            baseColor: Color("#75808b")
+            roughness: 0.48
+            metallic: 0.14
+        }
+    }
+
+    entity "Drone A Ring" {
+        transform {
+            position: Vec3(-3.4, 1.65, 6.6)
+            rotation: Vec3(90, 0, 0)
+        }
+
+        mesh: Cylinder(radius: 0.58, height: 0.07)
+
+        material {
+            baseColor: Color("#242c35")
+            roughness: 0.46
+            metallic: 0.32
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.9
+            speed: 1.35
+            offset: 0.0
+        }
+    }
+
+    entity "Drone A Lens" {
+        transform {
+            position: Vec3(-3.4, 1.65, 6.08)
+        }
+
+        mesh: Sphere(radius: 0.16)
+
+        material {
+            baseColor: Color("#ffb24a")
+            roughness: 0.12
+            emissive: Vec3(0.45, 0.16, 0.01)
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.9
+            speed: 1.35
+            offset: 0.0
+        }
+    }
+
+    entity "Drone A Antenna" {
+        transform {
+            position: Vec3(-3.4, 2.18, 6.6)
+        }
+
+        mesh: Cylinder(radius: 0.025, height: 0.42)
+
+        material {
+            baseColor: Color("#11161b")
+            roughness: 0.42
+            metallic: 0.28
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.9
+            speed: 1.35
+            offset: 0.0
+        }
+    }
+
+    entity "Drone B Ring" {
+        transform {
+            position: Vec3(2.9, 2.25, 8.6)
+            rotation: Vec3(90, 0, 0)
+        }
+
+        mesh: Cylinder(radius: 0.54, height: 0.07)
+
+        material {
+            baseColor: Color("#242c35")
+            roughness: 0.46
+            metallic: 0.32
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.75
+            speed: 1.6
+            offset: 1.2
+        }
+    }
+
+    entity "Drone B Lens" {
+        transform {
+            position: Vec3(2.9, 2.25, 8.1)
+        }
+
+        mesh: Sphere(radius: 0.15)
+
+        material {
+            baseColor: Color("#fff07a")
+            roughness: 0.1
+            emissive: Vec3(0.5, 0.32, 0.02)
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.75
+            speed: 1.6
+            offset: 1.2
+        }
+    }
+
+    entity "Drone C Ring" {
+        transform {
+            position: Vec3(5.8, 1.4, 4.8)
+            rotation: Vec3(90, 0, 0)
+        }
+
+        mesh: Cylinder(radius: 0.52, height: 0.065)
+
+        material {
+            baseColor: Color("#242c35")
+            roughness: 0.46
+            metallic: 0.32
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.65
+            speed: 1.9
+            offset: 2.4
+        }
+    }
+
+    entity "Drone C Lens" {
+        transform {
+            position: Vec3(5.8, 1.4, 4.32)
+        }
+
+        mesh: Sphere(radius: 0.145)
+
+        material {
+            baseColor: Color("#a3f4ff")
+            roughness: 0.1
+            emissive: Vec3(0.0, 0.34, 0.48)
+        }
+
+        script TargetDrift {
+            source: "scripts/target_drift.varg"
+            amplitude: 0.65
+            speed: 1.9
+            offset: 2.4
+        }
+    }
+
+    entity "Distance Marker 05" {
+        transform {
+            position: Vec3(-7.7, 0.065, -3.0)
+        }
+
+        mesh: Box(size: Vec3(0.9, 0.04, 0.22))
+
+        material {
+            baseColor: Color("#d9f7ff")
+            roughness: 0.28
+            emissive: Vec3(0.08, 0.18, 0.22)
+        }
+    }
+
+    entity "Distance Marker 10" {
+        transform {
+            position: Vec3(-7.7, 0.065, 2.5)
+        }
+
+        mesh: Box(size: Vec3(1.25, 0.04, 0.22))
+
+        material {
+            baseColor: Color("#d9f7ff")
+            roughness: 0.28
+            emissive: Vec3(0.08, 0.18, 0.22)
+        }
+    }
+
+    entity "Distance Marker 15" {
+        transform {
+            position: Vec3(-7.7, 0.065, 8.0)
+        }
+
+        mesh: Box(size: Vec3(1.55, 0.04, 0.22))
+
+        material {
+            baseColor: Color("#ffcf57")
+            roughness: 0.26
+            emissive: Vec3(0.24, 0.14, 0.02)
+        }
+    }
+
+    entity "Left Status Lamp Red" {
+        transform {
+            position: Vec3(-9.05, 3.05, -4.85)
+            rotation: Vec3(0, 0, 90)
+        }
+
+        mesh: Cylinder(radius: 0.18, height: 0.08)
+
+        material {
+            baseColor: Color("#ff4b2f")
+            roughness: 0.14
+            emissive: Vec3(0.44, 0.05, 0.01)
+        }
+    }
+
+    entity "Left Status Lamp Amber" {
+        transform {
+            position: Vec3(-9.05, 2.55, -4.85)
+            rotation: Vec3(0, 0, 90)
+        }
+
+        mesh: Cylinder(radius: 0.18, height: 0.08)
+
+        material {
+            baseColor: Color("#ffce4a")
+            roughness: 0.14
+            emissive: Vec3(0.38, 0.22, 0.01)
+        }
+    }
+
+    entity "Left Status Lamp Green" {
+        transform {
+            position: Vec3(-9.05, 2.05, -4.85)
+            rotation: Vec3(0, 0, 90)
+        }
+
+        mesh: Cylinder(radius: 0.18, height: 0.08)
+
+        material {
+            baseColor: Color("#76ff91")
+            roughness: 0.14
+            emissive: Vec3(0.08, 0.34, 0.1)
+        }
+    }
+
+    entity "Right Status Lamp Red" {
+        transform {
+            position: Vec3(9.05, 3.05, -4.85)
+            rotation: Vec3(0, 0, 90)
+        }
+
+        mesh: Cylinder(radius: 0.18, height: 0.08)
+
+        material {
+            baseColor: Color("#ff4b2f")
+            roughness: 0.14
+            emissive: Vec3(0.44, 0.05, 0.01)
+        }
+    }
+
+    entity "Right Status Lamp Amber" {
+        transform {
+            position: Vec3(9.05, 2.55, -4.85)
+            rotation: Vec3(0, 0, 90)
+        }
+
+        mesh: Cylinder(radius: 0.18, height: 0.08)
+
+        material {
+            baseColor: Color("#ffce4a")
+            roughness: 0.14
+            emissive: Vec3(0.38, 0.22, 0.01)
+        }
+    }
+
+    entity "Right Status Lamp Green" {
+        transform {
+            position: Vec3(9.05, 2.05, -4.85)
+            rotation: Vec3(0, 0, 90)
+        }
+
+        mesh: Cylinder(radius: 0.18, height: 0.08)
+
+        material {
+            baseColor: Color("#76ff91")
+            roughness: 0.14
+            emissive: Vec3(0.08, 0.34, 0.1)
+        }
+    }
+
+    entity "Floor Bolt 01" {
+        transform {
+            position: Vec3(-7.2, 0.12, -8.2)
+        }
+
+        mesh: Cylinder(radius: 0.08, height: 0.035)
+
+        material {
+            baseColor: Color("#10151a")
+            roughness: 0.38
+            metallic: 0.55
+        }
+    }
+
+    entity "Floor Bolt 02" {
+        transform {
+            position: Vec3(7.2, 0.12, -8.2)
+        }
+
+        mesh: Cylinder(radius: 0.08, height: 0.035)
+
+        material {
+            baseColor: Color("#10151a")
+            roughness: 0.38
+            metallic: 0.55
+        }
+    }
+
+    entity "Floor Bolt 03" {
+        transform {
+            position: Vec3(-7.2, 0.12, 8.8)
+        }
+
+        mesh: Cylinder(radius: 0.08, height: 0.035)
+
+        material {
+            baseColor: Color("#10151a")
+            roughness: 0.38
+            metallic: 0.55
+        }
+    }
+
+    entity "Floor Bolt 04" {
+        transform {
+            position: Vec3(7.2, 0.12, 8.8)
+        }
+
+        mesh: Cylinder(radius: 0.08, height: 0.035)
+
+        material {
+            baseColor: Color("#10151a")
+            roughness: 0.38
+            metallic: 0.55
+        }
+    }
+}

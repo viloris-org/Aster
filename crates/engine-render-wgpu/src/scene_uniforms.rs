@@ -675,7 +675,11 @@ pub(crate) fn primary_directional_light(world: &RenderWorld) -> Option<&RenderLi
     world
         .lights
         .iter()
-        .filter(|light| light.kind == RenderLightKind::Directional && light.intensity > 0.0)
+        .filter(|light| {
+            light.kind == RenderLightKind::Directional
+                && light.intensity > 0.0
+                && light.settings.casts_shadow
+        })
         .max_by(|a, b| a.intensity.total_cmp(&b.intensity))
 }
 
@@ -747,6 +751,7 @@ pub(crate) fn forward_light_uniform(light: &RenderLight) -> ForwardLightUniform 
     let range = light.range.max(0.001);
     let outer_half_angle = (light.spot_angle.clamp(1.0, 179.0) * 0.5).to_radians();
     let inner_half_angle = outer_half_angle * 0.75;
+    let shaded_color = light_color_with_temperature(light);
 
     ForwardLightUniform {
         position_type: [
@@ -757,11 +762,57 @@ pub(crate) fn forward_light_uniform(light: &RenderLight) -> ForwardLightUniform 
         ],
         direction_range: [direction.x, direction.y, direction.z, range],
         color_intensity: [
-            light.color.x.clamp(0.0, 1.0),
-            light.color.y.clamp(0.0, 1.0),
-            light.color.z.clamp(0.0, 1.0),
+            shaded_color.x.clamp(0.0, 1.0),
+            shaded_color.y.clamp(0.0, 1.0),
+            shaded_color.z.clamp(0.0, 1.0),
             light.intensity.max(0.0),
         ],
-        spot_angles: [inner_half_angle.cos(), outer_half_angle.cos(), 0.0, 0.0],
+        spot_angles: [
+            inner_half_angle.cos(),
+            outer_half_angle.cos(),
+            if light.settings.casts_shadow {
+                1.0
+            } else {
+                0.0
+            },
+            light.settings.source_radius.max(0.0),
+        ],
     }
+}
+
+pub(crate) fn light_color_with_temperature(light: &RenderLight) -> engine_core::math::Vec3 {
+    let kelvin = light.settings.temperature_kelvin;
+    if kelvin <= 0.0 {
+        return light.color;
+    }
+    let tint = blackbody_temperature_to_rgb(kelvin);
+    engine_core::math::Vec3::new(
+        light.color.x * tint.x,
+        light.color.y * tint.y,
+        light.color.z * tint.z,
+    )
+}
+
+pub(crate) fn blackbody_temperature_to_rgb(kelvin: f32) -> engine_core::math::Vec3 {
+    let temp = (kelvin.clamp(1_000.0, 40_000.0) / 100.0).max(1.0);
+    let red = if temp <= 66.0 {
+        1.0
+    } else {
+        (329.69873 * (temp - 60.0).powf(-0.133_204_76) / 255.0).clamp(0.0, 1.0)
+    };
+    let green = if temp <= 66.0 {
+        (99.470_8 * temp.ln() - 161.119_57) / 255.0
+    } else {
+        288.12216 * (temp - 60.0).powf(-0.075_514_846) / 255.0
+    }
+    .clamp(0.0, 1.0);
+    let blue = if temp >= 66.0 {
+        1.0
+    } else if temp <= 19.0 {
+        0.0
+    } else {
+        (138.517_73 * (temp - 10.0).ln() - 305.044_8) / 255.0
+    }
+    .clamp(0.0, 1.0);
+    engine_core::math::Vec3::new(red, green, blue)
 }

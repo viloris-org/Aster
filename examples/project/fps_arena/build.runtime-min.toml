@@ -1,0 +1,24 @@
+target = "native"
+release = false
+features = ["runtime-game", "physics", "audio"]
+
+[render]
+quality = "balanced"
+upscaler = "native"
+dynamic_resolution = false
+target_fps = 60
+min_render_scale_percent = 100
+max_render_scale_percent = 100
+sharpness_percent = 40
+battery_policy = "balanced"
+frame_generation = "disabled"
+ui_composition = "after-frame-generation"
+anti_aliasing = "taa"
+
+[format]
+version = 1
+
+[evolution]
+policy = "minor versions may add optional fields; major schema bumps require migration"
+forward_compatible_read = true
+migration_framework = "versioned Rust migrators keyed by explicit version"

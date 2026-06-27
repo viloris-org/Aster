@@ -10,6 +10,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use engine_assets::{
@@ -498,6 +499,7 @@ fn load_scene_from_path(path: &Path) -> EngineResult<Scene> {
 impl ProjectContext {
     /// Opens a project from `project_root` by loading its manifest, default scene, and asset root.
     pub fn open(project_root: impl Into<PathBuf>) -> EngineResult<Self> {
+        let open_started_at = Instant::now();
         let project_root = project_root.into();
         let manifest_path = project_manifest_path(&project_root);
         let manifest_text =
@@ -514,14 +516,28 @@ impl ProjectContext {
                 diagnostic.path, diagnostic.message
             )));
         }
+        let manifest_loaded_at = Instant::now();
         let scene_path = project_root.join(&manifest.default_scene);
         let scene = load_scene_from_path(&scene_path)?;
+        let scene_loaded_at = Instant::now();
         let mut database = AssetDatabase::new(
             project_root.join(&manifest.asset_root),
             project_root.join("builtin"),
         );
         let scan = scan_project_assets(project_root.join(&manifest.asset_root), &mut database)?;
+        let assets_scanned_at = Instant::now();
         database.scan(&project_root.join(&manifest.asset_root))?;
+        tracing::info!(
+            target: "editor",
+            project = %project_root.display(),
+            manifest_ms = manifest_loaded_at.duration_since(open_started_at).as_millis() as u64,
+            scene_ms = scene_loaded_at.duration_since(manifest_loaded_at).as_millis() as u64,
+            asset_scan_ms = assets_scanned_at.duration_since(scene_loaded_at).as_millis() as u64,
+            database_scan_ms = assets_scanned_at.elapsed().as_millis() as u64,
+            total_ms = open_started_at.elapsed().as_millis() as u64,
+            assets = scan.metas.len(),
+            "project open timing"
+        );
         Ok(Self {
             root: project_root,
             manifest,

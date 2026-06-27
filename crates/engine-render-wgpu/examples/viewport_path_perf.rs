@@ -117,6 +117,7 @@ fn benchmark_world() -> RenderWorld {
             range: 32.0,
             spot_angle: 45.0,
             transform: Transform::IDENTITY,
+            settings: Default::default(),
         }],
         ..RenderWorld::default()
     }

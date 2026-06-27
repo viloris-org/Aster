@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   VargLogo,
   IconAlertCircle,
@@ -47,14 +47,15 @@ import {
 } from '../api';
 import type { QuestEditorArtifact } from '../App';
 import { OrientationGizmo, ViewportGrid } from './ViewportOverlays';
-import ScriptEditor from './ScriptEditor';
 import {
   createOrthographicMatrix,
   createPerspectiveMatrix,
   createViewMatrix,
   projectToScreen,
 } from './gizmoMath';
-import AiPanel from './AiPanel';
+
+const AiPanel = lazy(() => import('./AiPanel'));
+const ScriptEditor = lazy(() => import('./ScriptEditor'));
 
 interface CalmEditorPrototypeProps {
   onCloseProject: () => void;
@@ -202,6 +203,14 @@ function useMeasuredFps() {
   }, []);
 
   return fps;
+}
+
+function PanelLoadingFallback({ label }: { label: string }) {
+  return (
+    <div className="grid h-full place-items-center bg-[var(--bg-base)] text-[12px] text-[var(--text-muted)]">
+      {label}
+    </div>
+  );
 }
 
 interface BuildTargetOption {
@@ -2188,32 +2197,34 @@ export default function CalmEditorPrototype({
             ) : activeNav === 'ai' ? (
               <div className="h-full min-h-0">
                 <AiPanelBoundary>
-                  <AiPanel
-                    projectName={shellState?.project_name}
-                    selectedEntity={selectedEntityId}
-                    selectedEntityName={inspectorEntity.name}
-                    sceneObjectCount={entities.length}
-                    sceneObjects={entities.map(entity => ({ id: entity.id, name: entity.name }))}
-                    onQuickAction={(action) => {
-                      if (action === 'play') {
-                        openGameView();
-                      } else if (action === 'save') {
-                        rpc('shell/save').then(() => refreshSceneTree());
-                      } else if (action === 'undo') {
-                        rpc('shell/undo').then(() => refreshSceneTree());
-                      }
-                    }}
-                    onSceneChanged={() => {
-                      refreshSceneTree();
-                      refreshConsole();
-                    }}
-                    chatOnly
-                    contextualRequest={contextualRequest}
-                    onContextualRequestConsumed={id => setContextualRequest(current => current?.id === id ? null : current)}
-                    onOpenSettings={onOpenSettings}
-                    onOpenQuest={onOpenQuest}
-                    compact
-                  />
+                  <Suspense fallback={<PanelLoadingFallback label="Loading AI panel..." />}>
+                    <AiPanel
+                      projectName={shellState?.project_name}
+                      selectedEntity={selectedEntityId}
+                      selectedEntityName={inspectorEntity.name}
+                      sceneObjectCount={entities.length}
+                      sceneObjects={entities.map(entity => ({ id: entity.id, name: entity.name }))}
+                      onQuickAction={(action) => {
+                        if (action === 'play') {
+                          openGameView();
+                        } else if (action === 'save') {
+                          rpc('shell/save').then(() => refreshSceneTree());
+                        } else if (action === 'undo') {
+                          rpc('shell/undo').then(() => refreshSceneTree());
+                        }
+                      }}
+                      onSceneChanged={() => {
+                        refreshSceneTree();
+                        refreshConsole();
+                      }}
+                      chatOnly
+                      contextualRequest={contextualRequest}
+                      onContextualRequestConsumed={id => setContextualRequest(current => current?.id === id ? null : current)}
+                      onOpenSettings={onOpenSettings}
+                      onOpenQuest={onOpenQuest}
+                      compact
+                    />
+                  </Suspense>
                 </AiPanelBoundary>
               </div>
             ) : (
@@ -2384,13 +2395,15 @@ export default function CalmEditorPrototype({
             {viewMode === 'scripts' ? (
               selectedEditorPath ? (
                 <div className="absolute inset-0 flex min-h-0 flex-col bg-[var(--bg-base)]">
-                  <ScriptEditor
-                    filePath={selectedEditorPath}
-                    initialContent={scriptContent}
-                    onContentChange={setScriptContent}
-                    onSave={saveScript}
-                    onClose={() => setViewMode(sceneViewMode)}
-                  />
+                  <Suspense fallback={<PanelLoadingFallback label="Loading script editor..." />}>
+                    <ScriptEditor
+                      filePath={selectedEditorPath}
+                      initialContent={scriptContent}
+                      onContentChange={setScriptContent}
+                      onSave={saveScript}
+                      onClose={() => setViewMode(sceneViewMode)}
+                    />
+                  </Suspense>
                   {scriptDiagnostics.length > 0 && (
                     <div className="max-h-32 shrink-0 overflow-auto border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2">
                       {scriptDiagnostics.map((diagnostic, index) => (

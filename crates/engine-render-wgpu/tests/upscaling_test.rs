@@ -175,6 +175,7 @@ fn light_budget_pressure_is_reported_in_metrics() {
             intensity: 1.0,
             range: 6.0,
             spot_angle: 45.0,
+            settings: Default::default(),
         })
         .collect();
     let world = RenderWorld {

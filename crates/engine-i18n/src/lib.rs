@@ -167,8 +167,8 @@ mod tests {
             .map(|(key, _)| key.to_owned())
             .collect::<BTreeSet<_>>();
 
-        for locale in [Locale::En, Locale::Zh, Locale::Es] {
-            let keys = Translations::load(locale)
+        for locale in Locale::VARIANTS {
+            let keys = Translations::load(*locale)
                 .entries()
                 .into_iter()
                 .map(|(key, _)| key.to_owned())

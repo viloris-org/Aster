@@ -29,6 +29,33 @@ const I18nContext = createContext<I18nContextValue>({
   loading: true,
 });
 
+const translationCache = new Map<string, Record<string, string>>();
+const translationRequests = new Map<string, Promise<Record<string, string>>>();
+
+async function loadTranslationMap(locale: string): Promise<Record<string, string>> {
+  const cached = translationCache.get(locale);
+  if (cached) return cached;
+
+  const pending = translationRequests.get(locale);
+  if (pending) return pending;
+
+  const request = rpc<TranslationsPayload>('hub/get_translations', { locale })
+    .then((result) => {
+      const entryMap: Record<string, string> = {};
+      for (const { key, value } of result.entries) {
+        entryMap[key] = value;
+      }
+      translationCache.set(result.locale, entryMap);
+      return entryMap;
+    })
+    .finally(() => {
+      translationRequests.delete(locale);
+    });
+
+  translationRequests.set(locale, request);
+  return request;
+}
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function useTranslation(): I18nContextValue {
@@ -46,36 +73,26 @@ export function I18nProvider({
 }) {
   const [map, setMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const localeRef = useRef(locale);
+  const localeRef = useRef<string | null>(null);
 
   const loadTranslations = useCallback(async (loc: string) => {
+    localeRef.current = loc;
     setLoading(true);
     try {
-      const result = await rpc<TranslationsPayload>('hub/get_translations', { locale: loc });
-      const entryMap: Record<string, string> = {};
-      for (const { key, value } of result.entries) {
-        entryMap[key] = value;
-      }
+      const entryMap = await loadTranslationMap(loc);
+      if (localeRef.current !== loc) return;
       setMap(entryMap);
     } catch {
       // Fallback: use key as value when backend isn't available
+      if (localeRef.current !== loc) return;
       setMap({});
     }
     setLoading(false);
   }, []);
 
-  // Load on mount
   useEffect(() => {
     loadTranslations(locale);
   }, [loadTranslations, locale]);
-
-  // Reload when locale changes
-  useEffect(() => {
-    if (locale !== localeRef.current) {
-      localeRef.current = locale;
-      loadTranslations(locale);
-    }
-  }, [locale, loadTranslations]);
 
   const t = useCallback(
     (key: string): string => {

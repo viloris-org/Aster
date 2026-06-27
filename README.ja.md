@@ -5,7 +5,7 @@
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/Rust-1.96+-orange.svg)
 
-[English](README.md) | [简体中文](README.zh-CN.md) | 日本語
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-Hant.md) | 日本語 | [한국어](README.ko.md) | [Español](README.es.md)
 
 Varg は AI ネイティブなゲームエンジンです。自然言語で作りたいゲームを説明すれば、自律エージェント群がシーン、ロジック、UI まですべて構築します。本格的なビジュアルエディタも搭載しており、細部の調整や仕上げも思いのままです。
 
@@ -92,6 +92,30 @@ Varg/
 cargo build -p runtime-min --no-default-features --features editor
 cargo build -p runtime-min --no-default-features --features runtime-min
 ```
+
+## ゲームプロジェクトのパッケージング
+
+```sh
+# サンプルプロジェクトのネイティブ実行フォルダ
+cargo xtask package --project examples/project --target native --format folder --debug
+
+# リリースフォルダ
+cargo xtask package --project examples/project --target native --format folder --release
+```
+
+パッケージは `exports/<project>/<target>/<channel>/` に出力され、ランタイムバイナリ、ランチャースクリプト、プロジェクトマニフェスト、既定シーン、コピー済みアセット、`asset-manifest.json`、`package-manifest.json` を含みます。
+
+現在の対応状況：
+
+| Target | ホスト対応 | Formats |
+|---|---|---|
+| `linux-x64` | Linux | `folder` |
+| `windows-x64` | Windows | `folder` |
+| `macos-universal` | macOS | `folder` |
+| `android-arm64` | Linux、Windows | `apk`、`aab` は予定；Android SDK/NDK と Rust target を検証 |
+| `ios-universal` | macOS | `ipa` は予定；Xcode と Rust iOS targets を検証 |
+
+Android と iOS target は共有パッケージングパイプラインとツールチェーン検証に接続済みですが、署名済みモバイル成果物を生成するには、モバイルランタイムアダプターとプラットフォーム用プロジェクトテンプレートが必要です。
 
 ## エディタのビルド
 

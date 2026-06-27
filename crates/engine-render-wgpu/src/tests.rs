@@ -364,6 +364,7 @@ fn packs_scene_lights_into_forward_uniform() {
         intensity: 3.0,
         range: 12.0,
         spot_angle: 45.0,
+        settings: Default::default(),
     };
     let world = RenderWorld {
         camera: None,
@@ -386,6 +387,32 @@ fn packs_scene_lights_into_forward_uniform() {
     assert_eq!(uniform.lights[0].position_type, [1.0, 2.0, 3.0, 1.0]);
     assert_eq!(uniform.lights[0].color_intensity, [0.5, 0.75, 1.0, 3.0]);
     assert_eq!(uniform.lights[0].direction_range[3], 12.0);
+}
+
+#[test]
+fn packs_light_quality_controls_into_forward_uniform() {
+    let light = RenderLight {
+        object: engine_core::EntityId::from_u128(8),
+        transform: engine_core::math::Transform::default(),
+        kind: RenderLightKind::Directional,
+        color: engine_core::math::Vec3::ONE,
+        intensity: 2.0,
+        range: 100.0,
+        spot_angle: 45.0,
+        settings: engine_render::RenderLightSettings {
+            casts_shadow: false,
+            source_radius: 1.75,
+            temperature_kelvin: 2_700.0,
+            contact_shadow_strength: 0.5,
+        },
+    };
+
+    let packed = forward_light_uniform(&light);
+
+    assert_eq!(packed.spot_angles[2], 0.0);
+    assert_eq!(packed.spot_angles[3], 1.75);
+    assert!(packed.color_intensity[0] >= packed.color_intensity[2]);
+    assert_eq!(packed.color_intensity[3], 2.0);
 }
 
 #[test]
@@ -691,7 +718,7 @@ fn selects_directional_budget_then_highest_scored_local_lights() {
 
     let uniform = lighting_uniform_from_world(&world);
     assert_eq!(uniform.lights[0].spot_angles[2], 1.0);
-    assert_eq!(uniform.lights[1].spot_angles[2], 0.0);
+    assert_eq!(uniform.lights[1].spot_angles[2], 1.0);
     assert_eq!(
         primary_directional_light(&world).unwrap().object,
         engine_core::EntityId::from_u128(3)
@@ -717,6 +744,7 @@ fn test_light(
         intensity,
         range,
         spot_angle: 45.0,
+        settings: Default::default(),
     }
 }
 
@@ -786,6 +814,7 @@ fn probe_volume_generates_enabled_irradiance_grid() {
             intensity: 4.0,
             range: 10.0,
             spot_angle: 45.0,
+            settings: Default::default(),
         }],
         ..RenderWorld::default()
     };
@@ -853,6 +882,7 @@ fn probe_irradiance_is_reduced_by_occluding_geometry() {
         intensity: 8.0,
         range: 12.0,
         spot_angle: 45.0,
+        settings: Default::default(),
     };
     let open_world = RenderWorld {
         lights: vec![light.clone()],

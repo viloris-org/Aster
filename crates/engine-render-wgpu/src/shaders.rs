@@ -406,8 +406,10 @@ fn fs_main(input: VsOut) -> FsOut {
     var shadow_factor = 1.0;
     if (input.receive_shadows > 0.5) {
         let shadow_light = lighting.lights[0];
-        let shadow_light_dir = normalize(-shadow_light.direction_range.xyz);
-        shadow_factor = sample_csm_shadow(input.world_position, view_depth, n, shadow_light_dir);
+        if (shadow_light.position_type.w < 0.5 && shadow_light.spot_angles.z > 0.5) {
+            let shadow_light_dir = normalize(-shadow_light.direction_range.xyz);
+            shadow_factor = sample_csm_shadow(input.world_position, view_depth, n, shadow_light_dir);
+        }
     }
 
     for (var i: u32 = 0u; i < lighting.params.x; i = i + 1u) {
@@ -426,8 +428,10 @@ fn fs_main(input: VsOut) -> FsOut {
             let distance = length(to_light);
             light_dir = to_light / max(distance, EPSILON);
             let range = max(light.direction_range.w, EPSILON);
-            let falloff = max(1.0 - distance / range, 0.0);
-            attenuation = falloff * falloff;
+            let source_radius = max(light.spot_angles.w, 0.0);
+            let effective_distance = max(distance - source_radius, 0.0);
+            let falloff = max(1.0 - effective_distance / range, 0.0);
+            attenuation = falloff * falloff / max(1.0 + source_radius * source_radius * 0.08, 1.0);
 
             if (light_type > 1.5) {
                 let spot_alignment = dot(normalize(-light_dir), normalize(light.direction_range.xyz));

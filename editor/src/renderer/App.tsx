@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import HubPage from './pages/HubPage';
-import CalmEditorPrototype from './pages/CalmEditorPrototype';
-import QuestPage from './pages/QuestPage';
+import React, { Suspense, lazy, useEffect, useState, useCallback } from 'react';
 import { closeNativeSceneView, rpc } from './api';
 import { I18nProvider, useTranslation } from './i18n';
 import { buttonClass } from './uiClasses';
+
+const HubPage = lazy(() => import('./pages/HubPage'));
+const CalmEditorPrototype = lazy(() => import('./pages/CalmEditorPrototype'));
+const QuestPage = lazy(() => import('./pages/QuestPage'));
 
 interface DesktopIntegration {
   desktop_environment: string;
@@ -215,9 +216,10 @@ export default function App() {
 
   const locale = hubState?.locale ?? 'en';
 
+  let content: React.ReactNode;
+
   if (screen === 'loading') {
-    return (
-      <I18nProvider locale={locale}>
+    content = (
         <AppFrame>
           {startupError ? (
             <StartupErrorScreen message={startupError} onRetry={initialize} />
@@ -225,13 +227,9 @@ export default function App() {
             <LoadingScreen />
           )}
         </AppFrame>
-      </I18nProvider>
     );
-  }
-
-  if (screen === 'hub' && hubState) {
-    return (
-      <I18nProvider locale={locale}>
+  } else if (screen === 'hub' && hubState) {
+    content = (
         <AppFrame>
           <HubPage
             state={hubState}
@@ -243,25 +241,18 @@ export default function App() {
             onOpenQuests={handleOpenQuest}
           />
         </AppFrame>
-      </I18nProvider>
     );
-  }
-
-  if (screen === 'quest' && hubState) {
-    return (
-      <I18nProvider locale={locale}>
+  } else if (screen === 'quest' && hubState) {
+    content = (
         <QuestPage
           currentProjectPath={hubState.open_project}
           initialQuestId={initialQuestId}
           onOpenEditor={handleOpenEditor}
           onCloseProject={handleCloseProject}
         />
-      </I18nProvider>
     );
-  }
-
-  return (
-    <I18nProvider locale={locale}>
+  } else {
+    content = (
       <CalmEditorPrototype
         onCloseProject={handleCloseProject}
         onOpenSettings={handleOpenSettings}
@@ -269,6 +260,14 @@ export default function App() {
         questArtifact={questArtifact}
         onDismissQuestArtifact={() => setQuestArtifact(null)}
       />
+    );
+  }
+
+  return (
+    <I18nProvider locale={locale}>
+      <Suspense fallback={<AppFrame><LoadingScreen /></AppFrame>}>
+        {content}
+      </Suspense>
     </I18nProvider>
   );
 }

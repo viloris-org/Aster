@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 
 use engine_editor::FileEditorStore;
 use tauri::{Manager, WebviewWindowBuilder, image::Image, utils::config::Color};
@@ -124,6 +124,7 @@ fn apply_pre_gtk_desktop_environment() {
 fn apply_pre_gtk_desktop_environment() {}
 
 pub fn run() {
+    let app_started_at = Instant::now();
     let log_dir = dirs_data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("varg-editor")
@@ -152,6 +153,11 @@ pub fn run() {
     tracing::info!(target: "editor", "logging initialized -> {:?}", log_dir);
 
     apply_pre_gtk_desktop_environment();
+    tracing::info!(
+        target: "editor",
+        elapsed_ms = app_started_at.elapsed().as_millis() as u64,
+        "startup timing: environment prepared"
+    );
 
     let config_dir = dirs_config_dir().unwrap_or_else(|| PathBuf::from("."));
     let store_path = config_dir.join("varg-editor-state.toml");
@@ -160,6 +166,7 @@ pub fn run() {
     let quest_root = dirs_data_dir()
         .unwrap_or_else(|| config_dir.clone())
         .join("quests");
+    let host_started_at = Instant::now();
     let host = match EditorHost::new_with_quest_root(store, quest_root) {
         Ok(h) => h,
         Err(e) => {
@@ -167,6 +174,12 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+    tracing::info!(
+        target: "editor",
+        elapsed_ms = app_started_at.elapsed().as_millis() as u64,
+        host_ms = host_started_at.elapsed().as_millis() as u64,
+        "startup timing: editor host initialized"
+    );
 
     tauri::Builder::default()
         .manage(EditorHostState::new(host))
@@ -212,9 +225,22 @@ pub fn run() {
             crate::commands::dialogs::import_asset_dialog,
             crate::commands::dialogs::save_scene_as_dialog
         ])
-        .setup(|app| {
+        .setup(move |app| {
+            let setup_started_at = Instant::now();
             create_main_window(app)?;
+            tracing::info!(
+                target: "editor",
+                elapsed_ms = app_started_at.elapsed().as_millis() as u64,
+                setup_ms = setup_started_at.elapsed().as_millis() as u64,
+                "startup timing: main window created"
+            );
             apply_desktop_window_adaptations(app)?;
+            tracing::info!(
+                target: "editor",
+                elapsed_ms = app_started_at.elapsed().as_millis() as u64,
+                setup_ms = setup_started_at.elapsed().as_millis() as u64,
+                "startup timing: desktop adaptations applied"
+            );
             if editor_compositor_requested() {
                 let support = main_window_editor_compositor_support(app.handle());
                 if !support.available {

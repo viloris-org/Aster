@@ -5,7 +5,7 @@
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](LICENSE)
 ![Rust](https://img.shields.io/badge/Rust-1.96+-orange.svg)
 
-[English](README.md) | 简体中文 | [日本語](README.ja.md)
+[English](README.md) | 简体中文 | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Español](README.es.md)
 
 Varg 是一个 AI 原生的游戏引擎。用自然语言描述你想做的游戏，多个自治 Agent 会帮你构建——场景、逻辑、UI，全部搞定。完整的可视化编辑器也在那儿，随时供你微调、打磨、完全掌控。
 
@@ -92,6 +92,30 @@ Profile 在编译时选择链接哪些子系统：
 cargo build -p runtime-min --no-default-features --features editor
 cargo build -p runtime-min --no-default-features --features runtime-min
 ```
+
+## 打包游戏项目
+
+```sh
+# 示例项目的原生可运行目录
+cargo xtask package --project examples/project --target native --format folder --debug
+
+# Release 目录
+cargo xtask package --project examples/project --target native --format folder --release
+```
+
+包会写入 `exports/<project>/<target>/<channel>/`，包含运行时二进制、启动脚本、项目清单、默认场景、复制后的资源、`asset-manifest.json` 和 `package-manifest.json`。
+
+当前支持：
+
+| Target | Host 支持 | Formats |
+|---|---|---|
+| `linux-x64` | Linux | `folder` |
+| `windows-x64` | Windows | `folder` |
+| `macos-universal` | macOS | `folder` |
+| `android-arm64` | Linux、Windows | 计划支持 `apk`、`aab`；会校验 Android SDK/NDK 与 Rust target |
+| `ios-universal` | macOS | 计划支持 `ipa`；会校验 Xcode 与 Rust iOS targets |
+
+Android 与 iOS target 已接入共享打包管线和工具链校验，但生成签名移动端产物前仍需要移动运行时适配器和平台项目模板。
 
 ## 构建编辑器
 

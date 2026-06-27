@@ -1,0 +1,265 @@
+script FpsPlayer {
+    @export var moveSpeed: Float = 4.8
+    @export var sprintMultiplier: Float = 1.55
+    @export var arenaLimitX: Float = 8.5
+    @export var arenaLimitZ: Float = 10.5
+    @export var fireRate: Float = 0.16
+    @export var reloadTime: Float = 1.15
+    @export var magazineSize: Int = 24
+    @export var hitRadius: Float = 2.35
+    @export var spawnAhead: Float = 8.5
+    @export var giIntensity: Float = 1.2
+    @export var roundTime: Float = 60.0
+    @export var clearGoal: Int = 18
+    @export var maxIntegrity: Int = 5
+
+    var yaw: Float = 0.0
+    var ammo: Int = 24
+    var reserve: Int = 96
+    var score: Int = 0
+    var streak: Int = 0
+    var shots: Int = 0
+    var hits: Int = 0
+    var canFire: Bool = true
+    var reloading: Bool = false
+    var reloadTimer: Float = 0.0
+    var targetTimer: Float = 0.0
+    var targetIndex: Int = 0
+    var roundTimer: Float = 60.0
+    var integrity: Int = 5
+    var wave: Int = 1
+    var cleared: Int = 0
+    var activeTargets: Int = 0
+    var gameOver: Bool = false
+    var pressureTimer: Float = 0.0
+    var musicStarted: Bool = false
+    var renderReady: Bool = false
+    var status: String = "Clear the drones"
+
+    func start() {
+        yaw = 0.0
+        ammo = magazineSize
+        reserve = 96
+        score = 0
+        streak = 0
+        shots = 0
+        hits = 0
+        canFire = true
+        reloading = false
+        reloadTimer = 0.0
+        targetTimer = 0.0
+        targetIndex = 0
+        roundTimer = roundTime
+        integrity = maxIntegrity
+        wave = 1
+        cleared = 0
+        activeTargets = 0
+        gameOver = false
+        pressureTimer = 4.5
+        position = Vec3(0.0, 0.85, -7.5)
+        status = "Clear " + clearGoal + " drones before lockdown"
+        log("FPS Arena: WASD moves, mouse aims, Fire shoots, Interact reloads.")
+    }
+
+    func update(_ dt: Float) {
+        if gameOver {
+            drawHud()
+            return
+        }
+
+        yaw += Input.mouseDeltaX() * 0.08
+        yaw += Input.value("LookX") * 86.0 * dt
+
+        if !renderReady {
+            render.gi.useScreenSpace()
+            render.gi.useProbeVolume(Vec3(0.0, 2.5, 0.0), Vec3(18.0, 8.0, 22.0), Vec3(4.0, 3.0, 4.0), giIntensity)
+            render.gi.setIntensity(giIntensity)
+            renderReady = true
+        }
+
+        if !musicStarted {
+            Audio.startLoop("fps_arena_pulse", "saw", "C3 R G3 R Bb3 R G3 R", 128.0, 0.42, 0.08)
+            musicStarted = true
+        }
+
+        let yawRad: Float = yaw * 0.01745329
+        let forwardX: Float = 0.0 - sin(yawRad)
+        let forwardZ: Float = cos(yawRad)
+        let rightX: Float = cos(yawRad)
+        let rightZ: Float = sin(yawRad)
+        var speed: Float = moveSpeed
+        if Input.down("Sprint") {
+            speed = moveSpeed * sprintMultiplier
+        }
+
+        let moveX: Float = Input.value("MoveX")
+        let moveZ: Float = Input.value("MoveY")
+        let strafeX: Float = rightX * moveX
+        let forwardMoveX: Float = forwardX * moveZ
+        let strafeZ: Float = rightZ * moveX
+        let forwardMoveZ: Float = forwardZ * moveZ
+        let deltaX: Float = strafeX + forwardMoveX
+        let deltaZ: Float = strafeZ + forwardMoveZ
+        position.x += deltaX * speed * dt
+        position.z += deltaZ * speed * dt
+        position.x = clamp(position.x, -arenaLimitX, arenaLimitX)
+        position.z = clamp(position.z, -arenaLimitZ, arenaLimitZ)
+        position.y = 0.85
+        rotation = Vec3(0.0, yaw, 0.0)
+
+        roundTimer -= dt
+        pressureTimer -= dt
+        if roundTimer <= 0.0 {
+            gameOver = true
+            status = "LOCKDOWN - score " + score
+        }
+
+        targetTimer -= dt
+        if targetTimer <= 0.0 && !gameOver {
+            spawnTarget()
+            let spawnDelay: Float = 1.35 - wave * 0.08
+            targetTimer = clamp(spawnDelay, 0.45, 1.35)
+        }
+
+        if pressureTimer <= 0.0 && activeTargets > 0 {
+            integrity -= 1
+            activeTargets -= 1
+            streak = 0
+            status = "Breach warning"
+            Audio.playTone("square", 130.0, 0.08, 0.22)
+            pressureTimer = clamp(4.6 - wave * 0.28, 1.6, 4.6)
+            if integrity <= 0 {
+                gameOver = true
+                status = "ARENA BREACHED - score " + score
+            }
+        }
+
+        if reloading {
+            reloadTimer -= dt
+            status = "Reloading"
+            if reloadTimer <= 0.0 {
+                let needed: Int = magazineSize - ammo
+                if reserve >= needed {
+                    ammo = magazineSize
+                    reserve -= needed
+                } else {
+                    ammo += reserve
+                    reserve = 0
+                }
+                reloading = false
+                canFire = true
+                status = "Ready"
+                Audio.playTone("triangle", 520.0, 0.08, 0.18)
+            }
+        }
+
+        if Input.pressed("Interact") && !reloading && ammo < magazineSize && reserve > 0 {
+            reloading = true
+            canFire = false
+            reloadTimer = reloadTime
+            Audio.playTone("square", 220.0, 0.08, 0.14)
+        }
+
+        if Input.pressed("Fire") && canFire && !reloading {
+            fireWeapon()
+        }
+
+        if cleared >= clearGoal {
+            gameOver = true
+            score += integrity * 250
+            status = "SIM CLEARED - score " + score
+            Audio.playTone("triangle", 1240.0, 0.16, 0.24)
+        }
+
+        drawHud()
+    }
+
+    func fireWeapon() {
+        if ammo <= 0 {
+            status = "Empty - reload"
+            Audio.playTone("square", 110.0, 0.05, 0.18)
+            return
+        }
+
+        ammo -= 1
+        shots += 1
+        canFire = false
+        Audio.playTone3D("sine", 760.0 + streak * 12.0, 0.04, 0.22)
+
+        let targetDistance: Float = scene.distanceToTag("Target")
+        if targetDistance <= hitRadius {
+            hits += 1
+            streak += 1
+            cleared += 1
+            activeTargets -= 1
+            if activeTargets < 0 {
+                activeTargets = 0
+            }
+            if cleared >= wave * 6 {
+                wave += 1
+                status = "Wave " + wave
+                roundTimer += 4.0
+                Audio.playTone("triangle", 1180.0, 0.1, 0.22)
+            }
+            score += 100 + streak * 15
+            roundTimer += 0.55
+            status = "Target down +" + streak
+            scene.destroyNearestWithTag("Target", hitRadius)
+            scene.destroyNearestWithTag("DronePart", hitRadius + 1.4)
+            scene.destroyNearestWithTag("DronePart", hitRadius + 1.4)
+            scene.destroyNearestWithTag("DronePart", hitRadius + 1.4)
+            scene.destroyNearestWithTag("DronePart", hitRadius + 1.4)
+            scene.destroyNearestWithTag("DronePart", hitRadius + 1.4)
+            scene.destroyNearestWithTag("DronePart", hitRadius + 1.4)
+            scene.spawnSphere("Hit Spark", "Spark", Vec3(position.x, position.y + 0.65, position.z + 1.2), 0.12, "scripts/despawn_far.varg")
+            Audio.playTone("triangle", 960.0 + streak * 18.0, 0.06, 0.2)
+            targetTimer = 0.12
+        } else {
+            streak = 0
+            roundTimer -= 0.65
+            status = "Miss - time lost"
+        }
+
+        wait(fireRate)
+        canFire = true
+    }
+
+    func spawnTarget() {
+        let lane: Float = targetIndex - floor(targetIndex / 5.0) * 5.0
+        let x: Float = -5.6 + lane * 2.8
+        let z: Float = -1.0 + sin(targetIndex * 1.1) * 5.4
+        let y: Float = 1.35 + abs(sin(targetIndex * 0.7)) * 1.45
+        let targetZ: Float = z + spawnAhead
+        activeTargets += 1
+        if activeTargets > 5 {
+            integrity -= 1
+            activeTargets = 5
+            status = "Too many drones"
+        }
+        scene.spawnSphere("Training Drone Core", "Target", Vec3(x, y, targetZ), 0.42, "scripts/target_drift.varg")
+        scene.spawnBox("Training Drone Top Plate", "DronePart", Vec3(x, y + 0.47, targetZ), Vec3(0.92, 0.12, 0.34), "scripts/drone_part_drift.varg")
+        scene.spawnBox("Training Drone Bottom Plate", "DronePart", Vec3(x, y - 0.47, targetZ), Vec3(0.72, 0.1, 0.28), "scripts/drone_part_drift.varg")
+        scene.spawnBox("Training Drone Left Wing", "DronePart", Vec3(x - 0.58, y, targetZ), Vec3(0.16, 0.34, 0.76), "scripts/drone_part_drift.varg")
+        scene.spawnBox("Training Drone Right Wing", "DronePart", Vec3(x + 0.58, y, targetZ), Vec3(0.16, 0.34, 0.76), "scripts/drone_part_drift.varg")
+        scene.spawnBox("Training Drone Tail Module", "DronePart", Vec3(x, y, targetZ + 0.58), Vec3(0.42, 0.24, 0.26), "scripts/drone_part_drift.varg")
+        scene.spawnSphere("Training Drone Lens", "DronePart", Vec3(x, y, targetZ - 0.5), 0.14, "scripts/drone_part_drift.varg")
+        targetIndex += 1
+    }
+
+    func drawHud() {
+        ui.rect("fps_hud_panel", 12.0, 12.0, 382.0, 184.0, 0.02, 0.025, 0.03, 0.86)
+        ui.rect("fps_hud_accent", 12.0, 12.0, 4.0, 184.0, 0.95, 0.18, 0.12, 1.0)
+        ui.label("fps_title", "FPS Arena", 24.0, 22.0)
+        ui.label("fps_score", "Score: " + score, 24.0, 44.0)
+        ui.label("fps_timer", "Time: " + roundTimer, 154.0, 44.0)
+        ui.label("fps_ammo", "Ammo: " + ammo + " / " + reserve, 24.0, 66.0)
+        ui.label("fps_integrity", "Integrity: " + integrity, 154.0, 66.0)
+        ui.label("fps_goal", "Cleared: " + cleared + " / " + clearGoal, 24.0, 88.0)
+        ui.label("fps_wave", "Wave: " + wave + "  Active: " + activeTargets, 154.0, 88.0)
+        ui.label("fps_hits", "Hits: " + hits + " / " + shots, 24.0, 110.0)
+        ui.label("fps_streak", "Streak: " + streak, 154.0, 110.0)
+        ui.label("fps_status", status, 24.0, 134.0)
+        ui.label("fps_controls", "WASD move / Shift sprint / Fire shoot / E reload", 24.0, 160.0)
+        ui.label("fps_crosshair", "+", 392.0, 292.0)
+    }
+}

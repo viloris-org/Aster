@@ -243,6 +243,19 @@ impl WgpuRenderDevice {
                     self.encode_gpu_particle_compute(encoder);
                     self.encode_hdr_forward_passes(encoder, batches);
                 }
+                FramePipelineStep::DeferredLighting if !composite_encoded => {
+                    if ssao_enabled {
+                        self.encode_ssao_pass(encoder, resources);
+                    }
+                    if ssgi_enabled {
+                        self.encode_ssgi_pass(encoder, resources);
+                    }
+                    if bloom_enabled {
+                        let _ = self.encode_bloom_pass(encoder, resources);
+                    }
+                    self.encode_post_pass(encoder, resources, output_view, output_viewport);
+                    composite_encoded = true;
+                }
                 FramePipelineStep::DeferredLighting => {}
                 FramePipelineStep::Forward => {
                     if plan.gbuffer {
@@ -332,6 +345,7 @@ impl WgpuRenderDevice {
         let geometry_passes = u32::from(plan.forward) + u32::from(plan.gbuffer);
         self.latest_draw_calls = geometry_passes * (forward_draws + 2)
             + u32::from(plan.shadow) * shadow_draws
+            + u32::from(plan.deferred_lighting)
             + u32::from(ssao_enabled)
             + u32::from(ssgi_enabled)
             + bloom_draws
