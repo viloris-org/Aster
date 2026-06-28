@@ -113,6 +113,7 @@ interface ApplyResult {
   needs_continuation?: boolean;
   continuation_reason?: string | null;
   task_updates?: CopilotTaskUpdate[];
+  next_plan?: CopilotPlan;
 }
 
 interface CopilotTask {
@@ -1380,7 +1381,13 @@ export default function AiPanel({
       });
       addMessage('assistant', summary);
       applyTaskUpdates(result.task_updates);
-      if (result.needs_continuation) {
+      if (result.next_plan && result.next_plan.operations.length > 0) {
+        setPlan(result.next_plan);
+        setApproved(new Set());
+        setStatus('ready');
+        setWorkspaceView('changes');
+        addMessage('assistant', result.next_plan.message || t('ai_plan_ready'), [{ type: 'plan', data: result.next_plan }]);
+      } else if (result.needs_continuation) {
         setPendingContinuation(result.continuation_reason ?? 'Continue the original task.');
         addMessage('system', t('ai_continuing'));
       } else {

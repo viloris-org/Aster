@@ -477,12 +477,22 @@ fn light_intersects_tile(
         light.position_type[1],
         light.position_type[2],
     );
-    let range = light.direction_range[3].max(0.001);
+    let range = uniform_light_influence_radius(light).max(0.001);
     let Some((sx, sy, depth)) = project_to_screen(view_projection, center, width, height) else {
         return true;
     };
     if depth < -range {
         return false;
+    }
+    if light.position_type[3] > 1.5 {
+        let tile_center_x = ((tile_x as f32 + 0.5) * tile_width).min(width as f32);
+        let tile_center_y = ((tile_y as f32 + 0.5) * tile_height).min(height as f32);
+        let screen_distance = ((tile_center_x - sx).powi(2) + (tile_center_y - sy).powi(2)).sqrt();
+        let forward_slack = ((light.direction_range[3] / depth.max(0.5)) * height as f32 * 0.5)
+            .clamp(16.0, height as f32);
+        if screen_distance > forward_slack {
+            return false;
+        }
     }
     let projected_radius =
         ((range / depth.max(0.5)) * height as f32 * 0.5).clamp(8.0, height as f32);
@@ -715,10 +725,12 @@ fn probe_irradiance_for_normal(
             | engine_render::RenderLightKind::Area => {
                 let to_light = light.transform.translation - position;
                 let distance = to_light.length();
-                let range = light.range.max(0.001);
-                let attenuation = (1.0 - distance / range)
-                    .max(0.0)
-                    .powf(light.settings.attenuation.max(0.01));
+                let attenuation = local_light_distance_attenuation(
+                    distance,
+                    light.range,
+                    light.settings.attenuation,
+                    light.settings.source_radius,
+                ) * local_light_spot_attenuation(light, -to_light.normalized());
                 let light_dir = to_light.normalized();
                 let facing = normal.dot(light_dir).clamp(0.0, 1.0);
                 let visibility = ray_visibility(world, position, light_dir, distance);
@@ -918,8 +930,72 @@ pub(crate) fn local_light_score(_world: &RenderWorld, light: &RenderLight) -> Op
         return None;
     }
 
+    let influence_radius = local_light_influence_radius(light);
+    Some(light.intensity * influence_radius * influence_radius)
+}
+
+pub(crate) fn local_light_distance_attenuation(
+    distance: f32,
+    range: f32,
+    decay: f32,
+    source_radius: f32,
+) -> f32 {
+    let source_radius = source_radius.max(0.0);
+    let effective_distance = (distance - source_radius).max(0.0001);
+    let inv_range = 1.0 / range.max(0.001);
+    let mut normalized_distance = effective_distance * inv_range;
+    normalized_distance *= normalized_distance;
+    normalized_distance *= normalized_distance;
+    let range_falloff = (1.0 - normalized_distance).max(0.0);
+    range_falloff * range_falloff * effective_distance.powf(-decay.max(0.01))
+        / (1.0 + source_radius * source_radius * 0.08).max(1.0)
+}
+
+fn local_light_influence_radius(light: &RenderLight) -> f32 {
     let range = light.range.max(0.001);
-    Some(light.intensity * range * range)
+    if light.kind != RenderLightKind::Spot {
+        return range + light.settings.source_radius.max(0.0);
+    }
+    range * spot_cone_radius_scale(light.spot_angle) + light.settings.source_radius.max(0.0)
+}
+
+fn uniform_light_influence_radius(light: &ForwardLightUniform) -> f32 {
+    let range = light.direction_range[3].max(0.001);
+    if light.position_type[3] <= 1.5 {
+        return range + light.spot_angles[3].max(0.0);
+    }
+    let outer_cos = light.spot_angles[1].clamp(-0.999, 0.999);
+    let cone_scale = outer_cos.acos().tan().clamp(0.02, 1.0);
+    range * cone_scale + light.spot_angles[3].max(0.0)
+}
+
+fn spot_cone_radius_scale(spot_angle_degrees: f32) -> f32 {
+    (spot_angle_degrees.clamp(1.0, 179.0) * 0.5)
+        .to_radians()
+        .tan()
+        .clamp(0.02, 1.0)
+}
+
+pub(crate) fn local_light_spot_attenuation(
+    light: &RenderLight,
+    light_to_fragment_dir: engine_core::math::Vec3,
+) -> f32 {
+    if light.kind != RenderLightKind::Spot {
+        return 1.0;
+    }
+    let spot_dir = rotate_vec3(
+        light.transform.rotation,
+        engine_core::math::Vec3::new(0.0, 0.0, -1.0),
+    )
+    .normalized();
+    let outer_half_angle = (light.spot_angle.clamp(1.0, 179.0) * 0.5).to_radians();
+    let outer_cos = outer_half_angle.cos();
+    let scos = light_to_fragment_dir
+        .normalized()
+        .dot(spot_dir)
+        .max(outer_cos);
+    let spot_rim = ((1.0 - scos) / (1.0 - outer_cos).max(f32::EPSILON)).max(0.0001);
+    1.0 - spot_rim.powf(light.settings.attenuation.max(0.01))
 }
 
 pub(crate) fn forward_light_uniform(light: &RenderLight) -> ForwardLightUniform {

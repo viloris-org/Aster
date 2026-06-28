@@ -404,7 +404,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         }
         self.colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (center, radius) = self.collider_world_sphere(*handle)?;
                 ray_sphere(origin, direction, max_distance, center, radius).map(|distance| RayHit {
@@ -421,7 +421,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
     fn overlap_sphere(&self, center: Vec3, radius: f32, filter: QueryFilter) -> Vec<OverlapResult> {
         self.colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (other_center, other_radius) = self.collider_world_sphere(*handle)?;
                 ((center - other_center).length_squared() <= (radius + other_radius).powi(2))
@@ -447,7 +447,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         }
         self.colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (other_center, other_radius) = self.collider_world_sphere(*handle)?;
                 ray_sphere(
@@ -482,7 +482,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         let mut hits: Vec<RayHit> = self
             .colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (center, radius) = self.collider_world_sphere(*handle)?;
                 ray_sphere(origin, direction, max_distance, center, radius).map(|distance| RayHit {
@@ -514,7 +514,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         let radius = half_extents.length();
         self.colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (other_center, other_radius) = self.collider_world_sphere(*handle)?;
                 ray_sphere(
@@ -552,7 +552,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         let sweep_radius = half_height + radius;
         self.colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (other_center, other_radius) = self.collider_world_sphere(*handle)?;
                 ray_sphere(
@@ -583,7 +583,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         let radius = half_extents.length();
         self.colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (other_center, other_radius) = self.collider_world_sphere(*handle)?;
                 ((center - other_center).length_squared() <= (radius + other_radius).powi(2))
@@ -606,7 +606,7 @@ impl PhysicsBackend for SimplePhysicsBackend {
         let sweep_radius = half_height + radius;
         self.colliders
             .iter()
-            .filter(|(_, collider)| filter_matches(collider.desc.layer, filter))
+            .filter(|(handle, collider)| filter_matches(**handle, collider, filter))
             .filter_map(|(handle, collider)| {
                 let (other_center, other_radius) = self.collider_world_sphere(*handle)?;
                 ((center - other_center).length_squared() <= (sweep_radius + other_radius).powi(2))
@@ -844,8 +844,17 @@ fn layers_match(left: &ColliderDesc, right: &ColliderDesc) -> bool {
     (left.mask & (1 << right.layer.min(31))) != 0 && (right.mask & (1 << left.layer.min(31))) != 0
 }
 
-fn filter_matches(layer: u32, filter: QueryFilter) -> bool {
-    filter.mask == 0 || (filter.mask & (1 << layer.min(31))) != 0
+fn filter_matches(handle: ColliderHandle, collider: &SimpleCollider, filter: QueryFilter) -> bool {
+    if filter.exclude_collider == Some(handle) {
+        return false;
+    }
+    if filter.exclude_body == Some(collider.body) {
+        return false;
+    }
+    if !filter.include_triggers && collider.desc.is_trigger {
+        return false;
+    }
+    filter.mask == 0 || (filter.mask & (1 << collider.desc.layer.min(31))) != 0
 }
 
 fn shape_world_sphere(center: Vec3, shape: &ColliderShape) -> (Vec3, f32) {

@@ -20,6 +20,15 @@ pub(crate) fn start_copilot_plan(
         let original_prompt = prepared.original_prompt.clone();
         let knowledge_entries_used = prepared.knowledge_entries_used;
         let approval_mode = prepared.approval_mode;
+        let continuation_request = prepared.request.clone();
+        let provider = prepared.provider.clone();
+        let model_name = prepared.model.clone();
+        let api_key = prepared.api_key.clone();
+        let endpoint = prepared.endpoint.clone();
+        let max_tokens = prepared.max_tokens;
+        let codex_oauth = prepared.codex_oauth.clone();
+        let mimo_config = prepared.mimo_config.clone();
+        let glm_config = prepared.glm_config.clone();
         let result = engine_ai::providers::create_provider(
             &prepared.provider,
             &prepared.model,
@@ -91,6 +100,15 @@ pub(crate) fn start_copilot_plan(
                 cached_context,
                 knowledge_entries_used,
                 approval_mode,
+                request: Some(continuation_request),
+                provider,
+                model: model_name,
+                api_key,
+                endpoint,
+                max_tokens,
+                codex_oauth,
+                mimo_config,
+                glm_config,
             },
         );
         drop(request_state);
@@ -129,6 +147,19 @@ pub(crate) fn finish_copilot_plan(
                 cached_context,
                 completed.knowledge_entries_used,
                 completed.approval_mode,
+                completed.request.map(|request| crate::CopilotContinuation {
+                    request,
+                    provider: completed.provider,
+                    model: completed.model,
+                    api_key: completed.api_key,
+                    endpoint: completed.endpoint,
+                    max_tokens: completed.max_tokens,
+                    codex_oauth: completed.codex_oauth,
+                    mimo_config: completed.mimo_config,
+                    glm_config: completed.glm_config,
+                    knowledge_entries_used: completed.knowledge_entries_used,
+                    approval_mode: completed.approval_mode,
+                }),
             )
         })
         .map_err(|error| error.to_string())

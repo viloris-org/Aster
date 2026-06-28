@@ -122,6 +122,26 @@ impl EditorHost {
         })
     }
 
+    fn copilot_plan_requires_user_approval(
+        plan: &AgentPlan,
+        approval_mode: CopilotApprovalMode,
+        allowed_commands: &[String],
+    ) -> bool {
+        plan.operations.iter().any(|op| {
+            let command = match &op.operation {
+                engine_ai::AgentOperation::ExecuteCommand { command, .. }
+                | engine_ai::AgentOperation::RunCommand { command, .. } => Some(command.as_str()),
+                _ => None,
+            };
+            if let Some(command) = command {
+                !allowed_commands.iter().any(|allowed| allowed == command)
+                    && !approval_mode.auto_approves_command()
+            } else {
+                op.requires_write && !approval_mode.auto_approves_write()
+            }
+        })
+    }
+
     pub(crate) fn scene_clone_for_agent(&self) -> EngineResult<engine_ecs::Scene> {
         let Some(project) = self.shell.project() else {
             return Err(EngineError::config("no project open"));
@@ -459,14 +479,14 @@ impl EditorHost {
             prepared.api_key.as_deref(),
             prepared.endpoint.as_deref(),
             prepared.max_tokens,
-            prepared.codex_oauth,
+            prepared.codex_oauth.clone(),
             prepared.mimo_config.as_ref(),
             prepared.glm_config.as_ref(),
         )?;
         let mut session = AgentSession::new(prepared.cached_context)?;
         let response = session.respond_with_tool_results_streaming(
             model.as_ref(),
-            prepared.request,
+            prepared.request.clone(),
             prepared.approval_mode.planning_policy(),
             on_delta,
         )?;
@@ -478,6 +498,19 @@ impl EditorHost {
             session.context,
             prepared.knowledge_entries_used,
             prepared.approval_mode,
+            Some(CopilotContinuation {
+                request: prepared.request,
+                provider: prepared.provider,
+                model: prepared.model,
+                api_key: prepared.api_key,
+                endpoint: prepared.endpoint,
+                max_tokens: prepared.max_tokens,
+                codex_oauth: prepared.codex_oauth,
+                mimo_config: prepared.mimo_config,
+                glm_config: prepared.glm_config,
+                knowledge_entries_used: prepared.knowledge_entries_used,
+                approval_mode: prepared.approval_mode,
+            }),
         )
     }
 
@@ -651,6 +684,7 @@ impl EditorHost {
         cached_context: engine_editor::ProjectContext,
         knowledge_entries_used: usize,
         approval_mode: CopilotApprovalMode,
+        continuation: Option<CopilotContinuation>,
     ) -> EngineResult<Value> {
         let mut session = AgentSession::new(cached_context)?;
         let planning_policy = approval_mode.planning_policy();
@@ -767,6 +801,7 @@ impl EditorHost {
             plan,
             model_completed,
             completion_summary: completion_summary.clone(),
+            continuation,
         });
 
         Ok(serde_json::json!({
@@ -804,6 +839,7 @@ impl EditorHost {
         })?;
         let model_completed = pending_plan.model_completed;
         let model_completion_summary = pending_plan.completion_summary.clone();
+        let continuation = pending_plan.continuation;
 
         // Filter the plan to only approved operations
         let filtered_ops: Vec<_> = pending_plan
@@ -942,7 +978,7 @@ impl EditorHost {
             })
             .collect();
 
-        Ok(serde_json::json!({
+        let mut result = serde_json::json!({
             "operations_performed": outcome.operations_performed,
             "completed": outcome.completed && model_completed,
             "summary": outcome.summary,
@@ -958,7 +994,108 @@ impl EditorHost {
                     "the model has not emitted a complete operation yet".to_owned()
                 )
             }),
-        }))
+        });
+
+        if let Some(continuation) = continuation {
+            if !model_completed || result["needs_continuation"].as_bool().unwrap_or(false) {
+                if let Some(next_plan) = self.continue_copilot_after_apply(
+                    continuation,
+                    &outcome,
+                    &trace_statuses,
+                    &console_results,
+                )? {
+                    if next_plan
+                        .get("operations")
+                        .and_then(Value::as_array)
+                        .is_some_and(|operations| !operations.is_empty())
+                    {
+                        result["next_plan"] = next_plan;
+                    } else if next_plan
+                        .get("completed")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                    {
+                        result["completed"] = serde_json::json!(true);
+                        result["summary"] = next_plan
+                            .get("message")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null);
+                    }
+                    result["needs_continuation"] = serde_json::json!(false);
+                    result["continuation_reason"] = serde_json::Value::Null;
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn continue_copilot_after_apply(
+        &mut self,
+        mut continuation: CopilotContinuation,
+        outcome: &AgentOutcome,
+        trace_statuses: &[String],
+        console_results: &[String],
+    ) -> EngineResult<Option<Value>> {
+        let execution_summary = copilot_execution_summary(
+            outcome.operations_performed,
+            outcome.summary.as_deref(),
+            trace_statuses,
+            console_results,
+        );
+        continuation.request.messages.push(engine_ai::ChatMessage::user(format!(
+            "Continue the same Copilot task after these approved operations were applied.\n\n{execution_summary}"
+        )));
+        let model = engine_ai::providers::create_provider(
+            &continuation.provider,
+            &continuation.model,
+            continuation.api_key.as_deref(),
+            continuation.endpoint.as_deref(),
+            continuation.max_tokens,
+            continuation.codex_oauth.clone(),
+            continuation.mimo_config.as_ref(),
+            continuation.glm_config.as_ref(),
+        )?;
+        let scene = self.scene_clone_for_agent()?;
+        let ctx = self.build_agent_context(scene)?;
+        let mut session = AgentSession::new(ctx)?;
+        let approval_mode = continuation.approval_mode;
+        let response = session.respond_with_tool_results_streaming(
+            model.as_ref(),
+            continuation.request.clone(),
+            approval_mode.planning_policy(),
+            &mut |_| {},
+        )?;
+        let next_value = self.finish_copilot_response_with_tools(
+            "Continue after approved Copilot operations.",
+            &response.content,
+            &response.tool_calls,
+            &response.resolved_operations,
+            session.context,
+            continuation.knowledge_entries_used,
+            continuation.approval_mode,
+            Some(continuation),
+        )?;
+        let has_operations = next_value
+            .get("operations")
+            .and_then(Value::as_array)
+            .is_some_and(|operations| !operations.is_empty());
+        let requires_approval = self.last_copilot_plan.as_ref().is_some_and(|pending| {
+            Self::copilot_plan_requires_user_approval(
+                &pending.plan,
+                approval_mode,
+                &self.copilot_settings.allowed_commands,
+            )
+        });
+        let completed = next_value
+            .get("completed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if has_operations || requires_approval || completed {
+            Ok(Some(next_value))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) fn copilot_undo_last(&mut self, _params: &Value) -> EngineResult<Value> {

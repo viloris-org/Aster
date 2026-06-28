@@ -176,6 +176,34 @@ fn forward_shader_selects_cascades_with_linear_camera_depth() {
 }
 
 #[test]
+fn forward_shader_uses_godot_style_local_light_falloff() {
+    assert!(FORWARD_SHADER.contains("fn distance_attenuation"));
+    assert!(
+        FORWARD_SHADER.contains("normalized_distance = normalized_distance * normalized_distance")
+    );
+    assert!(FORWARD_SHADER.contains("pow(effective_distance, -max(decay, 0.01))"));
+    assert!(FORWARD_SHADER.contains("fn spot_cone_attenuation"));
+    assert!(FORWARD_SHADER.contains("let spot_rim = max(0.0001"));
+    assert!(!FORWARD_SHADER.contains("let falloff = max(1.0 - effective_distance / range"));
+    assert!(!FORWARD_SHADER.contains("smoothstep(light.spot_angles.y, light.spot_angles.x"));
+}
+
+#[test]
+fn forward_shader_uses_burley_diffuse_and_roughness_fresnel() {
+    assert!(FORWARD_SHADER.contains("fn diffuse_burley"));
+    assert!(FORWARD_SHADER.contains("fd90_minus_1"));
+    assert!(FORWARD_SHADER.contains("fresnel_schlick_roughness"));
+    assert!(FORWARD_SHADER.contains("fresnel_schlick_f90"));
+    assert!(FORWARD_SHADER.contains("let f90 = clamp(dot(f0, vec3<f32>(16.5)), metallic, 1.0)"));
+    assert!(FORWARD_SHADER.contains("kd * base_color * diffuse_burley"));
+    assert!(!FORWARD_SHADER.contains("let diffuse = kd * base_color / PI;"));
+    assert!(
+        !FORWARD_SHADER
+            .contains("var radiance = (diffuse + specular) * light_color * intensity * ndotl")
+    );
+}
+
+#[test]
 fn gpu_uniform_structs_match_wgsl_alignment() {
     assert_eq!(std::mem::size_of::<CameraUniform>(), 96);
     assert_eq!(std::mem::size_of::<PostProcessUniform>(), 224);
@@ -277,6 +305,39 @@ fn clustered_lighting_builds_tile_ranges_for_selected_lights() {
         indices
             .iter()
             .all(|index| (*index as usize) < clustered_lights.len())
+    );
+}
+
+#[test]
+fn clustered_lighting_scores_and_culls_spotlights_by_cone_influence() {
+    let mut point = test_light(
+        1,
+        RenderLightKind::Point,
+        engine_core::math::Vec3::ZERO,
+        1.0,
+        10.0,
+    );
+    point.settings.source_radius = 0.0;
+    let mut spot = test_light(
+        2,
+        RenderLightKind::Spot,
+        engine_core::math::Vec3::ZERO,
+        1.0,
+        10.0,
+    );
+    spot.spot_angle = 30.0;
+    spot.settings.source_radius = 0.0;
+
+    let point_score = local_light_score(&RenderWorld::default(), &point).unwrap();
+    let spot_score = local_light_score(&RenderWorld::default(), &spot).unwrap();
+
+    assert!(spot_score < point_score * 0.1);
+    assert!(local_light_distance_attenuation(9.5, 10.0, 2.0, 0.0) < 0.02);
+    assert!(
+        local_light_spot_attenuation(&spot, engine_core::math::Vec3::new(0.0, 0.0, -1.0)) > 0.99
+    );
+    assert!(
+        local_light_spot_attenuation(&spot, engine_core::math::Vec3::new(1.0, 0.0, 0.0)) <= 0.001
     );
 }
 
@@ -673,6 +734,17 @@ fn compute_ibl_sampling_uses_explicit_lod_and_dynamic_mip_resolution() {
 fn post_shader_leaves_srgb_encoding_to_the_output_attachment() {
     assert!(!POST_SHADER.contains("gamma_correct"));
     assert!(!POST_SHADER.contains("1.0 / 2.2"));
+}
+
+#[test]
+fn post_shader_uses_godot_aces_transform() {
+    assert!(POST_SHADER.contains("let exposure_bias = 1.8"));
+    assert!(POST_SHADER.contains("let rgb_to_rrt = mat3x3<f32>"));
+    assert!(POST_SHADER.contains("let odt_to_rgb = mat3x3<f32>"));
+    assert!(POST_SHADER.contains("0.0245786"));
+    assert!(POST_SHADER.contains("0.000090537"));
+    assert!(POST_SHADER.contains("return saturate(odt_to_rgb * tonemapped)"));
+    assert!(!POST_SHADER.contains("let a = 2.51"));
 }
 
 #[test]

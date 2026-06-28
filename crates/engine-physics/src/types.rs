@@ -245,10 +245,27 @@ pub struct OverlapResult {
 }
 
 /// Query filter controlling which layers are tested.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct QueryFilter {
     /// Layer mask; zero means test all layers.
     pub mask: u32,
+    /// Body to exclude from the query, commonly the querying actor itself.
+    pub exclude_body: Option<BodyHandle>,
+    /// Collider to exclude from the query.
+    pub exclude_collider: Option<ColliderHandle>,
+    /// Whether trigger/sensor colliders are included in query results.
+    pub include_triggers: bool,
+}
+
+impl Default for QueryFilter {
+    fn default() -> Self {
+        Self {
+            mask: 0,
+            exclude_body: None,
+            exclude_collider: None,
+            include_triggers: true,
+        }
+    }
 }
 
 // ── Multi-hit query results ──────────────────────────────────────────────────

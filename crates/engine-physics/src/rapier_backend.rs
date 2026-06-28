@@ -196,6 +196,33 @@ impl RapierPhysicsBackend {
             });
         }
     }
+
+    fn query_filter(&self, filter: QueryFilter) -> rp::QueryFilter<'static> {
+        let mut rapier_filter = if filter.mask == 0 {
+            rp::QueryFilter::default()
+        } else {
+            rp::QueryFilter::default().groups(rp::InteractionGroups::new(
+                rp::Group::from_bits_truncate(u32::MAX),
+                rp::Group::from_bits_truncate(filter.mask),
+            ))
+        };
+        if let Some(body) = filter
+            .exclude_body
+            .and_then(|body| self.body_handles.get(&body))
+        {
+            rapier_filter = rapier_filter.exclude_rigid_body(*body);
+        }
+        if let Some(collider) = filter
+            .exclude_collider
+            .and_then(|collider| self.collider_handles.get(&collider))
+        {
+            rapier_filter = rapier_filter.exclude_collider(*collider);
+        }
+        if !filter.include_triggers {
+            rapier_filter = rapier_filter.exclude_sensors();
+        }
+        rapier_filter
+    }
 }
 
 impl PhysicsBackend for RapierPhysicsBackend {
@@ -371,7 +398,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
                 &ray,
                 max_distance,
                 true,
-                query_filter(filter),
+                self.query_filter(filter),
             )
             .and_then(|(rapier_collider, hit)| {
                 let collider = self.rapier_colliders.get(&rapier_collider).copied()?;
@@ -397,7 +424,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
                 ..Transform::IDENTITY
             }),
             shape.as_ref(),
-            query_filter(filter),
+            self.query_filter(filter),
             |rapier_collider| {
                 if let (Some(collider), Some(body)) = (
                     self.rapier_colliders.get(&rapier_collider).copied(),
@@ -438,7 +465,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
                     max_time_of_impact: max_distance,
                     ..ShapeCastOptions::default()
                 },
-                query_filter(filter),
+                self.query_filter(filter),
             )
             .and_then(|(rapier_collider, hit)| {
                 let collider = self.rapier_colliders.get(&rapier_collider).copied()?;
@@ -472,7 +499,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
             &ray,
             max_distance,
             true,
-            query_filter(filter),
+            self.query_filter(filter),
             |rapier_collider, hit| {
                 if let (Some(collider), Some(body)) = (
                     self.rapier_colliders.get(&rapier_collider).copied(),
@@ -523,7 +550,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
                     max_time_of_impact: max_distance,
                     ..ShapeCastOptions::default()
                 },
-                query_filter(filter),
+                self.query_filter(filter),
             )
             .and_then(|(rapier_collider, hit)| {
                 let collider = self.rapier_colliders.get(&rapier_collider).copied()?;
@@ -569,7 +596,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
                     max_time_of_impact: max_distance,
                     ..ShapeCastOptions::default()
                 },
-                query_filter(filter),
+                self.query_filter(filter),
             )
             .and_then(|(rapier_collider, hit)| {
                 let collider = self.rapier_colliders.get(&rapier_collider).copied()?;
@@ -603,7 +630,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
             &self.colliders,
             &pos,
             shape.as_ref(),
-            query_filter(filter),
+            self.query_filter(filter),
             |rapier_collider| {
                 if let (Some(collider), Some(body)) = (
                     self.rapier_colliders.get(&rapier_collider).copied(),
@@ -637,7 +664,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
             &self.colliders,
             &pos,
             shape.as_ref(),
-            query_filter(filter),
+            self.query_filter(filter),
             |rapier_collider| {
                 if let (Some(collider), Some(body)) = (
                     self.rapier_colliders.get(&rapier_collider).copied(),
@@ -677,7 +704,7 @@ impl PhysicsBackend for RapierPhysicsBackend {
             shape.as_ref(),
             body_ref.position(),
             vector3(desc.translation),
-            query_filter(desc.filter),
+            self.query_filter(desc.filter),
             |_| collisions = collisions.saturating_add(1),
         );
         let body_mut = self
@@ -1169,17 +1196,6 @@ fn interaction_groups(layer: u32, mask: u32) -> rp::InteractionGroups {
         rp::Group::from_bits_truncate(membership),
         rp::Group::from_bits_truncate(filter),
     )
-}
-
-fn query_filter(filter: QueryFilter) -> rp::QueryFilter<'static> {
-    if filter.mask == 0 {
-        rp::QueryFilter::default()
-    } else {
-        rp::QueryFilter::default().groups(rp::InteractionGroups::new(
-            rp::Group::from_bits_truncate(u32::MAX),
-            rp::Group::from_bits_truncate(filter.mask),
-        ))
-    }
 }
 
 fn isometry(transform: Transform) -> rp::Isometry<rp::Real> {

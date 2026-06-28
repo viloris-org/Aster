@@ -348,6 +348,37 @@ pub struct AgentModelResponse {
     pub resolved_operations: Vec<AgentOperation>,
 }
 
+/// Controls sustained model/tool execution for one agent turn.
+#[derive(Clone, Debug)]
+pub struct AgentTurnOptions {
+    /// Maximum number of model sampling steps in this turn.
+    pub max_steps: usize,
+    /// Maximum times the same tool signature may be executed before stopping.
+    pub max_repeated_tool_calls: usize,
+}
+
+impl Default for AgentTurnOptions {
+    fn default() -> Self {
+        Self {
+            max_steps: 12,
+            max_repeated_tool_calls: 2,
+        }
+    }
+}
+
+/// Result of a sustained agent turn.
+#[derive(Clone, Debug)]
+pub struct AgentTurnResult {
+    /// Final model response from the last sampling step.
+    pub response: AgentModelResponse,
+    /// Accumulated execution outcome for operations applied during the turn.
+    pub outcome: AgentOutcome,
+    /// Whether execution stopped before model completion.
+    pub stopped: bool,
+    /// Machine-readable reason for stopping before completion.
+    pub stop_reason: Option<String>,
+}
+
 /// An operation the AI agent requests the engine to perform.
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -1067,6 +1098,133 @@ impl AgentSession {
             resolved_tool_calls,
             resolved_tool_results,
             resolved_operations,
+        })
+    }
+
+    /// Runs a sustained model/tool turn.
+    ///
+    /// Unlike [`Self::respond_with_tool_results_streaming`], this applies every
+    /// non-completion operation allowed by `policy`, feeds the structured tool
+    /// result back to the model, and keeps sampling until the model emits a
+    /// completion/final text, a guardrail stops the loop, or execution reaches
+    /// an operation that cannot be represented as a tool result.
+    pub fn run_turn_with_tools_streaming(
+        &mut self,
+        model: &dyn AiModel,
+        request: AiRequest,
+        policy: PermissionPolicy,
+        options: AgentTurnOptions,
+        on_delta: &mut dyn FnMut(AiStreamDelta),
+    ) -> EngineResult<AgentTurnResult> {
+        let mut request = request;
+        let mut response = model.chat_stream(request.clone(), on_delta)?;
+        let mut resolved_tool_calls = Vec::new();
+        let mut resolved_tool_results = Vec::new();
+        let mut resolved_operations = Vec::new();
+        let mut accumulated = AgentOutcome::default();
+        let mut seen_tool_signatures: HashMap<String, usize> = HashMap::new();
+        let max_steps = options.max_steps.max(1);
+        let max_repeated_tool_calls = options.max_repeated_tool_calls.max(1);
+        let mut stop_reason = None;
+
+        for step in 0..max_steps {
+            if response.tool_calls.is_empty() {
+                break;
+            }
+
+            let plan =
+                self.plan_from_tool_calls(&response.tool_calls, &response.content, policy.clone())?;
+            let mut executable_tool_ops = Vec::new();
+            let mut completed = None;
+            for planned in plan.operations {
+                if let AgentOperation::Complete { summary } = &planned.operation {
+                    completed = Some(summary.clone());
+                    continue;
+                }
+                executable_tool_ops.push(planned);
+            }
+
+            if executable_tool_ops.is_empty() {
+                if let Some(summary) = completed {
+                    accumulated.completed = true;
+                    accumulated.summary = summary;
+                }
+                break;
+            }
+
+            let signatures = response
+                .tool_calls
+                .iter()
+                .map(tool_call_signature)
+                .collect::<Vec<_>>();
+            if signatures.iter().any(|signature| {
+                let count = seen_tool_signatures.entry(signature.clone()).or_insert(0);
+                *count += 1;
+                *count > max_repeated_tool_calls
+            }) {
+                stop_reason = Some("repeated_tool_call".to_owned());
+                break;
+            }
+
+            let before_console = self.console.entries().len();
+            resolved_operations.extend(
+                executable_tool_ops
+                    .iter()
+                    .map(|planned| planned.operation.clone()),
+            );
+            let followup_plan = AgentPlan {
+                read_only: executable_tool_ops
+                    .iter()
+                    .all(|planned| !planned.requires_write),
+                requires_write: executable_tool_ops
+                    .iter()
+                    .any(|planned| planned.requires_write),
+                operations: executable_tool_ops,
+                policy: policy.clone(),
+            };
+            let outcome = self.apply_plan(&followup_plan)?;
+            merge_outcome(&mut accumulated, outcome.clone());
+            let console_entries = self
+                .console
+                .entries()
+                .iter()
+                .skip(before_console)
+                .cloned()
+                .collect::<Vec<_>>();
+            let tool_result_messages =
+                format_tool_result_messages(&response.tool_calls, &outcome, &console_entries);
+
+            resolved_tool_calls.extend(response.tool_calls.clone());
+            request
+                .messages
+                .push(ChatMessage::assistant(tool_call_summary_message(
+                    &resolved_tool_calls,
+                )));
+            for tool_result in &tool_result_messages {
+                request.messages.push(tool_result.to_chat_message());
+            }
+            add_loaded_tools_to_request(&mut request, &resolved_operations);
+            resolved_tool_results.extend(tool_result_messages);
+
+            response = model.chat_stream(request.clone(), on_delta)?;
+            if step + 1 == max_steps {
+                stop_reason = Some("step_limit".to_owned());
+            }
+        }
+
+        let stopped = stop_reason.is_some();
+        Ok(AgentTurnResult {
+            response: AgentModelResponse {
+                content: response.content,
+                thinking: response.thinking,
+                tool_calls: response.tool_calls,
+                resolved_tool_calls,
+                resolved_tool_results,
+                resolved_operations,
+            },
+            outcome: accumulated,
+            stopped,
+            stop_reason,
         })
     }
 
@@ -2961,6 +3119,18 @@ fn operation_can_feed_model(operation: &AgentOperation) -> bool {
 
 fn tool_call_signature(tool_call: &ToolCall) -> String {
     format!("{}:{}", tool_call.name, tool_call.arguments)
+}
+
+fn merge_outcome(outcome: &mut AgentOutcome, next: AgentOutcome) {
+    outcome.operations_performed += next.operations_performed;
+    outcome.console_entries.extend(next.console_entries);
+    outcome.trace_entries = next.trace_entries;
+    if next.completed {
+        outcome.completed = true;
+    }
+    if next.summary.is_some() {
+        outcome.summary = next.summary;
+    }
 }
 
 fn tool_call_summary_message(tool_calls: &[ToolCall]) -> String {
@@ -5364,6 +5534,75 @@ mod tests {
             AgentOperation::CreateTask { .. }
         ));
         assert_eq!(response.tool_calls[0].name, "complete");
+    }
+
+    #[test]
+    fn sustained_turn_executes_write_tool_then_continues_to_completion() {
+        let mut session = AgentSession::new(temp_project_context()).unwrap();
+        let request = session.prepare_request(
+            "Create a player, inspect the scene, then finish.",
+            &[],
+            Some(ThinkingEffort::Off),
+        );
+        let model = MultiTurnStubModel::new(vec![
+            AiResponse {
+                content: String::new(),
+                thinking: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "create-1".into(),
+                    name: "create_object".into(),
+                    arguments: serde_json::json!({
+                        "name": "AI_Player"
+                    }),
+                }],
+            },
+            AiResponse {
+                content: String::new(),
+                thinking: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "scene-1".into(),
+                    name: "get_scene_info".into(),
+                    arguments: serde_json::json!({
+                        "include_components": false
+                    }),
+                }],
+            },
+            AiResponse {
+                content: String::new(),
+                thinking: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "complete-1".into(),
+                    name: "complete".into(),
+                    arguments: serde_json::json!({
+                        "summary": "Created AI_Player and inspected the scene."
+                    }),
+                }],
+            },
+        ]);
+
+        let result = session
+            .run_turn_with_tools_streaming(
+                &model,
+                request,
+                PermissionPolicy::worktree_write(),
+                AgentTurnOptions::default(),
+                &mut |_| {},
+            )
+            .unwrap();
+
+        assert!(!result.stopped);
+        assert_eq!(result.response.resolved_tool_calls.len(), 2);
+        assert_eq!(result.response.tool_calls[0].name, "complete");
+        assert_eq!(result.outcome.operations_performed, 2);
+        assert!(session.context.scene.find_by_name("AI_Player").is_some());
+        let requests = model.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(
+            requests[1]
+                .messages
+                .iter()
+                .any(|message| message.content.contains("create_object"))
+        );
     }
 
     #[test]

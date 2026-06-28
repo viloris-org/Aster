@@ -165,8 +165,32 @@ fn geometry_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32) -> f
     return g1v * g1l;
 }
 
+fn schlick_fresnel(cos_theta: f32) -> f32 {
+    let m = clamp(1.0 - cos_theta, 0.0, 1.0);
+    let m2 = m * m;
+    return m2 * m2 * m;
+}
+
 fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
-    return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+    return f0 + (1.0 - f0) * schlick_fresnel(cos_theta);
+}
+
+fn fresnel_schlick_f90(cos_theta: f32, f0: vec3<f32>, f90: f32) -> vec3<f32> {
+    return f0 + (vec3<f32>(f90) - f0) * schlick_fresnel(cos_theta);
+}
+
+fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
+    return f0 + (max(vec3<f32>(1.0 - roughness), f0) - f0) * schlick_fresnel(cos_theta);
+}
+
+fn diffuse_burley(n: vec3<f32>, l: vec3<f32>, v: vec3<f32>, h: vec3<f32>, roughness: f32) -> f32 {
+    let ndotl = max(dot(n, l), 0.0);
+    let ndotv = max(dot(n, v), 0.0001);
+    let ldoth = clamp(dot(l, h), 0.0, 1.0);
+    let fd90_minus_1 = 2.0 * ldoth * ldoth * roughness - 0.5;
+    let fdv = 1.0 + fd90_minus_1 * schlick_fresnel(ndotv);
+    let fdl = 1.0 + fd90_minus_1 * schlick_fresnel(ndotl);
+    return fdv * fdl * ndotl / PI;
 }
 
 fn sample_ibl_irradiance(n: vec3<f32>) -> vec3<f32> {
@@ -183,9 +207,27 @@ fn sample_ibl_brdf(ndotv: f32, roughness: f32) -> vec2<f32> {
     return textureSample(ibl_brdf_lut, ibl_sampler, vec2<f32>(ndotv, roughness)).rg;
 }
 
+fn distance_attenuation(distance: f32, range: f32, decay: f32, source_radius: f32) -> f32 {
+    let effective_distance = max(distance - max(source_radius, 0.0), 0.0001);
+    let inv_range = 1.0 / max(range, EPSILON);
+    var normalized_distance = effective_distance * inv_range;
+    normalized_distance = normalized_distance * normalized_distance;
+    normalized_distance = normalized_distance * normalized_distance;
+    let range_falloff = max(1.0 - normalized_distance, 0.0);
+    return (range_falloff * range_falloff)
+        * pow(effective_distance, -max(decay, 0.01))
+        / max(1.0 + source_radius * source_radius * 0.08, 1.0);
+}
+
+fn spot_cone_attenuation(light_to_fragment_dir: vec3<f32>, spot_dir: vec3<f32>, outer_cos: f32, cone_attenuation: f32) -> f32 {
+    let scos = max(dot(light_to_fragment_dir, normalize(spot_dir)), outer_cos);
+    let spot_rim = max(0.0001, (1.0 - scos) / max(1.0 - outer_cos, EPSILON));
+    return 1.0 - pow(spot_rim, max(cone_attenuation, 0.01));
+}
+
 fn compute_ibl(n: vec3<f32>, v: vec3<f32>, base_color: vec3<f32>, metallic: f32, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
     let ndotv = max(dot(n, v), 0.0);
-    let f = fresnel_schlick(ndotv, f0);
+    let f = fresnel_schlick_roughness(ndotv, f0, roughness);
     let kd = (1.0 - f) * (1.0 - metallic);
     let irradiance = sample_ibl_irradiance(n);
     let diffuse = kd * irradiance * base_color;
@@ -528,14 +570,11 @@ fn fs_main(input: VsOut) -> FsOut {
             light_dir = to_light / max(distance, EPSILON);
             let range = max(light.direction_range.w, EPSILON);
             let source_radius = max(light.spot_angles.w, 0.0);
-            let effective_distance = max(distance - source_radius, 0.0);
-            let falloff = max(1.0 - effective_distance / range, 0.0);
             let attenuation_power = max(light.quality.x, 0.01);
-            attenuation = pow(falloff, attenuation_power) / max(1.0 + source_radius * source_radius * 0.08, 1.0);
+            attenuation = distance_attenuation(distance, range, attenuation_power, source_radius);
 
             if (light_type > 1.5) {
-                let spot_alignment = dot(normalize(-light_dir), normalize(light.direction_range.xyz));
-                spot = smoothstep(light.spot_angles.y, light.spot_angles.x, spot_alignment);
+                spot = spot_cone_attenuation(normalize(-light_dir), light.direction_range.xyz, light.spot_angles.y, attenuation_power);
             }
         }
 
@@ -550,13 +589,16 @@ fn fs_main(input: VsOut) -> FsOut {
 
         let d = distribution_ggx(n, h, roughness);
         let g = geometry_smith(n, v, light_dir, roughness);
-        let f = fresnel_schlick(vdoth, f0);
+        let f90 = clamp(dot(f0, vec3<f32>(16.5)), metallic, 1.0);
+        let f = fresnel_schlick_f90(vdoth, f0, f90);
 
-        let specular = ((d * g * f) / max(4.0 * ndotv * ndotl, EPSILON)) * max(light.quality.y, 0.0);
+        let specular = ((d * g * f) / max(4.0 * ndotv * ndotl, EPSILON))
+            * ndotl
+            * max(light.quality.y, 0.0);
         let kd = (1.0 - f) * (1.0 - metallic);
-        let diffuse = kd * base_color / PI;
+        let diffuse = kd * base_color * diffuse_burley(n, light_dir, v, h, roughness);
 
-        var radiance = (diffuse + specular) * light_color * intensity * ndotl;
+        var radiance = (diffuse + specular) * light_color * intensity;
 
         if (light_type < 0.5 && light.spot_angles.z > 0.5) {
             radiance = radiance * shadow_factor;
@@ -1354,12 +1396,26 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VsOut {
 }
 
 fn aces_tonemap(color: vec3<f32>) -> vec3<f32> {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
+    let exposure_bias = 1.8;
+    let rgb_to_rrt = mat3x3<f32>(
+        vec3<f32>(0.59719 * exposure_bias, 0.07600 * exposure_bias, 0.02840 * exposure_bias),
+        vec3<f32>(0.35458 * exposure_bias, 0.90834 * exposure_bias, 0.13383 * exposure_bias),
+        vec3<f32>(0.04823 * exposure_bias, 0.01566 * exposure_bias, 0.83777 * exposure_bias),
+    );
+    let odt_to_rgb = mat3x3<f32>(
+        vec3<f32>(1.60475, -0.10208, -0.00327),
+        vec3<f32>(-0.53108, 1.10813, -0.07276),
+        vec3<f32>(-0.07367, -0.00605, 1.07602),
+    );
+    let a = 0.0245786;
+    let b = 0.000090537;
+    let c = 0.983729;
+    let d = 0.432951;
+    let e = 0.238081;
+    let rrt = rgb_to_rrt * max(color, vec3<f32>(0.0));
+    let tonemapped = (rrt * (rrt + vec3<f32>(a)) - vec3<f32>(b))
+        / (rrt * (vec3<f32>(c) * rrt + vec3<f32>(d)) + vec3<f32>(e));
+    return saturate(odt_to_rgb * tonemapped);
 }
 
 fn cubic_weight(distance: f32) -> f32 {

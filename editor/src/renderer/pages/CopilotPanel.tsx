@@ -55,6 +55,7 @@ interface ApplyResult {
   summary: string | null;
   trace_entries: TraceEntry[];
   console_entries: ConsoleEntry[];
+  next_plan?: CopilotPlan;
 }
 
 type CopilotStatus = 'idle' | 'planning' | 'ready' | 'executing' | 'complete' | 'error';
@@ -380,7 +381,17 @@ export default function CopilotPanel() {
         ? `✅ ${result.summary}`
         : `✅ ${t('copilot_applied_ops').replace('{count}', String(result.operations_performed))}`;
       setMessages(prev => [...prev, { role: 'assistant', content: summary }]);
-      setPlan(null);
+      if (result.next_plan && result.next_plan.operations.length > 0) {
+        setPlan(result.next_plan);
+        setApproved(new Set());
+        setStatus('ready');
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: result.next_plan?.message || t('copilot_status_ready'),
+        }]);
+      } else {
+        setPlan(null);
+      }
     } catch (err: any) {
       const msg = typeof err === 'string' ? err : err.message || 'Unknown error';
       setStatus('error');

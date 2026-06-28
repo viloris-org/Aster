@@ -15,7 +15,7 @@ use std::{
 };
 
 use base64::Engine as _;
-use engine_ai::{AgentOutcome, AgentPlan, AgentSession, LoadedToolSet};
+use engine_ai::{AgentOutcome, AgentPlan, AgentSession, AgentTurnOptions, LoadedToolSet};
 use engine_core::{EngineConfig, EngineError, EngineResult, RuntimeProfile};
 use engine_editor::agent::{PermissionPolicy, TraceEntry};
 use engine_editor::{
@@ -82,6 +82,21 @@ struct PendingCopilotPlan {
     plan: AgentPlan,
     model_completed: bool,
     completion_summary: Option<String>,
+    continuation: Option<CopilotContinuation>,
+}
+
+struct CopilotContinuation {
+    request: engine_ai::AiRequest,
+    provider: String,
+    model: String,
+    api_key: Option<String>,
+    endpoint: Option<String>,
+    max_tokens: u32,
+    codex_oauth: Option<engine_ai::providers::CodexOAuthCredentials>,
+    mimo_config: Option<engine_editor::MimoConfig>,
+    glm_config: Option<engine_editor::GlmConfig>,
+    knowledge_entries_used: usize,
+    approval_mode: CopilotApprovalMode,
 }
 
 impl CopilotApprovalMode {
@@ -624,6 +639,15 @@ pub(crate) struct CompletedCopilotRequest {
     cached_context: Option<engine_editor::ProjectContext>,
     knowledge_entries_used: usize,
     approval_mode: CopilotApprovalMode,
+    request: Option<engine_ai::AiRequest>,
+    provider: String,
+    model: String,
+    api_key: Option<String>,
+    endpoint: Option<String>,
+    max_tokens: u32,
+    codex_oauth: Option<engine_ai::providers::CodexOAuthCredentials>,
+    mimo_config: Option<engine_editor::MimoConfig>,
+    glm_config: Option<engine_editor::GlmConfig>,
 }
 
 pub(crate) struct PreparedQuestModelRequest {
@@ -1726,21 +1750,13 @@ pub(crate) fn run_quest_execution(prepared: PreparedQuestExecution) -> EngineRes
         parse_thinking_effort(&detail.record.model_config.thinking_effort),
         LoadedToolSet::quest_base().definitions(),
     );
-    let plan_response = session.respond_with_tool_results_streaming(
+    let turn_result = session.run_turn_with_tools_streaming(
         model.as_ref(),
         plan_request,
         PermissionPolicy::worktree_write(),
+        AgentTurnOptions::default(),
         &mut |delta| planning_trace.push(delta),
     )?;
-    let plan = if plan_response.tool_calls.is_empty() {
-        session.plan_from_response(&plan_response.content, PermissionPolicy::worktree_write())?
-    } else {
-        session.plan_from_tool_calls(
-            &plan_response.tool_calls,
-            &plan_response.content,
-            PermissionPolicy::worktree_write(),
-        )?
-    };
     quest_store.write_thinking_trace(
         id,
         "initial-plan",
@@ -1748,36 +1764,26 @@ pub(crate) fn run_quest_execution(prepared: PreparedQuestExecution) -> EngineRes
         &planning_trace.to_markdown(),
     )?;
     let plan_latency_ms = elapsed_millis(first_action_started_at);
-    let planned: Vec<String> = plan
-        .operations
+    let planned: Vec<String> = turn_result
+        .response
+        .resolved_operations
         .iter()
-        .map(|operation| operation.preview.clone())
-        .collect();
-    let planned_capabilities: Vec<serde_json::Value> = plan
-        .operations
-        .iter()
-        .map(|operation| {
-            serde_json::json!({
-                "preview": operation.preview,
-                "capabilities": operation.capabilities,
-                "capability_decisions": operation.capability_decisions,
-            })
-        })
+        .map(|operation| operation.action_name().to_owned())
         .collect();
     quest_store.append_timeline_event(
         id,
         "plan",
-        "Model produced an executable Quest plan",
+        "Model executed a sustained Quest turn",
         serde_json::json!({
             "operations": planned,
-            "requires_write": plan.requires_write,
-            "capabilities": planned_capabilities,
+            "resolved_tool_calls": turn_result.response.resolved_tool_calls.len(),
+            "stopped": turn_result.stopped,
+            "stop_reason": turn_result.stop_reason,
         }),
     )?;
 
-    let apply_started_at = Instant::now();
-    let mut outcome = session.apply_plan(&plan)?;
-    let mut tool_call_latency_ms = plan_latency_ms + elapsed_millis(apply_started_at);
+    let mut outcome = turn_result.outcome;
+    let mut tool_call_latency_ms = plan_latency_ms;
     save_project_context_scene(&session.context)?;
     quest_store.append_timeline_event(
         id,
@@ -1823,22 +1829,13 @@ pub(crate) fn run_quest_execution(prepared: PreparedQuestExecution) -> EngineRes
             parse_thinking_effort(&detail.record.model_config.thinking_effort),
             LoadedToolSet::quest_base().definitions(),
         );
-        let repair_response = session.respond_with_tool_results_streaming(
+        let repair_turn = session.run_turn_with_tools_streaming(
             model.as_ref(),
             repair_request,
             PermissionPolicy::worktree_write(),
+            AgentTurnOptions::default(),
             &mut |delta| repair_trace.push(delta),
         )?;
-        let repair_plan = if repair_response.tool_calls.is_empty() {
-            session
-                .plan_from_response(&repair_response.content, PermissionPolicy::worktree_write())?
-        } else {
-            session.plan_from_tool_calls(
-                &repair_response.tool_calls,
-                &repair_response.content,
-                PermissionPolicy::worktree_write(),
-            )?
-        };
         quest_store.write_thinking_trace(
             id,
             &repair_trace_id,
@@ -1846,37 +1843,26 @@ pub(crate) fn run_quest_execution(prepared: PreparedQuestExecution) -> EngineRes
             &repair_trace.to_markdown(),
         )?;
         let repair_plan_latency_ms = elapsed_millis(repair_started_at);
-        let planned_repair: Vec<String> = repair_plan
-            .operations
+        let planned_repair: Vec<String> = repair_turn
+            .response
+            .resolved_operations
             .iter()
-            .map(|operation| operation.preview.clone())
-            .collect();
-        let planned_repair_capabilities: Vec<serde_json::Value> = repair_plan
-            .operations
-            .iter()
-            .map(|operation| {
-                serde_json::json!({
-                    "preview": operation.preview,
-                    "capabilities": operation.capabilities,
-                    "capability_decisions": operation.capability_decisions,
-                })
-            })
+            .map(|operation| operation.action_name().to_owned())
             .collect();
         quest_store.append_timeline_event(
             id,
             "repair_plan",
-            &format!("Model produced Solo repair plan {repair_attempts}"),
+            &format!("Model executed Solo repair turn {repair_attempts}"),
             serde_json::json!({
                 "attempt": repair_attempts,
                 "operations": planned_repair,
-                "requires_write": repair_plan.requires_write,
-                "capabilities": planned_repair_capabilities,
+                "resolved_tool_calls": repair_turn.response.resolved_tool_calls.len(),
+                "stopped": repair_turn.stopped,
+                "stop_reason": repair_turn.stop_reason,
             }),
         )?;
-        let repair_apply_started_at = Instant::now();
-        let repair_outcome = session.apply_plan(&repair_plan)?;
-        tool_call_latency_ms += repair_plan_latency_ms + elapsed_millis(repair_apply_started_at);
-        merge_agent_outcome(&mut outcome, repair_outcome);
+        tool_call_latency_ms += repair_plan_latency_ms;
+        merge_agent_outcome(&mut outcome, repair_turn.outcome);
         save_project_context_scene(&session.context)?;
         quest_store.append_timeline_event(
             id,

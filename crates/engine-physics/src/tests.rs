@@ -209,14 +209,113 @@ fn simple_backend_overlap_sphere_filters_by_layer() {
 
     assert_eq!(
         backend
-            .overlap_sphere(Vec3::ZERO, 2.0, QueryFilter { mask: 1 << 3 },)
+            .overlap_sphere(
+                Vec3::ZERO,
+                2.0,
+                QueryFilter {
+                    mask: 1 << 3,
+                    ..QueryFilter::default()
+                },
+            )
             .len(),
         1
     );
     assert!(
         backend
-            .overlap_sphere(Vec3::ZERO, 2.0, QueryFilter { mask: 1 << 2 })
+            .overlap_sphere(
+                Vec3::ZERO,
+                2.0,
+                QueryFilter {
+                    mask: 1 << 2,
+                    ..QueryFilter::default()
+                },
+            )
             .is_empty()
+    );
+}
+
+#[test]
+fn simple_backend_queries_exclude_body_collider_and_triggers() {
+    let mut backend = SimplePhysicsBackend::new();
+    let self_body = backend.create_body(&RigidbodyDesc::default()).unwrap();
+    let self_collider = backend
+        .add_collider(
+            self_body,
+            &ColliderDesc {
+                shape: ColliderShape::Sphere { radius: 0.5 },
+                ..ColliderDesc::default()
+            },
+        )
+        .unwrap();
+    let solid_body = backend
+        .create_body(&RigidbodyDesc {
+            transform: Transform {
+                translation: Vec3::new(0.0, 0.0, 3.0),
+                ..Transform::IDENTITY
+            },
+            kind: BodyKind::Static,
+            ..RigidbodyDesc::default()
+        })
+        .unwrap();
+    let solid_collider = backend
+        .add_collider(
+            solid_body,
+            &ColliderDesc {
+                shape: ColliderShape::Sphere { radius: 0.5 },
+                ..ColliderDesc::default()
+            },
+        )
+        .unwrap();
+    let trigger_body = backend
+        .create_body(&RigidbodyDesc {
+            transform: Transform {
+                translation: Vec3::new(0.0, 0.0, 1.5),
+                ..Transform::IDENTITY
+            },
+            kind: BodyKind::Static,
+            ..RigidbodyDesc::default()
+        })
+        .unwrap();
+    backend
+        .add_collider(
+            trigger_body,
+            &ColliderDesc {
+                shape: ColliderShape::Sphere { radius: 0.25 },
+                is_trigger: true,
+                ..ColliderDesc::default()
+            },
+        )
+        .unwrap();
+
+    let hit = backend
+        .raycast(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+            10.0,
+            QueryFilter {
+                exclude_body: Some(self_body),
+                include_triggers: false,
+                ..QueryFilter::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(hit.collider, solid_collider);
+
+    let hits = backend.overlap_sphere(
+        Vec3::ZERO,
+        10.0,
+        QueryFilter {
+            exclude_collider: Some(self_collider),
+            include_triggers: false,
+            ..QueryFilter::default()
+        },
+    );
+    assert_eq!(
+        hits,
+        vec![OverlapResult {
+            body: solid_body,
+            collider: solid_collider,
+        }]
     );
 }
 
@@ -294,7 +393,10 @@ fn rapier_backend_raycast_hits_collider_with_layer_filter() {
                 Vec3::ZERO,
                 Vec3::new(0.0, 0.0, 1.0),
                 10.0,
-                QueryFilter { mask: 1 << 3 },
+                QueryFilter {
+                    mask: 1 << 3,
+                    ..QueryFilter::default()
+                },
             )
             .is_none()
     );
@@ -304,11 +406,102 @@ fn rapier_backend_raycast_hits_collider_with_layer_filter() {
             Vec3::ZERO,
             Vec3::new(0.0, 0.0, 1.0),
             10.0,
-            QueryFilter { mask: 1 << 4 },
+            QueryFilter {
+                mask: 1 << 4,
+                ..QueryFilter::default()
+            },
         )
         .unwrap();
     assert_eq!(hit.body, body);
     assert!(hit.distance > 4.0);
+}
+
+#[cfg(feature = "rapier")]
+#[test]
+fn rapier_backend_queries_exclude_body_collider_and_triggers() {
+    let mut backend = RapierPhysicsBackend::new();
+    let self_body = backend.create_body(&RigidbodyDesc::default()).unwrap();
+    let self_collider = backend
+        .add_collider(
+            self_body,
+            &ColliderDesc {
+                shape: ColliderShape::Sphere { radius: 0.5 },
+                ..ColliderDesc::default()
+            },
+        )
+        .unwrap();
+    let solid_body = backend
+        .create_body(&RigidbodyDesc {
+            transform: Transform {
+                translation: Vec3::new(0.0, 0.0, 3.0),
+                ..Transform::IDENTITY
+            },
+            kind: BodyKind::Static,
+            ..RigidbodyDesc::default()
+        })
+        .unwrap();
+    let solid_collider = backend
+        .add_collider(
+            solid_body,
+            &ColliderDesc {
+                shape: ColliderShape::Sphere { radius: 0.5 },
+                ..ColliderDesc::default()
+            },
+        )
+        .unwrap();
+    let trigger_body = backend
+        .create_body(&RigidbodyDesc {
+            transform: Transform {
+                translation: Vec3::new(0.0, 0.0, 1.5),
+                ..Transform::IDENTITY
+            },
+            kind: BodyKind::Static,
+            ..RigidbodyDesc::default()
+        })
+        .unwrap();
+    backend
+        .add_collider(
+            trigger_body,
+            &ColliderDesc {
+                shape: ColliderShape::Sphere { radius: 0.25 },
+                is_trigger: true,
+                ..ColliderDesc::default()
+            },
+        )
+        .unwrap();
+
+    backend.fixed_update(1.0 / 60.0);
+
+    let hit = backend
+        .raycast(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+            10.0,
+            QueryFilter {
+                exclude_body: Some(self_body),
+                include_triggers: false,
+                ..QueryFilter::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(hit.collider, solid_collider);
+
+    let hits = backend.overlap_sphere(
+        Vec3::ZERO,
+        10.0,
+        QueryFilter {
+            exclude_collider: Some(self_collider),
+            include_triggers: false,
+            ..QueryFilter::default()
+        },
+    );
+    assert_eq!(
+        hits,
+        vec![OverlapResult {
+            body: solid_body,
+            collider: solid_collider,
+        }]
+    );
 }
 
 #[cfg(feature = "rapier")]
