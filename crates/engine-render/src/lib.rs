@@ -151,6 +151,19 @@ pub struct RenderMaterialParams {
     pub emissive: [f32; 3],
 }
 
+/// Pixel-space rectangle inside a sprite texture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderSpriteRegion {
+    /// X offset in pixels.
+    pub x: f32,
+    /// Y offset in pixels.
+    pub y: f32,
+    /// Width in pixels.
+    pub width: f32,
+    /// Height in pixels.
+    pub height: f32,
+}
+
 /// 2D sprite draw data extracted from a scene.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderSprite {
@@ -160,8 +173,12 @@ pub struct RenderSprite {
     pub transform: Transform,
     /// Optional texture asset label.
     pub texture: Option<String>,
+    /// Optional pixel-space rectangle inside the texture.
+    pub region: Option<RenderSpriteRegion>,
     /// Sprite tint color.
     pub color: [f32; 4],
+    /// Material identifier used to shade this sprite.
+    pub material: String,
     /// Draw order within the sorting layer.
     pub order_in_layer: i32,
     /// Sorting layer name.
@@ -170,6 +187,22 @@ pub struct RenderSprite {
     pub flip_h: bool,
     /// Whether the sprite is flipped vertically.
     pub flip_v: bool,
+    /// Whether the generated sprite quad is centered around the transform origin.
+    pub centered: bool,
+    /// Pixels mapped to one world unit when region dimensions are available.
+    pub pixels_per_unit: f32,
+}
+
+fn material_ref_name(material: &engine_ecs::MaterialRef) -> String {
+    material
+        .builtin
+        .clone()
+        .or_else(|| {
+            material
+                .asset
+                .map(|id| format!("asset:{:032x}", id.as_u128()))
+        })
+        .unwrap_or_default()
 }
 
 /// Light data extracted from a scene for rendering.
@@ -766,17 +799,32 @@ impl RenderWorld {
                         }
                     }
                     engine_ecs::ComponentData::Sprite2D(sprite) => {
+                        let material = sprite
+                            .material_override
+                            .as_ref()
+                            .map(material_ref_name)
+                            .filter(|name| !name.is_empty())
+                            .unwrap_or_else(|| "@sprite".to_string());
                         world.sprites.push(RenderSprite {
                             object: obj.id,
                             transform,
                             texture: sprite
                                 .texture
                                 .map(|id| format!("asset:{:032x}", id.as_u128())),
+                            region: sprite.region.map(|region| RenderSpriteRegion {
+                                x: region.x,
+                                y: region.y,
+                                width: region.width,
+                                height: region.height,
+                            }),
                             color: sprite.color,
+                            material,
                             order_in_layer: sprite.order_in_layer,
                             layer: sprite.layer.clone(),
                             flip_h: sprite.flip_h,
                             flip_v: sprite.flip_v,
+                            centered: sprite.centered,
+                            pixels_per_unit: sprite.pixels_per_unit,
                         });
                     }
                     engine_ecs::ComponentData::Light(light) => {
@@ -1659,10 +1707,21 @@ mod tests {
             .upsert_component(
                 sprite,
                 ComponentData::Sprite2D(engine_ecs::Sprite2DComponentData {
+                    region: Some(engine_ecs::SpriteRegion2D {
+                        x: 8.0,
+                        y: 16.0,
+                        width: 32.0,
+                        height: 48.0,
+                    }),
                     color: [0.25, 0.5, 0.75, 0.5],
                     flip_h: true,
                     order_in_layer: 3,
                     layer: "Foreground".to_string(),
+                    pixels_per_unit: 16.0,
+                    material_override: Some(engine_ecs::MaterialRef {
+                        asset: None,
+                        builtin: Some("sprite/custom".to_string()),
+                    }),
                     ..engine_ecs::Sprite2DComponentData::default()
                 }),
             )
@@ -1673,6 +1732,17 @@ mod tests {
         assert!(world.is_visible());
         assert_eq!(world.sprites.len(), 1);
         assert_eq!(world.sprites[0].color, [0.25, 0.5, 0.75, 0.5]);
+        assert_eq!(
+            world.sprites[0].region,
+            Some(RenderSpriteRegion {
+                x: 8.0,
+                y: 16.0,
+                width: 32.0,
+                height: 48.0,
+            })
+        );
+        assert_eq!(world.sprites[0].material, "sprite/custom");
+        assert_eq!(world.sprites[0].pixels_per_unit, 16.0);
         assert!(world.sprites[0].flip_h);
         assert_eq!(world.sprites[0].order_in_layer, 3);
         assert_eq!(world.sprites[0].layer, "Foreground");

@@ -1484,6 +1484,8 @@ impl Default for EnvironmentComponentData {
 pub struct Sprite2DComponentData {
     /// Texture asset GUID.
     pub texture: Option<AssetId>,
+    /// Optional pixel-space rectangle inside the texture.
+    pub region: Option<SpriteRegion2D>,
     /// Tint color (RGBA).
     #[serde(default = "default_sprite_color")]
     pub color: [f32; 4],
@@ -1502,6 +1504,24 @@ pub struct Sprite2DComponentData {
     /// Whether the sprite is centered.
     #[serde(default = "default_true")]
     pub centered: bool,
+    /// Pixels mapped to one world unit when region dimensions are available.
+    #[serde(default = "default_pixels_per_unit")]
+    pub pixels_per_unit: f32,
+    /// Optional material override for the sprite surface.
+    pub material_override: Option<MaterialRef>,
+}
+
+/// Pixel-space rectangle inside a sprite texture.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct SpriteRegion2D {
+    /// X offset in pixels.
+    pub x: f32,
+    /// Y offset in pixels.
+    pub y: f32,
+    /// Width in pixels.
+    pub width: f32,
+    /// Height in pixels.
+    pub height: f32,
 }
 
 fn default_sprite_color() -> [f32; 4] {
@@ -1512,16 +1532,23 @@ fn default_sprite_layer() -> String {
     "Default".to_string()
 }
 
+fn default_pixels_per_unit() -> f32 {
+    100.0
+}
+
 impl Default for Sprite2DComponentData {
     fn default() -> Self {
         Self {
             texture: None,
+            region: None,
             color: default_sprite_color(),
             flip_h: false,
             flip_v: false,
             order_in_layer: 0,
             layer: default_sprite_layer(),
             centered: true,
+            pixels_per_unit: default_pixels_per_unit(),
+            material_override: None,
         }
     }
 }

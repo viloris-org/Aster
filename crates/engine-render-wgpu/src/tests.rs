@@ -1096,11 +1096,15 @@ fn mesh_batches_render_sprites_as_colored_planes() {
             object: engine_core::EntityId::from_u128(2),
             transform,
             texture: None,
+            region: None,
             color: [0.2, 0.4, 0.6, 0.5],
+            material: "@sprite".to_string(),
             order_in_layer: 7,
             layer: "Default".to_string(),
             flip_h: true,
             flip_v: false,
+            centered: true,
+            pixels_per_unit: 100.0,
         }],
         ..RenderWorld::default()
     };

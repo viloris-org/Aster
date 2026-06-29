@@ -42,6 +42,7 @@ tracing-appender.workspace = true
 engine-core.workspace = true
 engine-ecs.workspace = true
 engine-editor.workspace = true
+engine-ui.workspace = true
 engine-script-varg.workspace = true
 engine-i18n.workspace = true
 engine-packager.workspace = true

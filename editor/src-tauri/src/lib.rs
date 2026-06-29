@@ -488,6 +488,7 @@ fn is_text_project_file(extension: &str, file_name: &str) -> bool {
             | "txt"
             | "varg"
             | "vasset"
+            | "vpaint"
             | "vscene"
             | "xml"
             | "yaml"
@@ -1377,6 +1378,7 @@ impl EditorHost {
             "project/import_file" => self.project_import_file(params),
             "project/create_script" => self.project_create_script(params),
             "project/create_material" => self.project_create_material(params),
+            "project/create_texture_paint" => self.project_create_texture_paint(params),
             "project/create_animation" => self.project_create_animation(params),
             "project/create_audio_bus" => self.project_create_audio_bus(params),
             "project/create_prefab" => self.project_create_prefab(params),
@@ -1393,6 +1395,8 @@ impl EditorHost {
             "project/write_file" => self.project_write_file(params),
             "project/write_project_file" => self.project_write_project_file(params),
             "project/package" => self.project_package(params),
+            "texture_paint/add_stroke" => self.texture_paint_add_stroke(params),
+            "texture_paint/bake" => self.texture_paint_bake(params),
 
             // ── Quests ──
             "quest/list" => self.quest_list(params),

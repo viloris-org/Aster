@@ -281,6 +281,7 @@ pub struct WgpuRenderDevice {
     pub(crate) material_bind_group_layout: wgpu::BindGroupLayout,
     pub(crate) default_material_bind_group: wgpu::BindGroup,
     pub(crate) material_gpu: HashMap<String, MaterialGpuData>,
+    pub(crate) material_texture_size: HashMap<String, [f32; 2]>,
     pub(crate) vertex_buffer: wgpu::Buffer,
     pub(crate) index_buffer: wgpu::Buffer,
     pub(crate) instance_buffer: wgpu::Buffer,

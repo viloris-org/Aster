@@ -14,6 +14,7 @@ use engine_render::{
     RenderQualityMode, RenderScalingContext, RenderScalingSettings, UpscalerKind,
 };
 use engine_render_wgpu::WgpuRenderDevice;
+use engine_ui::{ControlTree, Vec2 as UiVec2};
 use runtime_min::RuntimeServices;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
@@ -28,7 +29,7 @@ const TEMPORAL_ACCUMULATION_FRAMES: u8 = 16;
 const NATIVE_ORIENTATION_GIZMO_SIZE: f32 = 80.0;
 const NATIVE_ORIENTATION_GIZMO_MARGIN: f32 = 8.0;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SceneCameraState {
     pub yaw: f32,
     pub pitch: f32,
@@ -81,6 +82,244 @@ impl SceneViewportRect {
             width: self.width.max(1),
             height: self.height.max(1),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditorViewportMouseButton {
+    Left,
+    Right,
+    Middle,
+    Other(u16),
+}
+
+impl From<MouseButton> for EditorViewportMouseButton {
+    fn from(value: MouseButton) -> Self {
+        match value {
+            MouseButton::Left => Self::Left,
+            MouseButton::Right => Self::Right,
+            MouseButton::Middle => Self::Middle,
+            MouseButton::Back => Self::Other(4),
+            MouseButton::Forward => Self::Other(5),
+            MouseButton::Other(button) => Self::Other(button),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EditorViewportInputEvent {
+    PointerDown {
+        button: EditorViewportMouseButton,
+        x: f64,
+        y: f64,
+    },
+    PointerUp {
+        button: EditorViewportMouseButton,
+        x: f64,
+        y: f64,
+    },
+    PointerMove {
+        x: f64,
+        y: f64,
+    },
+    Scroll {
+        x: f64,
+        y: f64,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct EditorViewportInputReply {
+    consumed: bool,
+    request_redraw: bool,
+}
+
+impl EditorViewportInputReply {
+    fn ignored() -> Self {
+        Self {
+            consumed: false,
+            request_redraw: false,
+        }
+    }
+
+    fn consumed_with_redraw() -> Self {
+        Self {
+            consumed: true,
+            request_redraw: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct EditorViewportOverlayRouter {
+    viewport_width: u32,
+    viewport_height: u32,
+}
+
+impl EditorViewportOverlayRouter {
+    fn new(viewport_width: u32, viewport_height: u32) -> Self {
+        Self {
+            viewport_width,
+            viewport_height,
+        }
+    }
+
+    fn set_viewport_size(&mut self, width: u32, height: u32) {
+        self.viewport_width = width;
+        self.viewport_height = height;
+    }
+
+    fn route_pointer_down(
+        &self,
+        button: EditorViewportMouseButton,
+        x: f64,
+        y: f64,
+        camera: &mut SceneCameraState,
+    ) -> EditorViewportInputReply {
+        if button != EditorViewportMouseButton::Left {
+            return EditorViewportInputReply::ignored();
+        }
+        let Some(snap) = native_orientation_gizmo_hit_test(
+            self.viewport_width,
+            self.viewport_height,
+            *camera,
+            x as f32,
+            y as f32,
+        ) else {
+            return EditorViewportInputReply::ignored();
+        };
+        snap.apply(camera);
+        EditorViewportInputReply::consumed_with_redraw()
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct EditorViewportInputRouter {
+    overlays: EditorViewportOverlayRouter,
+    client: EditorViewportClient,
+    last_cursor: Option<(f64, f64)>,
+    captured_button: Option<EditorViewportMouseButton>,
+}
+
+impl EditorViewportInputRouter {
+    fn new(viewport_width: u32, viewport_height: u32) -> Self {
+        Self {
+            overlays: EditorViewportOverlayRouter::new(viewport_width, viewport_height),
+            ..Self::default()
+        }
+    }
+
+    fn route_event(
+        &mut self,
+        event: EditorViewportInputEvent,
+        camera: &mut SceneCameraState,
+    ) -> EditorViewportInputReply {
+        match event {
+            EditorViewportInputEvent::PointerDown { button, x, y } => {
+                self.last_cursor = Some((x, y));
+                let overlay_reply = self.overlays.route_pointer_down(button, x, y, camera);
+                if overlay_reply.consumed {
+                    return overlay_reply;
+                }
+                if self.client.begin_pointer_drag(button) {
+                    self.captured_button = Some(button);
+                    EditorViewportInputReply {
+                        consumed: true,
+                        request_redraw: false,
+                    }
+                } else {
+                    EditorViewportInputReply::ignored()
+                }
+            }
+            EditorViewportInputEvent::PointerUp { button, x, y } => {
+                self.last_cursor = Some((x, y));
+                if self.captured_button == Some(button) {
+                    self.captured_button = None;
+                    EditorViewportInputReply {
+                        consumed: true,
+                        request_redraw: false,
+                    }
+                } else {
+                    EditorViewportInputReply::ignored()
+                }
+            }
+            EditorViewportInputEvent::PointerMove { x, y } => {
+                let previous = self.last_cursor.replace((x, y));
+                let Some(button) = self.captured_button else {
+                    return EditorViewportInputReply::ignored();
+                };
+                let Some((last_x, last_y)) = previous else {
+                    return EditorViewportInputReply {
+                        consumed: true,
+                        request_redraw: false,
+                    };
+                };
+                self.client
+                    .drag_pointer(button, x - last_x, y - last_y, camera)
+            }
+            EditorViewportInputEvent::Scroll { x, y } => self.client.scroll(x, y, camera),
+        }
+    }
+
+    fn clear_capture(&mut self) {
+        self.captured_button = None;
+        self.last_cursor = None;
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.captured_button.is_some()
+    }
+
+    fn last_cursor(&self) -> Option<(f64, f64)> {
+        self.last_cursor
+    }
+
+    fn set_viewport_size(&mut self, width: u32, height: u32) {
+        self.overlays.set_viewport_size(width, height);
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct EditorViewportClient;
+
+impl EditorViewportClient {
+    fn begin_pointer_drag(&self, button: EditorViewportMouseButton) -> bool {
+        matches!(
+            button,
+            EditorViewportMouseButton::Right | EditorViewportMouseButton::Middle
+        )
+    }
+
+    fn drag_pointer(
+        &self,
+        button: EditorViewportMouseButton,
+        dx: f64,
+        dy: f64,
+        camera: &mut SceneCameraState,
+    ) -> EditorViewportInputReply {
+        match button {
+            EditorViewportMouseButton::Right => {
+                camera.yaw -= dx as f32 * 0.005;
+                camera.pitch = (camera.pitch + dy as f32 * 0.005).clamp(-1.5, 1.5);
+                EditorViewportInputReply::consumed_with_redraw()
+            }
+            EditorViewportMouseButton::Middle => {
+                let d = camera.distance * 0.002;
+                let yaw = camera.yaw;
+                camera.target.x += (-dx as f32 * yaw.cos() - dy as f32 * yaw.sin() * 0.5) * d;
+                camera.target.y += dy as f32 * d * 0.5;
+                camera.target.z += (dx as f32 * yaw.sin() - dy as f32 * yaw.cos() * 0.5) * d;
+                EditorViewportInputReply::consumed_with_redraw()
+            }
+            EditorViewportMouseButton::Left | EditorViewportMouseButton::Other(_) => {
+                EditorViewportInputReply::ignored()
+            }
+        }
+    }
+
+    fn scroll(&self, _x: f64, y: f64, camera: &mut SceneCameraState) -> EditorViewportInputReply {
+        camera.distance = (camera.distance - y as f32 * 0.01).clamp(0.5, 100.0);
+        EditorViewportInputReply::consumed_with_redraw()
     }
 }
 
@@ -356,8 +595,7 @@ fn run_scene_window(
         dirty: true,
         temporal_frames_remaining: TEMPORAL_ACCUMULATION_FRAMES,
         render_frame_index: 0,
-        dragging: None,
-        last_cursor: None,
+        viewport_input: EditorViewportInputRouter::new(width, height),
         initial_viewport,
     };
     let run_result = event_loop.run_app(&mut app);
@@ -449,8 +687,7 @@ struct SceneApp {
     dirty: bool,
     temporal_frames_remaining: u8,
     render_frame_index: u64,
-    dragging: Option<MouseButton>,
-    last_cursor: Option<(f64, f64)>,
+    viewport_input: EditorViewportInputRouter,
     initial_viewport: Option<SceneViewportRect>,
 }
 
@@ -500,30 +737,42 @@ impl ApplicationHandler for SceneApp {
             WindowEvent::Resized(size) => {
                 self.width = size.width.max(1);
                 self.height = size.height.max(1);
+                self.viewport_input
+                    .set_viewport_size(self.width, self.height);
                 if let Some(runtime) = self.runtime.as_mut() {
                     runtime.renderer.resize_surface(self.width, self.height);
                 }
                 self.request_temporal_accumulation();
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                self.dragging = if state == ElementState::Pressed {
-                    Some(button)
+                let (x, y) = self.viewport_input.last_cursor().unwrap_or((0.0, 0.0));
+                let event = if state == ElementState::Pressed {
+                    EditorViewportInputEvent::PointerDown {
+                        button: button.into(),
+                        x,
+                        y,
+                    }
                 } else {
-                    None
+                    EditorViewportInputEvent::PointerUp {
+                        button: button.into(),
+                        x,
+                        y,
+                    }
                 };
-                self.last_cursor = None;
+                self.route_viewport_input(event);
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.update_drag(position.x, position.y);
+                self.route_viewport_input(EditorViewportInputEvent::PointerMove {
+                    x: position.x,
+                    y: position.y,
+                });
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let scroll = match delta {
                     MouseScrollDelta::LineDelta(_, y) => f64::from(y) * 32.0,
                     MouseScrollDelta::PixelDelta(pos) => pos.y,
                 };
-                self.camera.distance =
-                    (self.camera.distance - scroll as f32 * 0.01).clamp(0.5, 100.0);
-                self.request_temporal_accumulation();
+                self.route_viewport_input(EditorViewportInputEvent::Scroll { x: 0.0, y: scroll });
             }
             WindowEvent::RedrawRequested => {
                 self.render_frame();
@@ -555,8 +804,7 @@ impl ApplicationHandler for SceneApp {
                 }
                 SceneCommand::Hide => {
                     self.visible = false;
-                    self.dragging = None;
-                    self.last_cursor = None;
+                    self.viewport_input.clear_capture();
                     if let Some(window) = self.window.as_ref() {
                         window.set_visible(false);
                     }
@@ -577,7 +825,9 @@ impl ApplicationHandler for SceneApp {
         }
 
         if self.visible
-            && (self.dirty || self.dragging.is_some() || self.temporal_frames_remaining > 0)
+            && (self.dirty
+                || self.viewport_input.is_dragging()
+                || self.temporal_frames_remaining > 0)
         {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
@@ -618,6 +868,8 @@ impl SceneApp {
         let viewport = viewport.sanitized();
         self.width = viewport.width;
         self.height = viewport.height;
+        self.viewport_input
+            .set_viewport_size(self.width, self.height);
         if let Some(window) = self.window.as_ref() {
             if !matches!(self.mode, SceneWindowMode::WaylandEmbedded { .. }) {
                 window.set_outer_position(LogicalPosition::new(viewport.x, viewport.y));
@@ -659,38 +911,16 @@ impl SceneApp {
         Ok(())
     }
 
-    fn update_drag(&mut self, x: f64, y: f64) {
-        let Some(button) = self.dragging else {
-            self.last_cursor = Some((x, y));
-            return;
-        };
-        let Some((last_x, last_y)) = self.last_cursor else {
-            self.last_cursor = Some((x, y));
-            return;
-        };
-        let dx = x - last_x;
-        let dy = y - last_y;
-        match button {
-            MouseButton::Right => {
-                self.camera.yaw -= dx as f32 * 0.005;
-                self.camera.pitch = (self.camera.pitch + dy as f32 * 0.005).clamp(-1.5, 1.5);
-            }
-            MouseButton::Middle => {
-                let d = self.camera.distance * 0.002;
-                let yaw = self.camera.yaw;
-                self.camera.target.x += (-dx as f32 * yaw.cos() - dy as f32 * yaw.sin() * 0.5) * d;
-                self.camera.target.y += dy as f32 * d * 0.5;
-                self.camera.target.z += (dx as f32 * yaw.sin() - dy as f32 * yaw.cos() * 0.5) * d;
-            }
-            _ => {}
-        }
-        self.last_cursor = Some((x, y));
-        self.request_temporal_accumulation();
-    }
-
     fn request_temporal_accumulation(&mut self) {
         self.dirty = true;
         self.temporal_frames_remaining = TEMPORAL_ACCUMULATION_FRAMES;
+    }
+
+    fn route_viewport_input(&mut self, event: EditorViewportInputEvent) {
+        let reply = self.viewport_input.route_event(event, &mut self.camera);
+        if reply.request_redraw {
+            self.request_temporal_accumulation();
+        }
     }
 
     fn render_frame(&mut self) {
@@ -733,7 +963,7 @@ impl SceneApp {
         self.render_frame_index = self.render_frame_index.wrapping_add(1);
         runtime
             .renderer
-            .set_next_surface_gui(native_orientation_gizmo_draw_list(
+            .set_next_surface_gui(scene_surface_gui_draw_list(
                 self.width,
                 self.height,
                 self.camera,
@@ -1084,7 +1314,7 @@ impl RawSceneApp {
         self.render_frame_index = self.render_frame_index.wrapping_add(1);
         runtime
             .renderer
-            .set_next_surface_gui(native_orientation_gizmo_draw_list(
+            .set_next_surface_gui(scene_surface_gui_draw_list(
                 self.width,
                 self.height,
                 self.camera,
@@ -1137,6 +1367,55 @@ fn scene_view_render_scaling_settings() -> RenderScalingSettings {
         anti_aliasing: AntiAliasingMode::Off,
         ..RenderScalingSettings::default()
     }
+}
+
+fn scene_surface_gui_draw_list(width: u32, height: u32, camera: SceneCameraState) -> GuiDrawList {
+    let mut draw_list = native_editor_status_overlay_draw_list(width, height);
+    append_gui_draw_list(
+        &mut draw_list,
+        native_orientation_gizmo_draw_list(width, height, camera),
+    );
+    draw_list
+}
+
+fn native_editor_status_overlay_draw_list(width: u32, height: u32) -> GuiDrawList {
+    if width == 0 || height == 0 {
+        return GuiDrawList::default();
+    }
+    let mut tree = ControlTree::new();
+    {
+        let theme = tree.theme_mut();
+        theme.base_color = [0.045, 0.05, 0.058, 0.82];
+        theme.accent_color = [0.16, 0.38, 0.70, 0.88];
+        theme.text_color = [0.84, 0.90, 0.96, 1.0];
+        theme.font_size = 12.0;
+        theme.spacing = 8.0;
+    }
+    tree.add_button("scene-mode", "Scene View");
+    tree.add_label("scene-ui-pipeline", "engine-ui draw list");
+    tree.layout(UiVec2::new(width as f32, height as f32));
+    tree.build_gui_draw_list(UiVec2::new(width as f32, height as f32))
+}
+
+fn append_gui_draw_list(target: &mut GuiDrawList, source: GuiDrawList) {
+    if source.vertices.is_empty() || source.indices.is_empty() || source.commands.is_empty() {
+        return;
+    }
+    let vertex_offset = target.vertices.len() as u32;
+    let index_offset = target.indices.len() as u32;
+    target.vertices.extend(source.vertices);
+    target.indices.extend(
+        source
+            .indices
+            .into_iter()
+            .map(|index| index + vertex_offset),
+    );
+    target
+        .commands
+        .extend(source.commands.into_iter().map(|mut command| {
+            command.index_offset = command.index_offset.saturating_add(index_offset);
+            command
+        }));
 }
 
 fn native_orientation_gizmo_draw_list(
@@ -1216,6 +1495,86 @@ fn native_orientation_gizmo_draw_list(
     builder.finish()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeOrientationSnap {
+    Front,
+    Back,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl NativeOrientationSnap {
+    fn apply(self, camera: &mut SceneCameraState) {
+        match self {
+            Self::Front => {
+                camera.pitch = 0.0;
+                camera.yaw = 0.0;
+            }
+            Self::Back => {
+                camera.pitch = 0.0;
+                camera.yaw = std::f32::consts::PI;
+            }
+            Self::Left => {
+                camera.pitch = 0.0;
+                camera.yaw = 1.5;
+            }
+            Self::Right => {
+                camera.pitch = 0.0;
+                camera.yaw = -1.5;
+            }
+            Self::Top => {
+                camera.pitch = 1.5;
+                camera.yaw = 0.0;
+            }
+            Self::Bottom => {
+                camera.pitch = -1.5;
+                camera.yaw = 0.0;
+            }
+        }
+    }
+}
+
+fn native_orientation_gizmo_hit_test(
+    width: u32,
+    height: u32,
+    camera: SceneCameraState,
+    x: f32,
+    y: f32,
+) -> Option<NativeOrientationSnap> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let size = NATIVE_ORIENTATION_GIZMO_SIZE
+        .min(width as f32)
+        .min(height as f32);
+    if size < 24.0 {
+        return None;
+    }
+    let origin = [
+        width as f32 - NATIVE_ORIENTATION_GIZMO_MARGIN - size * 0.5,
+        NATIVE_ORIENTATION_GIZMO_MARGIN + size * 0.5,
+    ];
+    let radius = size * 0.34;
+    let hit_radius = size * 0.12;
+    native_orientation_axes(camera)
+        .into_iter()
+        .filter_map(|axis| {
+            let end = [origin[0] + axis.x * radius, origin[1] + axis.y * radius];
+            let dx = x - end[0];
+            let dy = y - end[1];
+            let distance_squared = dx * dx + dy * dy;
+            if distance_squared <= hit_radius * hit_radius {
+                Some((distance_squared, axis.snap()))
+            } else {
+                None
+            }
+        })
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .map(|(_, snap)| snap)
+}
+
 #[derive(Clone, Copy)]
 struct NativeOrientationAxis {
     label: char,
@@ -1224,6 +1583,20 @@ struct NativeOrientationAxis {
     x: f32,
     y: f32,
     depth: f32,
+}
+
+impl NativeOrientationAxis {
+    fn snap(self) -> NativeOrientationSnap {
+        match (self.label, self.negative) {
+            ('X', false) => NativeOrientationSnap::Right,
+            ('X', true) => NativeOrientationSnap::Left,
+            ('Y', false) => NativeOrientationSnap::Top,
+            ('Y', true) => NativeOrientationSnap::Bottom,
+            ('Z', false) => NativeOrientationSnap::Back,
+            ('Z', true) => NativeOrientationSnap::Front,
+            _ => NativeOrientationSnap::Front,
+        }
+    }
 }
 
 fn native_orientation_axes(camera: SceneCameraState) -> Vec<NativeOrientationAxis> {
@@ -1565,6 +1938,25 @@ mod tests {
     }
 
     #[test]
+    fn scene_surface_gui_combines_engine_ui_and_native_overlays() {
+        let draw_list = scene_surface_gui_draw_list(640, 360, SceneCameraState::default());
+
+        assert!(!draw_list.vertices.is_empty());
+        assert!(!draw_list.indices.is_empty());
+        assert!(
+            draw_list.commands.len() >= 2,
+            "expected engine-ui overlay plus orientation gizmo commands"
+        );
+        let mut previous_end = 0;
+        for command in &draw_list.commands {
+            assert!(command.index_offset >= previous_end);
+            let end = command.index_offset + command.index_count;
+            assert!((end as usize) <= draw_list.indices.len());
+            previous_end = end;
+        }
+    }
+
+    #[test]
     fn native_orientation_gizmo_tracks_camera_orientation() {
         let front = native_orientation_axes(SceneCameraState {
             yaw: 0.0,
@@ -1589,6 +1981,171 @@ mod tests {
         assert!(draw_list.vertices.is_empty());
         assert!(draw_list.indices.is_empty());
         assert!(draw_list.commands.is_empty());
+    }
+
+    #[test]
+    fn viewport_router_orbits_camera_with_right_drag() {
+        let mut router = EditorViewportInputRouter::default();
+        let mut camera = SceneCameraState::default();
+        let yaw = camera.yaw;
+        let pitch = camera.pitch;
+
+        let down = router.route_event(
+            EditorViewportInputEvent::PointerDown {
+                button: EditorViewportMouseButton::Right,
+                x: 100.0,
+                y: 120.0,
+            },
+            &mut camera,
+        );
+        let drag = router.route_event(
+            EditorViewportInputEvent::PointerMove { x: 140.0, y: 100.0 },
+            &mut camera,
+        );
+
+        assert!(down.consumed);
+        assert!(drag.consumed);
+        assert!(drag.request_redraw);
+        assert!((camera.yaw - (yaw - 0.2)).abs() < f32::EPSILON);
+        assert!((camera.pitch - (pitch - 0.1)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn viewport_router_pans_camera_with_middle_drag() {
+        let mut router = EditorViewportInputRouter::default();
+        let mut camera = SceneCameraState {
+            yaw: 0.0,
+            distance: 10.0,
+            ..SceneCameraState::default()
+        };
+        let target = camera.target;
+
+        router.route_event(
+            EditorViewportInputEvent::PointerDown {
+                button: EditorViewportMouseButton::Middle,
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut camera,
+        );
+        let reply = router.route_event(
+            EditorViewportInputEvent::PointerMove { x: 20.0, y: 30.0 },
+            &mut camera,
+        );
+
+        assert!(reply.consumed);
+        assert!(reply.request_redraw);
+        assert_ne!(camera.target, target);
+        assert!((camera.target.x - (target.x - 0.2)).abs() < f32::EPSILON);
+        assert!((camera.target.y - (target.y + 0.1)).abs() < f32::EPSILON);
+        assert!((camera.target.z - (target.z - 0.1)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn viewport_router_scrolls_camera_distance() {
+        let mut router = EditorViewportInputRouter::default();
+        let mut camera = SceneCameraState::default();
+
+        let reply = router.route_event(
+            EditorViewportInputEvent::Scroll { x: 0.0, y: 32.0 },
+            &mut camera,
+        );
+
+        assert!(reply.consumed);
+        assert!(reply.request_redraw);
+        assert!((camera.distance - 5.68).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn viewport_router_sends_left_click_to_orientation_overlay_before_viewport_client() {
+        let mut router = EditorViewportInputRouter::new(640, 360);
+        let mut camera = SceneCameraState::default();
+        let (x, y) = native_orientation_axis_screen_point(640, 360, camera, 'X', false);
+
+        let reply = router.route_event(
+            EditorViewportInputEvent::PointerDown {
+                button: EditorViewportMouseButton::Left,
+                x: f64::from(x),
+                y: f64::from(y),
+            },
+            &mut camera,
+        );
+
+        assert!(reply.consumed);
+        assert!(reply.request_redraw);
+        assert_eq!(camera.pitch, 0.0);
+        assert_eq!(camera.yaw, -1.5);
+        assert!(!router.is_dragging());
+    }
+
+    #[test]
+    fn viewport_overlay_router_ignores_non_overlay_pointer_down() {
+        let overlays = EditorViewportOverlayRouter::new(640, 360);
+        let mut camera = SceneCameraState::default();
+
+        let right_reply =
+            overlays.route_pointer_down(EditorViewportMouseButton::Right, 600.0, 48.0, &mut camera);
+        let empty_reply =
+            overlays.route_pointer_down(EditorViewportMouseButton::Left, 24.0, 24.0, &mut camera);
+
+        assert!(!right_reply.consumed);
+        assert!(!empty_reply.consumed);
+        assert_eq!(camera, SceneCameraState::default());
+    }
+
+    #[test]
+    fn viewport_router_ignores_left_button_for_scene_navigation() {
+        let mut router = EditorViewportInputRouter::new(640, 360);
+        let mut camera = SceneCameraState::default();
+
+        let down = router.route_event(
+            EditorViewportInputEvent::PointerDown {
+                button: EditorViewportMouseButton::Left,
+                x: 10.0,
+                y: 20.0,
+            },
+            &mut camera,
+        );
+        let drag = router.route_event(
+            EditorViewportInputEvent::PointerMove { x: 30.0, y: 40.0 },
+            &mut camera,
+        );
+
+        assert!(!down.consumed);
+        assert!(!drag.consumed);
+        assert_eq!(camera, SceneCameraState::default());
+    }
+
+    #[test]
+    fn native_orientation_gizmo_hit_test_returns_matching_snap_axis() {
+        let camera = SceneCameraState::default();
+        let (x, y) = native_orientation_axis_screen_point(640, 360, camera, 'Z', true);
+
+        let snap = native_orientation_gizmo_hit_test(640, 360, camera, x, y);
+
+        assert_eq!(snap, Some(NativeOrientationSnap::Front));
+    }
+
+    fn native_orientation_axis_screen_point(
+        width: u32,
+        height: u32,
+        camera: SceneCameraState,
+        label: char,
+        negative: bool,
+    ) -> (f32, f32) {
+        let size = NATIVE_ORIENTATION_GIZMO_SIZE
+            .min(width as f32)
+            .min(height as f32);
+        let origin = [
+            width as f32 - NATIVE_ORIENTATION_GIZMO_MARGIN - size * 0.5,
+            NATIVE_ORIENTATION_GIZMO_MARGIN + size * 0.5,
+        ];
+        let radius = size * 0.34;
+        let axis = native_orientation_axes(camera)
+            .into_iter()
+            .find(|axis| axis.label == label && axis.negative == negative)
+            .unwrap();
+        (origin[0] + axis.x * radius, origin[1] + axis.y * radius)
     }
 
     #[test]

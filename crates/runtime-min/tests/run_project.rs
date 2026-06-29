@@ -1,7 +1,8 @@
 //! Integration test for run_project command.
 
-use runtime_min::load_runtime_project;
+use runtime_min::{RuntimeServices, load_runtime_project};
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Verifies that load_runtime_project can load the example project.
 #[test]
@@ -34,6 +35,61 @@ fn load_runtime_project_loads_jump_jump_example() {
     assert!(
         !project.scene.objects().is_empty(),
         "scene should have objects"
+    );
+}
+
+/// Verifies that the VargCraft capability probe loads as a normal runtime project.
+#[test]
+fn load_runtime_project_loads_vargcraft_prototype() {
+    let workspace_root = find_workspace_root();
+    let project_path = workspace_root.join("examples/project/vargcraft_prototype");
+
+    let project = load_runtime_project(&project_path).expect("load vargcraft prototype");
+    let world = runtime_min::extract_render_world(&project.scene);
+    let visibility = engine_render::select_visibility(&world, 16.0 / 9.0);
+
+    assert_eq!(project.manifest.name, "VargCraft Prototype");
+    assert_eq!(project.manifest.asset_root, "assets");
+    assert_eq!(
+        project.manifest.default_scene,
+        "scenes/vargcraft_prototype.vscene"
+    );
+    assert!(project.scene.find_by_name("Player").is_some());
+    assert!(world.camera.is_some(), "prototype should extract a camera");
+    assert!(
+        !visibility.visible_indices.is_empty(),
+        "prototype camera should see at least one renderable object before runtime block spawning"
+    );
+}
+
+/// Verifies that the VargCraft prototype's runtime script creates editable block entities.
+#[test]
+fn vargcraft_prototype_spawns_blocks_on_first_frame() {
+    let workspace_root = find_workspace_root();
+    let project_path = workspace_root.join("examples/project/vargcraft_prototype");
+
+    let project = load_runtime_project(&project_path).expect("load vargcraft prototype");
+    let mut services = RuntimeServices::minimal(Default::default());
+    services.set_project_root(&project_path);
+    services.scene = project.scene;
+
+    services
+        .tick_game_frame(Duration::from_millis(16), false)
+        .expect("tick first vargcraft frame");
+
+    let block_count = services
+        .scene
+        .objects()
+        .into_iter()
+        .filter(|(_, object)| {
+            object.tag == "GrassBlock" || object.tag == "DirtBlock" || object.tag == "StoneBlock"
+        })
+        .count();
+
+    assert!(
+        block_count > 40,
+        "prototype should spawn enough block entities to stress runtime paths, got {block_count}; diagnostics={:?}",
+        services.diagnostics
     );
 }
 

@@ -133,6 +133,475 @@ pub struct VargScript {
     hooks: HashMap<String, Vec<RuntimeStatement>>,
 }
 
+/// Public metadata for a compiled Varg script.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct VargScriptMetadata {
+    /// Script declaration name.
+    pub name: String,
+    /// Editor-exposed properties available for inspector overrides.
+    pub exports: Vec<VargExport>,
+    /// Lifecycle hooks implemented by this script.
+    pub hooks: Vec<VargHookMetadata>,
+}
+
+/// Public metadata for one implemented script lifecycle hook.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct VargHookMetadata {
+    /// Stable hook name, such as `start`, `update`, `fixedUpdate`, or `lateUpdate`.
+    pub name: String,
+}
+
+/// Registry module containing script-facing engine APIs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct VargScriptApiModule {
+    /// Module name used at the script boundary.
+    pub name: &'static str,
+    /// Human-readable module summary.
+    pub description: &'static str,
+    /// API entries in this module.
+    pub items: &'static [VargScriptApiItem],
+}
+
+/// One script-facing engine API entry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct VargScriptApiItem {
+    /// API name as used in script source.
+    pub name: &'static str,
+    /// Compact Varg-facing signature.
+    pub signature: &'static str,
+    /// API entry kind.
+    pub kind: VargScriptApiKind,
+    /// Human-readable API summary.
+    pub description: &'static str,
+}
+
+/// Script-facing engine API entry kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum VargScriptApiKind {
+    /// Callable function or method.
+    Function,
+    /// Read-only value available to expressions.
+    Property,
+    /// Statement-like side effect accepted by the MVP interpreter.
+    Statement,
+    /// Mutable script binding that writes to engine state.
+    AssignmentTarget,
+}
+
+/// Returns the script-facing engine API registry used by diagnostics and tools.
+pub fn varg_script_api_registry() -> &'static [VargScriptApiModule] {
+    VARG_SCRIPT_API_REGISTRY
+}
+
+const INPUT_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "Input.value",
+        signature: "Input.value(action: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Reads the current analog value for a named input action.",
+    },
+    VargScriptApiItem {
+        name: "Input.actionValue",
+        signature: "Input.actionValue(action: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Alias for reading a named input action value.",
+    },
+    VargScriptApiItem {
+        name: "Input.axis",
+        signature: "Input.axis(axis: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Reads a built-in movement axis such as moveX or moveY.",
+    },
+    VargScriptApiItem {
+        name: "Input.down",
+        signature: "Input.down(action: String) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Returns whether a named action is currently held.",
+    },
+    VargScriptApiItem {
+        name: "Input.pressed",
+        signature: "Input.pressed(action: String) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Returns whether a named action was pressed this frame.",
+    },
+    VargScriptApiItem {
+        name: "Input.justPressed",
+        signature: "Input.justPressed(action: String) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Returns whether a named action was pressed this frame.",
+    },
+    VargScriptApiItem {
+        name: "Input.released",
+        signature: "Input.released(action: String) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Returns whether a named action was released this frame.",
+    },
+    VargScriptApiItem {
+        name: "Input.justReleased",
+        signature: "Input.justReleased(action: String) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Returns whether a named action was released this frame.",
+    },
+    VargScriptApiItem {
+        name: "Input.captureMouse",
+        signature: "Input.captureMouse(captured: Bool = true)",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests mouse capture for the game window.",
+    },
+    VargScriptApiItem {
+        name: "Input.releaseMouse",
+        signature: "Input.releaseMouse()",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests mouse release for the game window.",
+    },
+    VargScriptApiItem {
+        name: "Input.mouseDeltaX",
+        signature: "Input.mouseDeltaX() -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Reads horizontal mouse movement for the current frame.",
+    },
+    VargScriptApiItem {
+        name: "Input.mouseDeltaY",
+        signature: "Input.mouseDeltaY() -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Reads vertical mouse movement for the current frame.",
+    },
+    VargScriptApiItem {
+        name: "Input.cursorX",
+        signature: "Input.cursorX -> Float",
+        kind: VargScriptApiKind::Property,
+        description: "Current pointer x position in screen space.",
+    },
+    VargScriptApiItem {
+        name: "Input.cursorY",
+        signature: "Input.cursorY -> Float",
+        kind: VargScriptApiKind::Property,
+        description: "Current pointer y position in screen space.",
+    },
+];
+
+const TIME_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "Time.time",
+        signature: "Time.time -> Float",
+        kind: VargScriptApiKind::Property,
+        description: "Total elapsed runtime time in seconds.",
+    },
+    VargScriptApiItem {
+        name: "Time.delta",
+        signature: "Time.delta -> Float",
+        kind: VargScriptApiKind::Property,
+        description: "Current lifecycle delta time in seconds.",
+    },
+    VargScriptApiItem {
+        name: "Time.frame",
+        signature: "Time.frame -> Float",
+        kind: VargScriptApiKind::Property,
+        description: "Current runtime frame index.",
+    },
+];
+
+const ENTITY_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "entity.translate",
+        signature: "entity.translate(delta: Vec3)",
+        kind: VargScriptApiKind::Statement,
+        description: "Adds a local-space translation to the owning entity.",
+    },
+    VargScriptApiItem {
+        name: "entity.destroy",
+        signature: "entity.destroy()",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests deferred destruction of the owning entity.",
+    },
+    VargScriptApiItem {
+        name: "entity.hasTag",
+        signature: "entity.hasTag(tag: String) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Returns whether the owning entity has the requested tag.",
+    },
+    VargScriptApiItem {
+        name: "position",
+        signature: "position: Vec3",
+        kind: VargScriptApiKind::AssignmentTarget,
+        description: "Owning entity local position.",
+    },
+    VargScriptApiItem {
+        name: "rotation",
+        signature: "rotation: Vec3",
+        kind: VargScriptApiKind::AssignmentTarget,
+        description: "Owning entity local Euler rotation in degrees.",
+    },
+];
+
+const SCENE_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "scene.spawnBox",
+        signature: "scene.spawnBox(name: String, tag: String, position: Vec3, size: Vec3, script: String)",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests creation of a primitive box scene object.",
+    },
+    VargScriptApiItem {
+        name: "scene.spawnSphere",
+        signature: "scene.spawnSphere(name: String, tag: String, position: Vec3, radius: Float, script: String)",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests creation of a primitive sphere scene object.",
+    },
+    VargScriptApiItem {
+        name: "scene.destroyNearestWithTag",
+        signature: "scene.destroyNearestWithTag(tag: String, radius: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests destruction of the nearest object with a tag inside a radius.",
+    },
+    VargScriptApiItem {
+        name: "scene.distanceToTag",
+        signature: "scene.distanceToTag(tag: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Distance from the owning entity to the nearest object with a tag.",
+    },
+    VargScriptApiItem {
+        name: "scene.distanceToTagBounds",
+        signature: "scene.distanceToTagBounds(tag: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Distance from the owning entity to nearest tagged bounds.",
+    },
+    VargScriptApiItem {
+        name: "scene.horizontalDistanceToTagBounds",
+        signature: "scene.horizontalDistanceToTagBounds(tag: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Horizontal distance from the owning entity to nearest tagged bounds.",
+    },
+    VargScriptApiItem {
+        name: "scene.xOf",
+        signature: "scene.xOf(name: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Reads the x position of a named object.",
+    },
+    VargScriptApiItem {
+        name: "scene.yOf",
+        signature: "scene.yOf(name: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Reads the y position of a named object.",
+    },
+    VargScriptApiItem {
+        name: "scene.zOf",
+        signature: "scene.zOf(name: String) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Reads the z position of a named object.",
+    },
+];
+
+const AUDIO_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "Audio.playTone",
+        signature: "Audio.playTone(waveform: String, frequency: Float, duration: Float, volume: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Plays a transient procedural tone.",
+    },
+    VargScriptApiItem {
+        name: "Audio.playTone3D",
+        signature: "Audio.playTone3D(waveform: String, frequency: Float, duration: Float, volume: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Plays a transient procedural tone at the owning entity position.",
+    },
+    VargScriptApiItem {
+        name: "Audio.startLoop",
+        signature: "Audio.startLoop(id: String, waveform: String, pattern: String, bpm: Float, beatsPerNote: Float, volume: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Starts or updates a procedural audio loop.",
+    },
+    VargScriptApiItem {
+        name: "Audio.stopLoop",
+        signature: "Audio.stopLoop(id: String)",
+        kind: VargScriptApiKind::Statement,
+        description: "Stops a procedural audio loop.",
+    },
+];
+
+const RENDER_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "render.gi.useScreenSpace",
+        signature: "render.gi.useScreenSpace()",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests screen-space global illumination.",
+    },
+    VargScriptApiItem {
+        name: "render.gi.useProbeVolume",
+        signature: "render.gi.useProbeVolume(center: Vec3, extent: Vec3, counts: Vec3, intensity: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Requests probe-volume global illumination.",
+    },
+    VargScriptApiItem {
+        name: "render.gi.setIntensity",
+        signature: "render.gi.setIntensity(intensity: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Sets runtime global illumination intensity.",
+    },
+    VargScriptApiItem {
+        name: "render.weather.set",
+        signature: "render.weather.set(preset: String)",
+        kind: VargScriptApiKind::Statement,
+        description: "Sets the runtime weather preset.",
+    },
+    VargScriptApiItem {
+        name: "render.weather.setTimeOfDay",
+        signature: "render.weather.setTimeOfDay(hour: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Sets runtime time of day in hours.",
+    },
+    VargScriptApiItem {
+        name: "render.weather.setCloudCover",
+        signature: "render.weather.setCloudCover(amount: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Sets runtime cloud cover from 0 to 1.",
+    },
+    VargScriptApiItem {
+        name: "render.weather.setPrecipitation",
+        signature: "render.weather.setPrecipitation(amount: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Sets runtime precipitation from 0 to 1.",
+    },
+    VargScriptApiItem {
+        name: "render.weather.setWind",
+        signature: "render.weather.setWind(wind: Vec3)",
+        kind: VargScriptApiKind::Statement,
+        description: "Sets runtime weather wind velocity.",
+    },
+];
+
+const UI_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "ui.label",
+        signature: "ui.label(id: String, text: String, x: Float, y: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Draws retained text in screen space.",
+    },
+    VargScriptApiItem {
+        name: "ui.rect",
+        signature: "ui.rect(id: String, x: Float, y: Float, width: Float, height: Float, r: Float, g: Float, b: Float, a: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Draws a retained rectangle in screen space.",
+    },
+    VargScriptApiItem {
+        name: "ui.screenWidth",
+        signature: "ui.screenWidth() -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Returns the current runtime output width in pixels.",
+    },
+    VargScriptApiItem {
+        name: "ui.screenHeight",
+        signature: "ui.screenHeight() -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Returns the current runtime output height in pixels.",
+    },
+    VargScriptApiItem {
+        name: "ui.texture",
+        signature: "ui.texture(id: String, texture: String, x: Float, y: Float, width: Float, height: Float)",
+        kind: VargScriptApiKind::Statement,
+        description: "Draws a retained textured rectangle in screen space.",
+    },
+    VargScriptApiItem {
+        name: "ui.button",
+        signature: "ui.button(id: String, text: String, x: Float, y: Float, width: Float, height: Float) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Draws a button and returns true when clicked.",
+    },
+    VargScriptApiItem {
+        name: "ui.toggle",
+        signature: "ui.toggle(id: String, current: Bool, x: Float, y: Float, width: Float, height: Float) -> Bool",
+        kind: VargScriptApiKind::Function,
+        description: "Draws a toggle and returns its next value.",
+    },
+    VargScriptApiItem {
+        name: "ui.slider",
+        signature: "ui.slider(id: String, current: Float, x: Float, y: Float, width: Float, height: Float, min: Float, max: Float) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Draws a slider and returns its next value.",
+    },
+];
+
+const MATH_API: &[VargScriptApiItem] = &[
+    VargScriptApiItem {
+        name: "Vec3",
+        signature: "Vec3(x: Float, y: Float, z: Float) -> Vec3",
+        kind: VargScriptApiKind::Function,
+        description: "Constructs a vector value.",
+    },
+    VargScriptApiItem {
+        name: "clamp",
+        signature: "clamp(value: Float, min: Float, max: Float) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Clamps a value to a numeric range.",
+    },
+    VargScriptApiItem {
+        name: "lerp",
+        signature: "lerp(from: Float, to: Float, t: Float) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Linearly interpolates between two numbers.",
+    },
+    VargScriptApiItem {
+        name: "sin",
+        signature: "sin(value: Float) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Sine function.",
+    },
+    VargScriptApiItem {
+        name: "cos",
+        signature: "cos(value: Float) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Cosine function.",
+    },
+    VargScriptApiItem {
+        name: "floor",
+        signature: "floor(value: Float) -> Float",
+        kind: VargScriptApiKind::Function,
+        description: "Rounds down to the nearest integer value.",
+    },
+];
+
+const VARG_SCRIPT_API_REGISTRY: &[VargScriptApiModule] = &[
+    VargScriptApiModule {
+        name: "Input",
+        description: "Frame input, pointer, and capture APIs.",
+        items: INPUT_API,
+    },
+    VargScriptApiModule {
+        name: "Time",
+        description: "Runtime timing values.",
+        items: TIME_API,
+    },
+    VargScriptApiModule {
+        name: "entity",
+        description: "Owning entity transform, tag, and lifecycle APIs.",
+        items: ENTITY_API,
+    },
+    VargScriptApiModule {
+        name: "scene",
+        description: "Read-only scene queries and deferred scene mutation requests.",
+        items: SCENE_API,
+    },
+    VargScriptApiModule {
+        name: "Audio",
+        description: "Procedural runtime audio commands.",
+        items: AUDIO_API,
+    },
+    VargScriptApiModule {
+        name: "render",
+        description: "Runtime render environment commands.",
+        items: RENDER_API,
+    },
+    VargScriptApiModule {
+        name: "ui",
+        description: "Retained immediate gameplay UI helpers.",
+        items: UI_API,
+    },
+    VargScriptApiModule {
+        name: "Math",
+        description: "Numeric and vector helper functions.",
+        items: MATH_API,
+    },
+];
+
 /// Compiled declarative behavior tree summary from a `.varg` behavior declaration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VargBehavior {
@@ -208,6 +677,8 @@ pub struct VargRuntimeContext {
     pub total_time: f32,
     /// Monotonic runtime frame index.
     pub frame_index: u64,
+    /// Runtime output size in pixels.
+    pub screen_size: (f32, f32),
     /// Editor-exposed overrides keyed by exported property name.
     pub exported_values: HashMap<String, serde_json::Value>,
     /// Persistent script state keyed by state variable name.
@@ -232,6 +703,8 @@ pub struct VargRuntimeContextRef<'a> {
     pub total_time: f32,
     /// Monotonic runtime frame index.
     pub frame_index: u64,
+    /// Runtime output size in pixels.
+    pub screen_size: (f32, f32),
     /// Editor-exposed overrides keyed by exported property name.
     pub exported_values: &'a HashMap<String, serde_json::Value>,
     /// Persistent script state keyed by state variable name.
@@ -392,6 +865,23 @@ pub enum VargUiCommand {
         /// Height in pixels.
         height: f32,
         /// RGBA color in linear float channels.
+        color: [f32; 4],
+    },
+    /// Draws a textured rectangle in screen space.
+    Texture {
+        /// Stable script-provided widget id.
+        id: String,
+        /// Runtime GUI texture key.
+        texture: String,
+        /// Screen-space x position in pixels.
+        x: f32,
+        /// Screen-space y position in pixels.
+        y: f32,
+        /// Width in pixels.
+        width: f32,
+        /// Height in pixels.
+        height: f32,
+        /// RGBA tint in linear float channels.
         color: [f32; 4],
     },
 }
@@ -745,6 +1235,15 @@ enum RuntimeStatement {
         height: Expression,
         color: [Expression; 4],
     },
+    UiTexture {
+        id: Expression,
+        texture: Expression,
+        x: Expression,
+        y: Expression,
+        width: Expression,
+        height: Expression,
+        color: [Expression; 4],
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1045,6 +1544,33 @@ pub fn serialize_scene_file_to_vscene(file: &SceneFile) -> engine_core::EngineRe
 }
 
 impl VargScript {
+    /// Returns public metadata for editor, AI, hot reload, and runtime dispatch.
+    pub fn metadata(&self) -> VargScriptMetadata {
+        VargScriptMetadata {
+            name: self.name.clone(),
+            exports: self.exports.clone(),
+            hooks: self
+                .hook_names()
+                .into_iter()
+                .map(|name| VargHookMetadata {
+                    name: name.to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Returns whether this script implements a lifecycle hook.
+    pub fn has_hook(&self, hook: &str) -> bool {
+        self.hooks.contains_key(hook)
+    }
+
+    /// Returns implemented lifecycle hook names in stable lexical order.
+    pub fn hook_names(&self) -> Vec<&str> {
+        let mut hooks = self.hooks.keys().map(String::as_str).collect::<Vec<_>>();
+        hooks.sort_unstable();
+        hooks
+    }
+
     /// Executes a lifecycle hook if the script defines it.
     pub fn run_hook(&self, hook: &str, context: VargRuntimeContext) -> VargRuntimeOutput {
         self.run_hook_borrowed(
@@ -1057,6 +1583,7 @@ impl VargScript {
                 delta_time: context.delta_time,
                 total_time: context.total_time,
                 frame_index: context.frame_index,
+                screen_size: context.screen_size,
                 exported_values: &context.exported_values,
                 state: context.state,
                 scene: context.scene,
@@ -1108,6 +1635,7 @@ impl VargScript {
             delta_time: context.delta_time,
             total_time: context.total_time,
             frame_index: context.frame_index,
+            screen_size: context.screen_size,
             exported_values: context.exported_values,
             scene: &context.scene,
             transform: &mut output.transform,
@@ -3026,6 +3554,7 @@ struct RuntimeEnvironment<'a> {
     delta_time: f32,
     total_time: f32,
     frame_index: u64,
+    screen_size: (f32, f32),
     exported_values: &'a HashMap<String, serde_json::Value>,
     scene: &'a VargSceneContext,
     transform: &'a mut Transform,
@@ -3463,6 +3992,37 @@ impl RuntimeEnvironment<'_> {
                     color,
                 });
             }
+            RuntimeStatement::UiTexture {
+                id,
+                texture,
+                x,
+                y,
+                width,
+                height,
+                color,
+            } => {
+                let id = self.eval_string(id).unwrap_or_default();
+                let texture = self.eval_string(texture).unwrap_or_default();
+                let x = self.eval_number(x);
+                let y = self.eval_number(y);
+                let width = self.eval_number(width).max(0.0);
+                let height = self.eval_number(height).max(0.0);
+                let color = [
+                    self.eval_number(&color[0]).clamp(0.0, 1.0),
+                    self.eval_number(&color[1]).clamp(0.0, 1.0),
+                    self.eval_number(&color[2]).clamp(0.0, 1.0),
+                    self.eval_number(&color[3]).clamp(0.0, 1.0),
+                ];
+                self.ui_commands.push(VargUiCommand::Texture {
+                    id,
+                    texture,
+                    x,
+                    y,
+                    width,
+                    height,
+                    color,
+                });
+            }
         }
     }
 
@@ -3750,6 +4310,8 @@ impl RuntimeEnvironment<'_> {
                 .cursor_position()
                 .map(|position| position.1)
                 .unwrap_or(0.0),
+            "ui.screenWidth" | "UI.screenWidth" => self.screen_size.0.max(1.0),
+            "ui.screenHeight" | "UI.screenHeight" => self.screen_size.1.max(1.0),
             "Input.pointerDown" | "Input.touchDown" => self
                 .input
                 .mouse_button_down(engine_platform::MouseButton::Left)
@@ -4636,6 +5198,35 @@ fn parse_runtime_statement(
                     parse_expression(args[7])?,
                     parse_expression(args[8])?,
                 ],
+            });
+        }
+    }
+    if let Some(content) = method_args(line, "ui.texture") {
+        let args = split_top_level_commas(content);
+        if args.len() == 6 || args.len() == 10 {
+            let color = if args.len() == 10 {
+                [
+                    parse_expression(args[6])?,
+                    parse_expression(args[7])?,
+                    parse_expression(args[8])?,
+                    parse_expression(args[9])?,
+                ]
+            } else {
+                [
+                    Expression::Number(1.0),
+                    Expression::Number(1.0),
+                    Expression::Number(1.0),
+                    Expression::Number(1.0),
+                ]
+            };
+            return Some(RuntimeStatement::UiTexture {
+                id: parse_expression(args[0])?,
+                texture: parse_expression(args[1])?,
+                x: parse_expression(args[2])?,
+                y: parse_expression(args[3])?,
+                width: parse_expression(args[4])?,
+                height: parse_expression(args[5])?,
+                color,
             });
         }
     }
@@ -5999,6 +6590,90 @@ mod tests {
     }
 
     #[test]
+    fn compiled_script_exposes_metadata_for_exports_and_hooks() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/player.varg",
+            r#"script Player {
+    @export var speed: Float = 6.0
+
+    func start() {
+        log("ready")
+    }
+
+    func update(_ dt: Float) {
+        entity.translate(Vec3(speed * dt, 0.0, 0.0))
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let script = script.unwrap();
+        assert!(script.has_hook("start"));
+        assert!(script.has_hook("update"));
+        assert!(!script.has_hook("lateUpdate"));
+        assert_eq!(script.hook_names(), vec!["start", "update"]);
+
+        let metadata = script.metadata();
+        assert_eq!(metadata.name, "Player");
+        assert_eq!(metadata.exports.len(), 1);
+        assert_eq!(metadata.exports[0].name, "speed");
+        assert_eq!(metadata.exports[0].type_name, "Float");
+        assert_eq!(
+            metadata
+                .hooks
+                .iter()
+                .map(|hook| hook.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["start", "update"]
+        );
+    }
+
+    #[test]
+    fn script_api_registry_exposes_supported_runtime_modules() {
+        let registry = varg_script_api_registry();
+        let module_names = registry
+            .iter()
+            .map(|module| module.name)
+            .collect::<Vec<_>>();
+
+        assert!(module_names.contains(&"Input"));
+        assert!(module_names.contains(&"scene"));
+        assert!(module_names.contains(&"Audio"));
+        assert!(module_names.contains(&"render"));
+        assert!(module_names.contains(&"ui"));
+
+        let input = registry
+            .iter()
+            .find(|module| module.name == "Input")
+            .unwrap();
+        assert!(input.items.iter().any(|item| item.name == "Input.value"));
+        assert!(
+            input
+                .items
+                .iter()
+                .any(|item| item.name == "Input.captureMouse")
+        );
+
+        let scene = registry
+            .iter()
+            .find(|module| module.name == "scene")
+            .unwrap();
+        assert!(
+            scene
+                .items
+                .iter()
+                .any(|item| item.name == "scene.spawnSphere")
+        );
+
+        let ui = registry.iter().find(|module| module.name == "ui").unwrap();
+        assert!(ui.items.iter().any(|item| item.name == "ui.button"));
+        assert!(ui.items.iter().any(|item| item.name == "ui.texture"));
+        assert!(ui.items.iter().any(|item| item.name == "ui.screenWidth"));
+        assert!(ui.items.iter().any(|item| item.name == "ui.screenHeight"));
+    }
+
+    #[test]
     fn rejects_unsupported_condition_calls() {
         let diagnostics = diagnose_source(
             "scripts/player.varg",
@@ -6044,6 +6719,7 @@ mod tests {
             delta_time: 0.016,
             total_time: 0.016,
             frame_index: 1,
+            screen_size: (800.0, 600.0),
             exported_values: HashMap::new(),
             state: HashMap::new(),
             scene: VargSceneContext::default(),
@@ -6064,6 +6740,7 @@ mod tests {
             delta_time: 0.016,
             total_time: 0.032,
             frame_index: 2,
+            screen_size: (800.0, 600.0),
             exported_values: HashMap::new(),
             state: output.state,
             scene: VargSceneContext::default(),
@@ -6100,6 +6777,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 1.0,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6134,6 +6812,50 @@ mod tests {
     }
 
     #[test]
+    fn runtime_ui_can_read_screen_size_and_emit_textures() {
+        let (script, diagnostics) = compile_script_source(
+            "scripts/responsive_hud.varg",
+            r#"script ResponsiveHud {
+    func update(_ dt: Float) {
+        let cx: Float = ui.screenWidth() * 0.5
+        let y: Float = ui.screenHeight() - 32.0
+        ui.texture("hotbar", "vargcraft:hotbar", cx - 91.0, y, 182.0, 22.0)
+    }
+}
+"#,
+        );
+
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let output = script.unwrap().run_hook(
+            "update",
+            VargRuntimeContext {
+                transform: Transform::default(),
+                input: engine_platform::InputState::default(),
+                delta_time: 0.016,
+                total_time: 1.0,
+                frame_index: 1,
+                screen_size: (1280.0, 720.0),
+                exported_values: HashMap::new(),
+                state: HashMap::new(),
+                scene: VargSceneContext::default(),
+            },
+        );
+
+        assert_eq!(
+            output.ui_commands,
+            vec![VargUiCommand::Texture {
+                id: "hotbar".to_string(),
+                texture: "vargcraft:hotbar".to_string(),
+                x: 549.0,
+                y: 688.0,
+                width: 182.0,
+                height: 22.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+            }]
+        );
+    }
+
+    #[test]
     fn runtime_emits_procedural_audio_commands() {
         let (script, diagnostics) = compile_script_source(
             "scripts/sfx.varg",
@@ -6158,6 +6880,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 1.0,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6209,6 +6932,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 1.0,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6275,6 +6999,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6327,6 +7052,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6353,6 +7079,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.032,
                 frame_index: 2,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: output.state,
                 scene: VargSceneContext::default(),
@@ -6408,6 +7135,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6441,6 +7169,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.032,
                 frame_index: 2,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: output.state,
                 scene: VargSceneContext::default(),
@@ -6491,6 +7220,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6546,6 +7276,7 @@ mod tests {
                 delta_time: 1.0,
                 total_time: 1.0,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6579,6 +7310,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6642,6 +7374,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene,
@@ -6701,6 +7434,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6753,6 +7487,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6807,6 +7542,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -6874,6 +7610,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene,
@@ -7127,6 +7864,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7166,6 +7904,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7205,6 +7944,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7243,6 +7983,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7284,6 +8025,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7326,6 +8068,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7367,6 +8110,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7410,6 +8154,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7451,6 +8196,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.5,
                 frame_index: 7,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7492,6 +8238,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7516,6 +8263,7 @@ mod tests {
                     delta_time: 0.016,
                     total_time: 0.5,
                     frame_index: 30,
+                    screen_size: (800.0, 600.0),
                     exported_values: HashMap::new(),
                     state: state.clone(),
                     scene: VargSceneContext::default(),
@@ -7541,6 +8289,7 @@ mod tests {
                     delta_time: 0.016,
                     total_time: 1.2,
                     frame_index: 70,
+                    screen_size: (800.0, 600.0),
                     exported_values: HashMap::new(),
                     state: state.clone(),
                     scene: VargSceneContext::default(),
@@ -7590,6 +8339,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: exported.clone(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7613,6 +8363,7 @@ mod tests {
                     delta_time: 0.016,
                     total_time: 0.5,
                     frame_index: 32,
+                    screen_size: (800.0, 600.0),
                     exported_values: exported.clone(),
                     state: state.clone(),
                     scene: VargSceneContext::default(),
@@ -7658,6 +8409,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7702,6 +8454,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: &HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7750,6 +8503,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: &HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7786,6 +8540,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.032,
                 frame_index: 2,
+                screen_size: (800.0, 600.0),
                 exported_values: &HashMap::new(),
                 state: std::mem::take(&mut state),
                 scene: VargSceneContext::default(),
@@ -7826,6 +8581,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: &HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7864,6 +8620,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7922,6 +8679,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),
@@ -7956,6 +8714,7 @@ mod tests {
                 delta_time: 0.016,
                 total_time: 0.016,
                 frame_index: 1,
+                screen_size: (800.0, 600.0),
                 exported_values: HashMap::new(),
                 state: HashMap::new(),
                 scene: VargSceneContext::default(),

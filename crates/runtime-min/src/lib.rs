@@ -46,16 +46,16 @@ use engine_physics::{
 #[cfg(feature = "runtime-game")]
 use engine_platform::GamepadProvider;
 use engine_platform::{ActionMap, InputState};
+#[cfg(feature = "asset-import")]
+use engine_render::RenderMaterialTextures;
 use engine_render::{
     AntiAliasingMode, BatteryPolicy, FrameGenerationKind, GuiDrawCmd, GuiDrawList, GuiTextureId,
-    GuiVertex, HeadlessRenderDevice, ImageHandle, PresentStrategy, RenderApi, RenderDevice,
-    RenderEnvironment, RenderFog, RenderFrame, RenderGlobalIllumination, RenderGraph,
-    RenderGraphBuilder, RenderPerformanceConfig, RenderPlatformClass, RenderProbeVolume,
-    RenderQualityMode, RenderScalingContext, RenderScalingSettings, RenderWorld, ThermalState,
-    UiCompositionPolicy, UpscalerKind,
+    GuiVertex, HeadlessRenderDevice, ImageDesc, ImageFormat, ImageHandle, ImageUsage,
+    PresentStrategy, RenderApi, RenderDevice, RenderEnvironment, RenderFog, RenderFrame,
+    RenderGlobalIllumination, RenderGraph, RenderGraphBuilder, RenderPerformanceConfig,
+    RenderPlatformClass, RenderProbeVolume, RenderQualityMode, RenderScalingContext,
+    RenderScalingSettings, RenderWorld, ThermalState, UiCompositionPolicy, UpscalerKind,
 };
-#[cfg(feature = "asset-import")]
-use engine_render::{ImageDesc, ImageFormat, ImageUsage, RenderMaterialTextures};
 #[cfg(feature = "wgpu")]
 pub use engine_render_wgpu::WgpuRenderDevice;
 use engine_script_varg::{
@@ -132,6 +132,8 @@ pub struct RuntimeServices<R = HeadlessRenderDevice> {
     pub asset_root: Option<PathBuf>,
     /// GPU textures resolved from project asset GUIDs.
     pub texture_resources: HashMap<engine_core::AssetId, ImageHandle>,
+    /// GUI textures available to script-authored HUDs.
+    pub gui_textures: HashMap<String, GuiTextureId>,
     /// CPU mesh resources resolved from project asset GUIDs.
     pub mesh_resources: HashMap<engine_core::AssetId, ModelResource>,
     /// Material resources resolved from project asset GUIDs.
@@ -591,6 +593,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             asset_registry: AssetRegistry::default(),
             asset_root: None,
             texture_resources: HashMap::new(),
+            gui_textures: HashMap::new(),
             mesh_resources: HashMap::new(),
             material_resources: HashMap::new(),
             frame_counter: FrameCounter::default(),
@@ -614,6 +617,28 @@ impl<R: RenderDevice> RuntimeServices<R> {
             #[cfg(feature = "physics")]
             physics_bindings: Vec::new(),
         }
+    }
+
+    fn ensure_builtin_gui_textures(&mut self) -> EngineResult<()> {
+        for (key, width, height, pixels) in builtin_gui_texture_sources() {
+            if self.gui_textures.contains_key(key) {
+                continue;
+            }
+            let id = self.renderer.upload_gui_texture(
+                ImageDesc {
+                    width,
+                    height,
+                    mip_levels: 1,
+                    samples: 1,
+                    format: ImageFormat::Rgba8Srgb,
+                    usage: ImageUsage::SAMPLED.or(ImageUsage::TRANSFER_DST),
+                    label: Some("runtime gui texture"),
+                },
+                &pixels,
+            )?;
+            self.gui_textures.insert(key.to_string(), id);
+        }
+        Ok(())
     }
 
     /// Applies player-facing render settings immediately without recreating the renderer.
@@ -753,9 +778,10 @@ impl<R: RenderDevice> RuntimeServices<R> {
         let frame = RenderFrame {
             frame_index: self.frame_counter.get(),
         };
-        let ui_draw_list = build_script_ui_draw_list(&self.ui_commands);
+        self.ensure_builtin_gui_textures()?;
+        let ui_draw_list = build_script_ui_draw_list(&self.ui_commands, &self.gui_textures);
         let ui_draw_list = if self.pause_menu_open {
-            build_pause_menu_draw_list(ui_draw_list, self.user_preferences)
+            build_pause_menu_draw_list(ui_draw_list, self.user_preferences, self.stats.output_size)
         } else {
             ui_draw_list
         };
@@ -836,6 +862,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
 
         self.input_capture.mouse = false;
         self.paused = true;
+        let pause_layout = PauseMenuLayout::for_output(self.stats.output_size);
 
         if self.input.key_pressed(KeyCode::Enter)
             || self.input.key_pressed(KeyCode::Space)
@@ -843,7 +870,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
             || self
                 .pointer_released
                 .iter()
-                .any(|(x, y)| point_in_rect(*x, *y, 720.0, 410.0, 480.0, 52.0))
+                .any(|(x, y)| pause_layout.continue_button.contains(*x, *y))
         {
             self.pause_menu_open = false;
             self.paused = false;
@@ -851,21 +878,21 @@ impl<R: RenderDevice> RuntimeServices<R> {
             || self
                 .pointer_released
                 .iter()
-                .any(|(x, y)| point_in_rect(*x, *y, 720.0, 482.0, 480.0, 52.0))
+                .any(|(x, y)| pause_layout.exit_button.contains(*x, *y))
         {
             self.exit_requested = true;
         } else if self.input.key_pressed(KeyCode::Character('x'))
             || self
                 .pointer_released
                 .iter()
-                .any(|(x, y)| point_in_rect(*x, *y, 720.0, 554.0, 480.0, 44.0))
+                .any(|(x, y)| pause_layout.invert_x_button.contains(*x, *y))
         {
             self.user_preferences.invert_mouse_x = !self.user_preferences.invert_mouse_x;
         } else if self.input.key_pressed(KeyCode::Character('y'))
             || self
                 .pointer_released
                 .iter()
-                .any(|(x, y)| point_in_rect(*x, *y, 720.0, 610.0, 480.0, 44.0))
+                .any(|(x, y)| pause_layout.invert_y_button.contains(*x, *y))
         {
             self.user_preferences.invert_mouse_y = !self.user_preferences.invert_mouse_y;
         }
@@ -944,9 +971,16 @@ impl<R: RenderDevice> RuntimeServices<R> {
                     continue;
                 }
             };
+            if !compiled.has_hook(hook.name()) {
+                continue;
+            }
             let transform = self.scene.transforms().local(entity).unwrap_or_default();
             let scene_context = self.scene_snapshot.context_for(entity);
             let script_input = self.input_for_scripts();
+            let screen_size = (
+                self.stats.output_size.0.max(800) as f32,
+                self.stats.output_size.1.max(600) as f32,
+            );
             let mut output = compiled.run_hook_borrowed(
                 hook.name(),
                 VargRuntimeContextRef {
@@ -957,6 +991,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
                     delta_time: dt,
                     total_time: self.time.total_time,
                     frame_index: self.time.frame_index,
+                    screen_size,
                     exported_values: &script.exported_values,
                     state: script.state.clone(),
                     scene: scene_context,
@@ -3014,7 +3049,10 @@ pub fn render_scaling_settings_from_build(build: &BuildConfiguration) -> RenderS
     apply_runtime_scaling_env(settings)
 }
 
-fn build_script_ui_draw_list(commands: &[VargUiCommand]) -> GuiDrawList {
+fn build_script_ui_draw_list(
+    commands: &[VargUiCommand],
+    gui_textures: &HashMap<String, GuiTextureId>,
+) -> GuiDrawList {
     let mut draw_list = GuiDrawList::default();
     for command in commands {
         match command {
@@ -3026,6 +3064,21 @@ fn build_script_ui_draw_list(commands: &[VargUiCommand]) -> GuiDrawList {
                 color,
                 ..
             } => push_gui_quad(&mut draw_list, *x, *y, *width, *height, *color),
+            VargUiCommand::Texture {
+                texture,
+                x,
+                y,
+                width,
+                height,
+                color,
+                ..
+            } => {
+                let texture_id = gui_textures
+                    .get(texture)
+                    .copied()
+                    .unwrap_or(GuiTextureId(0));
+                push_gui_textured_quad(&mut draw_list, texture_id, *x, *y, *width, *height, *color);
+            }
             VargUiCommand::Label { text, x, y, .. } => {
                 let mut cursor_x = *x;
                 for ch in text.chars() {
@@ -3045,74 +3098,89 @@ fn build_script_ui_draw_list(commands: &[VargUiCommand]) -> GuiDrawList {
 fn build_pause_menu_draw_list(
     mut draw_list: GuiDrawList,
     preferences: RuntimeUserPreferences,
+    output_size: (u32, u32),
 ) -> GuiDrawList {
+    let layout = PauseMenuLayout::for_output(output_size);
+    let screen = layout.screen;
+    let panel = layout.panel;
+    let accent = layout.accent;
+    let continue_button = layout.continue_button;
+    let exit_button = layout.exit_button;
+    let invert_x_button = layout.invert_x_button;
+    let invert_y_button = layout.invert_y_button;
     push_gui_quad(
         &mut draw_list,
-        0.0,
-        0.0,
-        1920.0,
-        1080.0,
+        screen.x,
+        screen.y,
+        screen.width,
+        screen.height,
         [0.0, 0.0, 0.0, 0.58],
     );
     push_gui_quad(
         &mut draw_list,
-        660.0,
-        300.0,
-        600.0,
-        410.0,
+        panel.x,
+        panel.y,
+        panel.width,
+        panel.height,
         [0.035, 0.045, 0.06, 0.94],
     );
     push_gui_quad(
         &mut draw_list,
-        660.0,
-        300.0,
-        6.0,
-        410.0,
+        accent.x,
+        accent.y,
+        accent.width,
+        accent.height,
         [0.34, 0.75, 0.92, 1.0],
     );
-    push_gui_text(&mut draw_list, 720.0, 360.0, "PAUSED", [1.0, 1.0, 1.0, 1.0]);
+    push_gui_text(
+        &mut draw_list,
+        layout.content_x,
+        panel.y + 60.0,
+        "PAUSED",
+        [1.0, 1.0, 1.0, 1.0],
+    );
     push_gui_quad(
         &mut draw_list,
-        720.0,
-        410.0,
-        480.0,
-        52.0,
+        continue_button.x,
+        continue_button.y,
+        continue_button.width,
+        continue_button.height,
         [0.12, 0.24, 0.32, 0.96],
     );
     push_gui_text(
         &mut draw_list,
-        748.0,
-        430.0,
+        continue_button.x + 28.0,
+        continue_button.y + 20.0,
         "CONTINUE",
         [0.88, 0.94, 1.0, 1.0],
     );
     push_gui_quad(
         &mut draw_list,
-        720.0,
-        482.0,
-        480.0,
-        52.0,
+        exit_button.x,
+        exit_button.y,
+        exit_button.width,
+        exit_button.height,
         [0.25, 0.1, 0.1, 0.96],
     );
     push_gui_text(
         &mut draw_list,
-        748.0,
-        502.0,
+        exit_button.x + 28.0,
+        exit_button.y + 20.0,
         "EXIT GAME",
         [0.88, 0.94, 1.0, 1.0],
     );
     push_gui_quad(
         &mut draw_list,
-        720.0,
-        554.0,
-        480.0,
-        44.0,
+        invert_x_button.x,
+        invert_x_button.y,
+        invert_x_button.width,
+        invert_x_button.height,
         [0.1, 0.13, 0.18, 0.96],
     );
     push_gui_text(
         &mut draw_list,
-        748.0,
-        570.0,
+        invert_x_button.x + 28.0,
+        invert_x_button.y + 16.0,
         &format!(
             "INVERT MOUSE X: {}",
             if preferences.invert_mouse_x {
@@ -3125,16 +3193,16 @@ fn build_pause_menu_draw_list(
     );
     push_gui_quad(
         &mut draw_list,
-        720.0,
-        610.0,
-        480.0,
-        44.0,
+        invert_y_button.x,
+        invert_y_button.y,
+        invert_y_button.width,
+        invert_y_button.height,
         [0.1, 0.13, 0.18, 0.96],
     );
     push_gui_text(
         &mut draw_list,
-        748.0,
-        626.0,
+        invert_y_button.x + 28.0,
+        invert_y_button.y + 16.0,
         &format!(
             "INVERT MOUSE Y: {}",
             if preferences.invert_mouse_y {
@@ -3147,16 +3215,97 @@ fn build_pause_menu_draw_list(
     );
     push_gui_text(
         &mut draw_list,
-        720.0,
-        674.0,
+        layout.content_x,
+        panel.y + panel.height - 36.0,
         "Esc / Enter / Space / E continue    Q exits    X/Y toggles",
         [0.72, 0.78, 0.86, 1.0],
     );
     draw_list
 }
 
-fn point_in_rect(px: f32, py: f32, x: f32, y: f32, width: f32, height: f32) -> bool {
-    px >= x && px <= x + width && py >= y && py <= y + height
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct UiRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+impl UiRect {
+    fn contains(self, px: f32, py: f32) -> bool {
+        px >= self.x && px <= self.x + self.width && py >= self.y && py <= self.y + self.height
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PauseMenuLayout {
+    screen: UiRect,
+    panel: UiRect,
+    accent: UiRect,
+    continue_button: UiRect,
+    exit_button: UiRect,
+    invert_x_button: UiRect,
+    invert_y_button: UiRect,
+    content_x: f32,
+}
+
+impl PauseMenuLayout {
+    fn for_output(output_size: (u32, u32)) -> Self {
+        let screen_width = output_size.0.max(1) as f32;
+        let screen_height = output_size.1.max(1) as f32;
+        let panel_width = 600.0_f32.min((screen_width - 32.0).max(320.0));
+        let panel_height = 410.0_f32.min((screen_height - 32.0).max(300.0));
+        let panel_x = ((screen_width - panel_width) * 0.5).max(16.0);
+        let panel_y = ((screen_height - panel_height) * 0.5).max(16.0);
+        let content_x = panel_x + 60.0;
+        let button_width = (panel_width - 120.0).max(220.0);
+
+        Self {
+            screen: UiRect {
+                x: 0.0,
+                y: 0.0,
+                width: screen_width,
+                height: screen_height,
+            },
+            panel: UiRect {
+                x: panel_x,
+                y: panel_y,
+                width: panel_width,
+                height: panel_height,
+            },
+            accent: UiRect {
+                x: panel_x,
+                y: panel_y,
+                width: 6.0,
+                height: panel_height,
+            },
+            continue_button: UiRect {
+                x: content_x,
+                y: panel_y + 110.0,
+                width: button_width,
+                height: 52.0,
+            },
+            exit_button: UiRect {
+                x: content_x,
+                y: panel_y + 182.0,
+                width: button_width,
+                height: 52.0,
+            },
+            invert_x_button: UiRect {
+                x: content_x,
+                y: panel_y + 254.0,
+                width: button_width,
+                height: 44.0,
+            },
+            invert_y_button: UiRect {
+                x: content_x,
+                y: panel_y + 310.0,
+                width: button_width,
+                height: 44.0,
+            },
+            content_x,
+        }
+    }
 }
 
 fn push_gui_text(draw_list: &mut GuiDrawList, x: f32, y: f32, text: &str, color: [f32; 4]) {
@@ -3346,6 +3495,18 @@ fn push_gui_quad(
     height: f32,
     color: [f32; 4],
 ) {
+    push_gui_textured_quad(draw_list, GuiTextureId(0), x, y, width, height, color);
+}
+
+fn push_gui_textured_quad(
+    draw_list: &mut GuiDrawList,
+    texture: GuiTextureId,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: [f32; 4],
+) {
     if width <= 0.0 || height <= 0.0 {
         return;
     }
@@ -3378,11 +3539,172 @@ fn push_gui_quad(
         .indices
         .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     draw_list.commands.push(GuiDrawCmd {
-        texture: GuiTextureId(0),
+        texture,
         scissor: gui_scissor_for_rect(x, y, width, height),
         index_offset,
         index_count: 6,
     });
+}
+
+fn builtin_gui_texture_sources() -> Vec<(&'static str, u32, u32, Vec<u8>)> {
+    vec![
+        ("vargcraft:hotbar", 182, 22, hotbar_texture_pixels()),
+        ("vargcraft:slot", 20, 20, slot_texture_pixels(false)),
+        ("vargcraft:slot_selected", 24, 24, slot_texture_pixels(true)),
+        (
+            "vargcraft:block_grass",
+            16,
+            16,
+            block_icon_pixels([85, 139, 52, 255], [117, 179, 76, 255], [96, 72, 45, 255]),
+        ),
+        (
+            "vargcraft:block_stone",
+            16,
+            16,
+            block_icon_pixels([92, 93, 91, 255], [132, 132, 126, 255], [58, 59, 57, 255]),
+        ),
+        (
+            "vargcraft:block_wood",
+            16,
+            16,
+            block_icon_pixels([126, 86, 46, 255], [174, 122, 63, 255], [72, 48, 28, 255]),
+        ),
+        (
+            "vargcraft:heart",
+            9,
+            9,
+            mask_icon_pixels(
+                9,
+                9,
+                &[
+                    "011011000",
+                    "111111100",
+                    "111111100",
+                    "111111100",
+                    "011111000",
+                    "001110000",
+                    "000100000",
+                    "000000000",
+                    "000000000",
+                ],
+                [223, 41, 41, 255],
+                [96, 12, 12, 255],
+            ),
+        ),
+        (
+            "vargcraft:armor",
+            9,
+            9,
+            mask_icon_pixels(
+                9,
+                9,
+                &[
+                    "001110000",
+                    "011111000",
+                    "111111100",
+                    "110101100",
+                    "111111100",
+                    "011111000",
+                    "001010000",
+                    "000000000",
+                    "000000000",
+                ],
+                [184, 205, 216, 255],
+                [72, 92, 104, 255],
+            ),
+        ),
+    ]
+}
+
+fn hotbar_texture_pixels() -> Vec<u8> {
+    let mut pixels = vec![0; 182 * 22 * 4];
+    for y in 0..22 {
+        for x in 0..182 {
+            let slot_x = x % 20;
+            let border = y <= 1 || y >= 20 || slot_x <= 1 || slot_x >= 18;
+            let inner_shadow = y >= 17 || slot_x >= 16;
+            let color = if border {
+                [44, 44, 44, 224]
+            } else if inner_shadow {
+                [83, 83, 83, 224]
+            } else {
+                [139, 139, 139, 216]
+            };
+            write_pixel(&mut pixels, 182, x, y, color);
+        }
+    }
+    pixels
+}
+
+fn slot_texture_pixels(selected: bool) -> Vec<u8> {
+    let size = if selected { 24 } else { 20 };
+    let mut pixels = vec![0; size * size * 4];
+    for y in 0..size {
+        for x in 0..size {
+            let edge = x == 0 || y == 0 || x == size - 1 || y == size - 1;
+            let inner_edge = x == 1 || y == 1 || x == size - 2 || y == size - 2;
+            let color = if selected && edge {
+                [245, 245, 245, 255]
+            } else if selected && inner_edge {
+                [52, 52, 52, 248]
+            } else if edge {
+                [38, 38, 38, 230]
+            } else {
+                [118, 118, 118, 210]
+            };
+            write_pixel(&mut pixels, size as u32, x as u32, y as u32, color);
+        }
+    }
+    pixels
+}
+
+fn block_icon_pixels(base: [u8; 4], light: [u8; 4], dark: [u8; 4]) -> Vec<u8> {
+    let mut pixels = vec![0; 16 * 16 * 4];
+    for y in 0..16 {
+        for x in 0..16 {
+            let checker = ((x / 4) + (y / 4)) % 2 == 0;
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            let top = y < 4;
+            let color = if edge {
+                dark
+            } else if top || checker {
+                light
+            } else {
+                base
+            };
+            write_pixel(&mut pixels, 16, x, y, color);
+        }
+    }
+    pixels
+}
+
+fn mask_icon_pixels(
+    width: usize,
+    height: usize,
+    mask: &[&str],
+    fill: [u8; 4],
+    shade: [u8; 4],
+) -> Vec<u8> {
+    let mut pixels = vec![0; width * height * 4];
+    for y in 0..height {
+        for (x, bit) in mask[y].bytes().enumerate() {
+            if bit != b'1' {
+                continue;
+            }
+            let color = if y > height / 2 || x == 0 || x == width - 1 {
+                shade
+            } else {
+                fill
+            };
+            write_pixel(&mut pixels, width as u32, x as u32, y as u32, color);
+        }
+    }
+    pixels
+}
+
+fn write_pixel(pixels: &mut [u8], width: u32, x: u32, y: u32, color: [u8; 4]) {
+    let offset = ((y * width + x) * 4) as usize;
+    pixels[offset..offset + 4].copy_from_slice(&color);
 }
 
 fn pack_gui_color(color: [f32; 4]) -> u32 {
@@ -4307,22 +4629,36 @@ mod tests {
 
     #[test]
     fn script_ui_commands_build_gui_draw_list() {
-        let draw_list = build_script_ui_draw_list(&[
-            VargUiCommand::Rect {
-                id: "panel".to_string(),
-                x: 8.0,
-                y: 10.0,
-                width: 24.0,
-                height: 12.0,
-                color: [0.25, 0.5, 0.75, 1.0],
-            },
-            VargUiCommand::Label {
-                id: "label".to_string(),
-                text: "Hi!".to_string(),
-                x: 40.0,
-                y: 12.0,
-            },
-        ]);
+        let mut gui_textures = HashMap::new();
+        gui_textures.insert("test:slot".to_string(), GuiTextureId(7));
+        let draw_list = build_script_ui_draw_list(
+            &[
+                VargUiCommand::Rect {
+                    id: "panel".to_string(),
+                    x: 8.0,
+                    y: 10.0,
+                    width: 24.0,
+                    height: 12.0,
+                    color: [0.25, 0.5, 0.75, 1.0],
+                },
+                VargUiCommand::Label {
+                    id: "label".to_string(),
+                    text: "Hi!".to_string(),
+                    x: 40.0,
+                    y: 12.0,
+                },
+                VargUiCommand::Texture {
+                    id: "slot".to_string(),
+                    texture: "test:slot".to_string(),
+                    x: 64.0,
+                    y: 18.0,
+                    width: 16.0,
+                    height: 16.0,
+                    color: [1.0, 1.0, 1.0, 0.75],
+                },
+            ],
+            &gui_textures,
+        );
 
         assert!(draw_list.vertices.len() > 16);
         assert_eq!(draw_list.vertices.len() % 4, 0);
@@ -4335,6 +4671,8 @@ mod tests {
         assert_eq!(draw_list.vertices[4].pos, [40.0, 12.0]);
         assert_eq!(draw_list.vertices[4].color, 0xffffffff);
         assert_eq!(draw_list.commands[1].scissor, [40, 12, 2, 2]);
+        assert_eq!(draw_list.commands.last().unwrap().texture, GuiTextureId(7));
+        assert_eq!(draw_list.vertices.last().unwrap().color, 0xbfffffff);
     }
 
     #[test]
@@ -4402,6 +4740,55 @@ mod tests {
             script.state.get("ticks").and_then(|value| value.as_f64()),
             Some(1.0)
         );
+    }
+
+    #[test]
+    fn varg_script_without_start_hook_does_not_record_started_state() {
+        let root = tempfile::tempdir().unwrap();
+        let scripts = root.path().join("scripts");
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::write(
+            scripts.join("tick.varg"),
+            r#"script TickOnly {
+    var ticks: Int = 0
+
+    func update(_ dt: Float) {
+        state.ticks += 1
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services.set_project_root(root.path());
+        let entity = services.scene.create_object("Scripted").unwrap();
+        services
+            .scene
+            .upsert_component(
+                entity,
+                ComponentData::Script(engine_ecs::ScriptComponent::new("scripts/tick.varg")),
+            )
+            .unwrap();
+
+        services
+            .tick_game_frame(Duration::from_millis(16), false)
+            .unwrap();
+
+        let object = services.scene.object(entity).unwrap();
+        let script = object
+            .components
+            .iter()
+            .find_map(|component| match component {
+                ComponentData::Script(script) => Some(script),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            script.state.get("ticks").and_then(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert!(!script.state.contains_key("__varg_started"));
     }
 
     #[test]
@@ -5515,6 +5902,7 @@ mod tests {
     #[test]
     fn escape_opens_pause_menu_and_menu_actions_control_runtime() {
         let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services.stats.output_size = (800, 600);
         services.input_capture.mouse = true;
         services
             .input
@@ -5533,12 +5921,21 @@ mod tests {
             RuntimeInputCapture { mouse: false }
         );
         assert!(
-            !build_pause_menu_draw_list(GuiDrawList::default(), services.user_preferences)
-                .commands
-                .is_empty()
+            !build_pause_menu_draw_list(
+                GuiDrawList::default(),
+                services.user_preferences,
+                (1920, 1080),
+            )
+            .commands
+            .is_empty()
         );
 
-        services.pointer_released.push((760.0, 574.0));
+        services.stats.output_size = (800, 600);
+        let layout = PauseMenuLayout::for_output(services.stats.output_size);
+        services.pointer_released.push((
+            layout.invert_x_button.x + 40.0,
+            layout.invert_x_button.y + 20.0,
+        ));
         services
             .tick_game_frame(Duration::from_millis(16), false)
             .unwrap();
@@ -5546,7 +5943,11 @@ mod tests {
         assert!(services.pause_menu_open);
         assert!(services.user_preferences.invert_mouse_x);
 
-        services.pointer_released.push((760.0, 630.0));
+        services.stats.output_size = (800, 600);
+        services.pointer_released.push((
+            layout.invert_y_button.x + 40.0,
+            layout.invert_y_button.y + 20.0,
+        ));
         services
             .tick_game_frame(Duration::from_millis(16), false)
             .unwrap();
@@ -5558,7 +5959,11 @@ mod tests {
             .apply_event(engine_platform::InputEvent::KeyUp(
                 engine_platform::KeyCode::Escape,
             ));
-        services.pointer_released.push((760.0, 430.0));
+        services.stats.output_size = (800, 600);
+        services.pointer_released.push((
+            layout.continue_button.x + 40.0,
+            layout.continue_button.y + 20.0,
+        ));
         services
             .tick_game_frame(Duration::from_millis(16), false)
             .unwrap();
@@ -5579,13 +5984,47 @@ mod tests {
             .apply_event(engine_platform::InputEvent::KeyUp(
                 engine_platform::KeyCode::Escape,
             ));
-        services.pointer_released.push((760.0, 500.0));
+        services.stats.output_size = (800, 600);
+        services
+            .pointer_released
+            .push((layout.exit_button.x + 40.0, layout.exit_button.y + 20.0));
         services
             .tick_game_frame(Duration::from_millis(16), false)
             .unwrap();
 
         assert!(services.take_exit_requested());
         assert!(!services.take_exit_requested());
+    }
+
+    #[test]
+    fn pause_menu_layout_centers_in_small_outputs() {
+        let layout = PauseMenuLayout::for_output((800, 600));
+
+        assert_eq!(layout.panel.width, 600.0);
+        assert_eq!(layout.panel.height, 410.0);
+        assert_eq!(layout.panel.x, 100.0);
+        assert_eq!(layout.panel.y, 95.0);
+        assert!(layout.continue_button.contains(200.0, 225.0));
+    }
+
+    #[test]
+    fn pause_menu_click_targets_follow_output_size() {
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services.stats.output_size = (800, 600);
+        services.pause_menu_open = true;
+        services.paused = true;
+        let layout = PauseMenuLayout::for_output(services.stats.output_size);
+
+        services.pointer_released.push((
+            layout.continue_button.x + 8.0,
+            layout.continue_button.y + 8.0,
+        ));
+        services
+            .tick_game_frame(Duration::from_millis(16), false)
+            .unwrap();
+
+        assert!(!services.pause_menu_open);
+        assert!(!services.paused);
     }
 
     #[test]

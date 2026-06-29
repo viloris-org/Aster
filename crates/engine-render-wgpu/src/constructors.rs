@@ -2963,6 +2963,7 @@ impl WgpuRenderDevice {
             material_bind_group_layout,
             default_material_bind_group,
             material_gpu: HashMap::new(),
+            material_texture_size: HashMap::new(),
             vertex_buffer,
             index_buffer,
             instance_buffer,

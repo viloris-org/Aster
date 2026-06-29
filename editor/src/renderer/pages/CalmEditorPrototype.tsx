@@ -606,11 +606,11 @@ function assetFamily(asset: { kind: string; path: string }) {
   const value = `${asset.kind} ${asset.path}`.toLowerCase();
   if (/scene|\.vscene$|\.scene$/.test(value)) return 'scene';
   if (/script|\.varg$|\.ts$|\.js$|\.lua$/.test(value)) return 'script';
+  if (/texture|image|\.png$|\.jpg$|\.jpeg$|\.ktx2$|\.vpaint$/.test(value)) return 'texture';
   if (/material|\.mat$|\.vasset$/.test(value)) return 'material';
   if (/animation|\/animations?\//.test(value)) return 'animation';
   if (/audio|\.wav$|\.ogg$|\.mp3$|\.flac$/.test(value)) return 'audio';
   if (/model|mesh|\.gltf$|\.glb$|\.fbx$/.test(value)) return 'model';
-  if (/texture|image|\.png$|\.jpg$|\.jpeg$|\.ktx2$/.test(value)) return 'texture';
   return 'other';
 }
 
@@ -1410,7 +1410,7 @@ export default function CalmEditorPrototype({
   }, [assetKindFilter, assetSearch, assetSortMode, projectAssets]);
   const scriptAssets = useMemo(() => (
     projectAssets
-      .filter((asset) => /script/i.test(asset.kind) || /\.(varg|vscene|vasset|js|ts|lua)$/i.test(asset.path))
+      .filter((asset) => /script/i.test(asset.kind) || /\.(varg|vscene|vasset|vpaint|js|ts|lua)$/i.test(asset.path))
       .map((asset) => asset.path)
   ), [projectAssets]);
   const animationAssets = useMemo(() => (
@@ -1420,7 +1420,7 @@ export default function CalmEditorPrototype({
     projectAssets.filter((asset) => /audio/i.test(asset.kind) || /(^|\/)audio\//i.test(asset.path) || /\.(wav|ogg|mp3|flac)$/i.test(asset.path))
   ), [projectAssets]);
   const materialAssets = useMemo(() => (
-    projectAssets.filter((asset) => /material/i.test(asset.kind) || /(^|\/)materials?\//i.test(asset.path))
+    projectAssets.filter((asset) => /material/i.test(asset.kind) || /(^|\/)materials?\//i.test(asset.path) || /\.vpaint$/i.test(asset.path))
   ), [projectAssets]);
   const selectedEditorPath = selectedProjectFile?.path ?? selectedScript;
   const selectedDiagnosticPath = selectedProjectFile?.asset_path ?? selectedScript;
@@ -2324,14 +2324,16 @@ export default function CalmEditorPrototype({
     setBottomTab('problems');
   };
 
-  const createNamedAsset = async (kind: 'material' | 'animation' | 'audio_bus') => {
+  const createNamedAsset = async (kind: 'material' | 'texture_paint' | 'animation' | 'audio_bus') => {
     if (!backendReady) return;
-    const label = kind === 'audio_bus' ? 'audio bus' : kind;
-    const fallback = kind === 'audio_bus' ? 'SFX' : kind === 'animation' ? 'Idle' : 'Material';
+    const label = kind === 'audio_bus' ? 'audio bus' : kind === 'texture_paint' ? 'texture paint' : kind;
+    const fallback = kind === 'audio_bus' ? 'SFX' : kind === 'animation' ? 'Idle' : kind === 'texture_paint' ? 'TexturePaint' : 'Material';
     const name = window.prompt(`Create ${label}`, fallback)?.trim();
     if (!name) return;
     const method = kind === 'material'
       ? 'project/create_material'
+      : kind === 'texture_paint'
+        ? 'project/create_texture_paint'
       : kind === 'animation'
         ? 'project/create_animation'
         : 'project/create_audio_bus';
@@ -2844,10 +2846,11 @@ export default function CalmEditorPrototype({
             ) : activeNav === 'materials' ? (
               <div className="space-y-3 p-3">
                 <button type="button" className="h-8 w-full rounded-[var(--radius-sm)] border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40" disabled={!backendReady} onClick={() => createNamedAsset('material')}>New Material</button>
+                <button type="button" className="h-8 w-full rounded-[var(--radius-sm)] border border-[var(--border)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40" disabled={!backendReady} onClick={() => createNamedAsset('texture_paint')}>New Texture Paint</button>
                 {materialAssets.filter((asset) => `${asset.name} ${asset.path}`.toLowerCase().includes(assetSearch.toLowerCase())).map((asset) => (
                   <button key={asset.path} type="button" className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => {
                     setSelectedAssetPath(asset.path);
-                    if (/\.vasset$/i.test(asset.path)) openScript(asset.path);
+                    if (/\.(vasset|vpaint)$/i.test(asset.path)) openScript(asset.path);
                   }}>
                     <IconModel size={13} />
                     <span className="min-w-0 flex-1 truncate">{asset.name}</span>

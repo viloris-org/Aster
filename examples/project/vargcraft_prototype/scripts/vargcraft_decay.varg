@@ -1,0 +1,9 @@
+script VargcraftDecay {
+    @export var maxDistance: Float = 34.0
+
+    func update(_ dt: Float) {
+        if playerDistance() > maxDistance {
+            entity.destroy()
+        }
+    }
+}

@@ -1,0 +1,347 @@
+script VargcraftPlayer {
+    @export var moveSpeed: Float = 5.2
+    @export var sprintMultiplier: Float = 1.55
+    @export var worldHalfSize: Int = 7
+    @export var maxTerrainHeight: Int = 5
+    @export var editRadius: Float = 2.75
+    @export var blockSize: Float = 1.0
+    @export var giIntensity: Float = 1.05
+    @export var dayLength: Float = 92.0
+
+    var yaw: Float = 0.0
+    var generated: Bool = false
+    var renderReady: Bool = false
+    var musicStarted: Bool = false
+    var blocksSpawned: Int = 0
+    var blocksRemoved: Int = 0
+    var blocksPlaced: Int = 0
+    var oreCollected: Int = 0
+    var saplingsPlanted: Int = 0
+    var selectedSlot: Int = 0
+    var creativeMode: Bool = true
+    var stormMode: Bool = false
+    var hudOpen: Bool = true
+    var timeOfDay: Float = 9.5
+    var cloudCover: Float = 0.28
+    var precipitation: Float = 0.02
+    var nearestBlock: Float = 999.0
+    var nearestOre: Float = 999.0
+    var status: String = "Generating voxel island"
+
+    func start() {
+        yaw = 0.0
+        generated = false
+        renderReady = false
+        musicStarted = false
+        blocksSpawned = 0
+        blocksRemoved = 0
+        blocksPlaced = 0
+        oreCollected = 0
+        saplingsPlanted = 0
+        selectedSlot = 0
+        creativeMode = true
+        stormMode = false
+        hudOpen = true
+        timeOfDay = 9.5
+        cloudCover = 0.28
+        precipitation = 0.02
+        nearestBlock = 999.0
+        nearestOre = 999.0
+        position = Vec3(0.0, maxTerrainHeight + 1.25, -worldHalfSize - 1.2)
+        status = "WASD move / Fire mine / E place / Space collect"
+        log("VargCraft Prototype: richer runtime-spawned voxel capability probe.")
+    }
+
+    func update(_ dt: Float) {
+        if !generated {
+            generateWorld()
+            generated = true
+        }
+
+        if !renderReady {
+            render.gi.useScreenSpace()
+            render.gi.useProbeVolume(Vec3(0.0, 2.8, 0.0), Vec3(24.0, 12.0, 24.0), Vec3(5.0, 4.0, 5.0), giIntensity)
+            render.weather.set("clear")
+            render.weather.setTimeOfDay(timeOfDay)
+            render.weather.setCloudCover(cloudCover)
+            render.weather.setPrecipitation(precipitation)
+            render.weather.setWind(Vec3(1.6, 0.0, 0.8))
+            renderReady = true
+        }
+
+        if !musicStarted {
+            Audio.startLoop("vargcraft_ambience", "triangle", "C3 R G3 R E3 R G3 R", 86.0, 0.65, 0.08)
+            musicStarted = true
+        }
+
+        yaw += Input.mouseDeltaX() * 0.08
+        yaw += Input.value("LookX") * 86.0 * dt
+
+        let yawRad: Float = yaw * 0.01745329
+        let forwardX: Float = 0.0 - sin(yawRad)
+        let forwardZ: Float = cos(yawRad)
+        let rightX: Float = cos(yawRad)
+        let rightZ: Float = sin(yawRad)
+        var speed: Float = moveSpeed
+        if Input.down("Sprint") {
+            speed = moveSpeed * sprintMultiplier
+        }
+
+        let moveX: Float = Input.value("MoveX")
+        let moveZ: Float = Input.value("MoveY")
+        position.x += (rightX * moveX + forwardX * moveZ) * speed * dt
+        position.z += (rightZ * moveX + forwardZ * moveZ) * speed * dt
+        position.x = clamp(position.x, 0.0 - worldHalfSize - 3.0, worldHalfSize + 3.0)
+        position.z = clamp(position.z, 0.0 - worldHalfSize - 4.0, worldHalfSize + 3.0)
+        position.y = maxTerrainHeight + 1.25
+        rotation = Vec3(0.0, yaw, 0.0)
+
+        timeOfDay += dt * 24.0 / dayLength
+        if timeOfDay >= 24.0 {
+            timeOfDay -= 24.0
+        }
+
+        if stormMode {
+            cloudCover = 0.86
+            precipitation = 0.72
+            render.weather.set("storm")
+            render.weather.setWind(Vec3(4.0, 0.0, -2.5))
+        } else {
+            precipitation = 0.02
+            render.weather.set("clear")
+            render.weather.setWind(Vec3(1.6, 0.0, 0.8))
+        }
+
+        render.weather.setTimeOfDay(timeOfDay)
+        render.weather.setCloudCover(cloudCover)
+        render.weather.setPrecipitation(precipitation)
+        render.gi.setIntensity(giIntensity + (1.0 - cloudCover) * 0.25)
+
+        if Input.pressed("Fire") {
+            removeBlock()
+        }
+
+        if Input.pressed("Interact") {
+            placeBlock()
+        }
+
+        if Input.pressed("Jump") {
+            collectNearestOre()
+        }
+
+        if Input.pressed("Escape") {
+            hudOpen = !hudOpen
+        }
+
+        nearestBlock = nearestEditableBlock()
+        nearestOre = scene.distanceToTag("OreNode")
+        drawHud()
+    }
+
+    func generateWorld() {
+        for x in -7..=7 {
+            for z in -7..=7 {
+                let radial: Float = abs(x) + abs(z)
+                if radial <= 12.0 {
+                    let wave: Float = abs(sin(x * 0.52) + cos(z * 0.43))
+                    let terrace: Float = floor(wave * 1.55)
+                    let height: Int = 2 + terrace
+
+                    scene.spawnBox("Basalt Voxel Block", "StoneBlock", Vec3(x, 0, z), Vec3(blockSize, blockSize, blockSize), "")
+                    blocksSpawned += 1
+                    scene.spawnBox("Soil Voxel Block", "DirtBlock", Vec3(x, 1, z), Vec3(blockSize, blockSize, blockSize), "")
+                    blocksSpawned += 1
+
+                    if height >= 3 {
+                        scene.spawnBox("Grass Voxel Block", "GrassBlock", Vec3(x, 2, z), Vec3(blockSize, blockSize, blockSize), "")
+                        blocksSpawned += 1
+                    }
+
+                    if height >= 4 {
+                        scene.spawnBox("Raised Grass Block", "GrassBlock", Vec3(x, 3, z), Vec3(blockSize, blockSize, blockSize), "")
+                        blocksSpawned += 1
+                    }
+
+                    let oreSeed: Float = abs(sin(x * 2.41 + z * 1.73))
+                    if oreSeed > 0.93 && radial < 10.0 {
+                        scene.spawnSphere("Glow Ore Node", "OreNode", Vec3(x, height + 0.55, z), 0.26, "scripts/vargcraft_orb.varg")
+                    }
+                }
+            }
+        }
+
+        buildLandmarks()
+        status = "Spawned " + blocksSpawned + " blocks plus ore nodes"
+        log("VargCraft generated " + blocksSpawned + " entity blocks, ore nodes, trees, and cave markers.")
+    }
+
+    func buildLandmarks() {
+        scene.spawnBox("Cave Mouth Left", "StoneBlock", Vec3(-5.0, 3.0, -1.0), Vec3(1.0, 2.0, 1.0), "")
+        scene.spawnBox("Cave Mouth Right", "StoneBlock", Vec3(-3.0, 3.0, -1.0), Vec3(1.0, 2.0, 1.0), "")
+        scene.spawnBox("Cave Roof", "StoneBlock", Vec3(-4.0, 4.2, -1.0), Vec3(3.0, 0.7, 1.0), "")
+        blocksSpawned += 3
+
+        scene.spawnBox("Tree Trunk A", "WoodBlock", Vec3(4.0, 3.2, 1.0), Vec3(0.7, 2.2, 0.7), "")
+        scene.spawnSphere("Tree Crown A", "LeafBlock", Vec3(4.0, 4.7, 1.0), 1.25, "")
+        scene.spawnBox("Tree Trunk B", "WoodBlock", Vec3(-1.0, 3.2, 5.0), Vec3(0.7, 2.2, 0.7), "")
+        scene.spawnSphere("Tree Crown B", "LeafBlock", Vec3(-1.0, 4.7, 5.0), 1.25, "")
+        blocksSpawned += 4
+
+        scene.spawnSphere("Blue Ore Marker", "OreNode", Vec3(-4.0, 5.05, -1.0), 0.34, "scripts/vargcraft_orb.varg")
+        scene.spawnSphere("Spawn Beacon", "OreNode", Vec3(0.0, 5.25, 0.0), 0.24, "scripts/vargcraft_orb.varg")
+    }
+
+    func nearestEditableBlock() -> Float {
+        let grass: Float = scene.distanceToTagBounds("GrassBlock")
+        let dirt: Float = scene.distanceToTagBounds("DirtBlock")
+        let stone: Float = scene.distanceToTagBounds("StoneBlock")
+        let wood: Float = scene.distanceToTagBounds("WoodBlock")
+        var nearest: Float = grass
+        if dirt < nearest {
+            nearest = dirt
+        }
+        if stone < nearest {
+            nearest = stone
+        }
+        if wood < nearest {
+            nearest = wood
+        }
+        return nearest
+    }
+
+    func removeBlock() {
+        let grass: Float = scene.distanceToTagBounds("GrassBlock")
+        let dirt: Float = scene.distanceToTagBounds("DirtBlock")
+        let stone: Float = scene.distanceToTagBounds("StoneBlock")
+        let wood: Float = scene.distanceToTagBounds("WoodBlock")
+        var removed: Bool = false
+
+        if grass <= editRadius {
+            scene.destroyNearestWithTag("GrassBlock", editRadius)
+            removed = true
+        } else {
+            if dirt <= editRadius {
+                scene.destroyNearestWithTag("DirtBlock", editRadius)
+                removed = true
+            } else {
+                if stone <= editRadius {
+                    scene.destroyNearestWithTag("StoneBlock", editRadius)
+                    removed = true
+                } else {
+                    if wood <= editRadius {
+                        scene.destroyNearestWithTag("WoodBlock", editRadius)
+                        removed = true
+                    }
+                }
+            }
+        }
+
+        if removed {
+            blocksRemoved += 1
+            status = "Mined block at " + floor(nearestEditableBlock() * 100.0) + " cm"
+            Audio.playTone3D("square", 180.0, 0.05, 0.16)
+        } else {
+            status = "No editable block in reach"
+            Audio.playTone("square", 96.0, 0.04, 0.09)
+        }
+    }
+
+    func placeBlock() {
+        let yawRad: Float = yaw * 0.01745329
+        let px: Float = position.x - sin(yawRad) * 1.9
+        let pz: Float = position.z + cos(yawRad) * 1.9
+        let placeX: Float = floor(px + 0.5)
+        let placeZ: Float = floor(pz + 0.5)
+        let placeY: Float = 3.0 + (blocksPlaced - floor(blocksPlaced / 4.0) * 4.0)
+
+        if selectedSlot == 0 {
+            scene.spawnBox("Placed Grass Block", "PlacedBlock", Vec3(placeX, placeY, placeZ), Vec3(blockSize, blockSize, blockSize), "scripts/vargcraft_decay.varg")
+            status = "Placed grass probe block"
+        } else {
+            if selectedSlot == 1 {
+                scene.spawnBox("Placed Stone Block", "PlacedBlock", Vec3(placeX, placeY, placeZ), Vec3(blockSize, blockSize, blockSize), "scripts/vargcraft_decay.varg")
+                status = "Placed stone probe block"
+            } else {
+                scene.spawnBox("Placed Wood Block", "PlacedBlock", Vec3(placeX, placeY, placeZ), Vec3(0.7, 1.6, 0.7), "scripts/vargcraft_decay.varg")
+                scene.spawnSphere("Placed Leaf Crown", "LeafBlock", Vec3(placeX, placeY + 1.2, placeZ), 0.9, "scripts/vargcraft_decay.varg")
+                saplingsPlanted += 1
+                status = "Planted runtime tree"
+            }
+        }
+
+        blocksPlaced += 1
+        Audio.playTone3D("triangle", 420.0 + selectedSlot * 80.0, 0.05, 0.16)
+    }
+
+    func collectNearestOre() {
+        if scene.distanceToTag("OreNode") <= editRadius + 0.85 {
+            scene.destroyNearestWithTag("OreNode", editRadius + 0.85)
+            oreCollected += 1
+            status = "Collected ore shard +" + oreCollected
+            Audio.playTone3D("sine", 880.0 + oreCollected * 20.0, 0.1, 0.24)
+            scene.spawnSphere("Ore Spark", "OreSpark", Vec3(position.x, position.y + 0.4, position.z), 0.12, "scripts/vargcraft_decay.varg")
+        } else {
+            status = "No ore shard nearby"
+        }
+    }
+
+    func drawHud() {
+        if !hudOpen {
+            drawCrosshair()
+            return
+        }
+
+        let sw: Float = ui.screenWidth()
+        let sh: Float = ui.screenHeight()
+        let cx: Float = sw * 0.5
+        let cy: Float = sh * 0.5
+        let hotbarX: Float = cx - 91.0
+        let hotbarY: Float = sh - 58.0
+        let heartsY: Float = hotbarY - 16.0
+        let armorY: Float = hotbarY - 28.0
+        let toastX: Float = sw - 276.0
+        let toastY: Float = 28.0
+        let liveBlocks: Int = blocksSpawned + blocksPlaced - blocksRemoved
+        ui.rect("vargcraft_crosshair_v", cx - 1.0, cy - 8.0, 2.0, 16.0, 0.96, 0.96, 0.96, 0.82)
+        ui.rect("vargcraft_crosshair_h", cx - 8.0, cy - 1.0, 16.0, 2.0, 0.96, 0.96, 0.96, 0.82)
+
+        ui.texture("vargcraft_hotbar", "vargcraft:hotbar", hotbarX, hotbarY, 182.0, 22.0)
+        if selectedSlot == 0 {
+            ui.texture("vargcraft_selected_0", "vargcraft:slot_selected", hotbarX - 2.0, hotbarY - 2.0, 24.0, 24.0)
+        } else {
+            if selectedSlot == 1 {
+                ui.texture("vargcraft_selected_1", "vargcraft:slot_selected", hotbarX + 18.0, hotbarY - 2.0, 24.0, 24.0)
+            } else {
+                ui.texture("vargcraft_selected_2", "vargcraft:slot_selected", hotbarX + 38.0, hotbarY - 2.0, 24.0, 24.0)
+            }
+        }
+        ui.texture("vargcraft_grass_icon", "vargcraft:block_grass", hotbarX + 4.0, hotbarY + 3.0, 14.0, 14.0)
+        ui.texture("vargcraft_stone_icon", "vargcraft:block_stone", hotbarX + 24.0, hotbarY + 3.0, 14.0, 14.0)
+        ui.texture("vargcraft_wood_icon", "vargcraft:block_wood", hotbarX + 44.0, hotbarY + 3.0, 14.0, 14.0)
+
+        for i in 0..=4 {
+            ui.texture("vargcraft_heart", "vargcraft:heart", hotbarX + i * 10.0, heartsY, 9.0, 9.0)
+            ui.texture("vargcraft_armor", "vargcraft:armor", hotbarX + i * 10.0, armorY, 9.0, 9.0)
+        }
+
+        ui.rect("vargcraft_xp_shadow", hotbarX, hotbarY - 6.0, 182.0, 3.0, 0.06, 0.06, 0.06, 0.82)
+        ui.rect("vargcraft_xp_fill", hotbarX + 1.0, hotbarY - 5.0, 18.0 + oreCollected * 12.0, 1.0, 0.42, 0.95, 0.18, 1.0)
+        ui.label("vargcraft_level", oreCollected, cx - 2.0, hotbarY - 22.0)
+
+        ui.rect("vargcraft_toast", toastX, toastY, 250.0, 112.0, 0.02, 0.02, 0.02, 0.46)
+        ui.label("vargcraft_status", status, toastX + 12.0, toastY + 12.0)
+        ui.label("vargcraft_counts", "Blocks " + liveBlocks + "  Ore " + oreCollected, toastX + 12.0, toastY + 30.0)
+
+        selectedSlot = floor(ui.slider("vargcraft_palette_slider", selectedSlot, hotbarX, hotbarY + 28.0, 58.0, 12.0, 0.0, 2.0) + 0.5)
+        cloudCover = ui.slider("vargcraft_cloud_slider", cloudCover, toastX + 12.0, toastY + 66.0, 146.0, 14.0, 0.0, 1.0)
+        stormMode = ui.toggle("vargcraft_storm_toggle", stormMode, toastX + 168.0, toastY + 64.0, 36.0, 18.0)
+        creativeMode = ui.toggle("vargcraft_creative_toggle", creativeMode, toastX + 168.0, toastY + 86.0, 36.0, 18.0)
+    }
+
+    func drawCrosshair() {
+        let cx: Float = ui.screenWidth() * 0.5
+        let cy: Float = ui.screenHeight() * 0.5
+        ui.rect("vargcraft_crosshair_v", cx - 1.0, cy - 8.0, 2.0, 16.0, 0.96, 0.96, 0.96, 0.82)
+        ui.rect("vargcraft_crosshair_h", cx - 8.0, cy - 1.0, 16.0, 2.0, 0.96, 0.96, 0.96, 0.82)
+    }
+}

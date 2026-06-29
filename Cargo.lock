@@ -6336,6 +6336,7 @@ dependencies = [
  "engine-render",
  "engine-render-wgpu",
  "engine-script-varg",
+ "engine-ui",
  "gdk",
  "gdkwayland-sys",
  "gdkx11-sys",

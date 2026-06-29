@@ -956,6 +956,17 @@ impl RenderDevice for WgpuRenderDevice {
     }
 
     fn register_material_textures(&mut self, name: &str, textures: &RenderMaterialTextures) {
+        if let Some(handle) = textures.base_color
+            && let Some(image) = self.images.get(&handle.raw())
+        {
+            self.material_texture_size.insert(
+                name.to_owned(),
+                [
+                    image._desc.width.max(1) as f32,
+                    image._desc.height.max(1) as f32,
+                ],
+            );
+        }
         let view_for = |handle: &Option<ImageHandle>| -> &wgpu::TextureView {
             match handle {
                 Some(h) => match self.images.get(&h.raw()) {

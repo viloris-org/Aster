@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use crate::{device::*, meshes::*, uniforms::*};
-use engine_render::RenderWorld;
+use engine_render::{RenderSprite, RenderWorld};
 use wgpu::util::DeviceExt;
 
 #[derive(Clone)]
@@ -39,6 +39,23 @@ fn render_instance(instance: Instance) -> RenderBatchInstance {
         shadow_radius,
         shadow_depth_min: f32::NEG_INFINITY,
         shadow_depth_max: f32::INFINITY,
+    }
+}
+
+fn sprite_mesh_key(sprite: &RenderSprite, uv_min: [f32; 2], uv_max: [f32; 2]) -> String {
+    match sprite.region {
+        Some(region) => format!(
+            "@sprite-quad:{:08x}:{:08x}:{:08x}:{:08x}:{:08x}:{:08x}:{}",
+            (region.width / sprite.pixels_per_unit.max(0.01)).to_bits(),
+            (region.height / sprite.pixels_per_unit.max(0.01)).to_bits(),
+            uv_min[0].to_bits(),
+            uv_min[1].to_bits(),
+            uv_max[0].to_bits(),
+            uv_max[1].to_bits(),
+            u8::from(sprite.centered)
+        ),
+        None if !sprite.centered => "@sprite-quad:3f800000:3f800000:0".to_string(),
+        None => "debug/plane".to_string(),
     }
 }
 
@@ -281,8 +298,56 @@ impl WgpuRenderDevice {
         }
     }
 
+    fn sprite_region_uv(&self, sprite: &RenderSprite) -> ([f32; 2], [f32; 2]) {
+        let Some(region) = sprite.region else {
+            return ([0.0, 0.0], [1.0, 1.0]);
+        };
+        let Some(texture) = sprite.texture.as_ref() else {
+            return ([0.0, 0.0], [1.0, 1.0]);
+        };
+        let Some([texture_width, texture_height]) =
+            self.material_texture_size.get(texture).copied()
+        else {
+            return ([0.0, 0.0], [1.0, 1.0]);
+        };
+        let inv_width = 1.0 / texture_width.max(1.0);
+        let inv_height = 1.0 / texture_height.max(1.0);
+        (
+            [
+                (region.x * inv_width).clamp(0.0, 1.0),
+                (region.y * inv_height).clamp(0.0, 1.0),
+            ],
+            [
+                ((region.x + region.width) * inv_width).clamp(0.0, 1.0),
+                ((region.y + region.height) * inv_height).clamp(0.0, 1.0),
+            ],
+        )
+    }
+
+    fn ensure_sprite_mesh(&mut self, sprite: &RenderSprite) -> String {
+        let (uv_min, uv_max) = self.sprite_region_uv(sprite);
+        let mesh_name = sprite_mesh_key(sprite, uv_min, uv_max);
+        if self.mesh_cache.contains_key(&mesh_name) || mesh_name == "debug/plane" {
+            return mesh_name;
+        }
+        let (width, height) = sprite
+            .region
+            .map(|region| {
+                let pixels_per_unit = sprite.pixels_per_unit.max(0.01);
+                (
+                    (region.width / pixels_per_unit).max(0.01),
+                    (region.height / pixels_per_unit).max(0.01),
+                )
+            })
+            .unwrap_or((1.0, 1.0));
+        let (vertices, indices) =
+            generate_sprite_quad(width, height, sprite.centered, uv_min, uv_max);
+        self.upload_mesh(&mesh_name, &vertices, &indices);
+        mesh_name
+    }
+
     pub(crate) fn mesh_batches_from_world_visible(
-        &self,
+        &mut self,
         world: &RenderWorld,
         aspect: f32,
     ) -> (Vec<RenderBatch>, engine_render::VisibilityResult) {
@@ -342,7 +407,7 @@ impl WgpuRenderDevice {
                     .cmp(&right.layer)
                     .then(left.order_in_layer.cmp(&right.order_in_layer))
             });
-            let mut current_texture: Option<String> = None;
+            let mut current_batch_key: Option<(String, String)> = None;
             let mut current_instances = Vec::new();
             for sprite in sprites {
                 let t = sprite.transform;
@@ -363,27 +428,32 @@ impl WgpuRenderDevice {
                     receive_shadows: 1.0,
                 });
                 let texture = sprite.texture.clone().unwrap_or_default();
-                if current_texture
+                let mesh = self.ensure_sprite_mesh(sprite);
+                let material = if sprite.material == "@sprite" {
+                    format!("@sprite:{texture}")
+                } else {
+                    sprite.material.clone()
+                };
+                let batch_key = (mesh, material);
+                if current_batch_key
                     .as_ref()
-                    .is_some_and(|current| current != &texture)
+                    .is_some_and(|current| current != &batch_key)
                 {
+                    let (mesh, material) = current_batch_key.take().unwrap();
                     batches.push((
-                        "debug/plane".to_owned(),
+                        mesh,
                         std::mem::take(&mut current_instances),
-                        format!("@sprite:{}", current_texture.take().unwrap_or_default()),
+                        material,
                         false,
                     ));
                 }
-                current_texture = Some(texture);
+                current_batch_key = Some(batch_key);
                 current_instances.push(instance);
             }
             if !current_instances.is_empty() {
-                batches.push((
-                    "debug/plane".to_owned(),
-                    current_instances,
-                    format!("@sprite:{}", current_texture.unwrap_or_default()),
-                    false,
-                ));
+                let (mesh, material) = current_batch_key
+                    .unwrap_or_else(|| ("debug/plane".to_string(), "@sprite:".to_string()));
+                batches.push((mesh, current_instances, material, false));
             }
         }
         if world.particle_emitters.is_empty() && !world.particles.is_empty() {

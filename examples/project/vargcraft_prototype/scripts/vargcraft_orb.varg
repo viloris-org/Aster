@@ -1,0 +1,15 @@
+script VargcraftOrb {
+    @export var amplitude: Float = 0.18
+    @export var speed: Float = 1.8
+
+    var baseY: Float = 0.0
+
+    func start() {
+        baseY = position.y
+    }
+
+    func update(_ dt: Float) {
+        position.y = baseY + sin(Time.time * speed + position.x) * amplitude
+        rotation = Vec3(0.0, Time.time * 72.0, 0.0)
+    }
+}

@@ -1,0 +1,113 @@
+scene VargcraftPrototype {
+    camera "Main Camera" {
+        transform {
+            position: Vec3(0.0, 5.2, -8.5)
+            rotation: Vec3(-12, 0, 0)
+        }
+
+        perspective {
+            fov: 78
+            near: 0.01
+            far: 500
+        }
+
+        primary: true
+
+        script VargcraftCamera {
+            source: "scripts/vargcraft_camera.varg"
+            eyeHeight: 0.72
+            mouseSensitivity: 0.08
+            gamepadLookSpeed: 86.0
+            minPitch: -70.0
+            maxPitch: 70.0
+        }
+    }
+
+    light "Voxel Sun" {
+        kind: directional
+        intensity: 3.4
+        color: Vec3(1.0, 0.96, 0.82)
+        rotation: Vec3(-52, 32, 0)
+    }
+
+    light "Cave Probe Light" {
+        kind: point
+        intensity: 1.35
+        range: 16.0
+        color: Vec3(0.38, 0.66, 1.0)
+        position: Vec3(-4.0, 5.5, -2.0)
+    }
+
+    entity "Player" {
+        tag: "Player"
+
+        transform {
+            position: Vec3(0.0, 5.25, -8.0)
+        }
+
+        mesh: Capsule(radius: 0.34, height: 1.7)
+
+        material {
+            baseColor: Color("#263238")
+            roughness: 0.62
+        }
+
+        rigidbody {
+            mode: kinematic
+        }
+
+        collider {
+            shape: box
+            size: Vec3(0.72, 1.7, 0.72)
+        }
+
+        script VargcraftPlayer {
+            source: "scripts/vargcraft_player.varg"
+            moveSpeed: 5.2
+            sprintMultiplier: 1.55
+            worldHalfSize: 7
+            maxTerrainHeight: 5
+            editRadius: 2.75
+            blockSize: 1.0
+            giIntensity: 1.05
+            dayLength: 92.0
+        }
+    }
+
+    entity "Runtime Feature Marker" {
+        tag: "Marker"
+
+        transform {
+            position: Vec3(0.0, 5.35, 0.0)
+        }
+
+        mesh: Sphere(radius: 0.25)
+
+        material {
+            baseColor: Color("#55d7ff")
+            roughness: 0.22
+            emissive: Vec3(0.0, 0.22, 0.34)
+        }
+    }
+
+    entity "Prototype Origin Pad" {
+        tag: "Platform"
+
+        transform {
+            position: Vec3(0.0, 4.72, -7.8)
+        }
+
+        mesh: Box(size: Vec3(3.2, 0.18, 2.2))
+
+        material {
+            baseColor: Color("#2f4050")
+            roughness: 0.54
+            emissive: Vec3(0.02, 0.04, 0.05)
+        }
+
+        collider {
+            shape: box
+            size: Vec3(3.2, 0.18, 2.2)
+        }
+    }
+}

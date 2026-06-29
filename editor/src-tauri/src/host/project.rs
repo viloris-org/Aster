@@ -508,6 +508,118 @@ impl EditorHost {
         }))
     }
 
+    pub(crate) fn project_create_texture_paint(&mut self, params: &Value) -> EngineResult<Value> {
+        let name = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EngineError::config("missing 'name'"))?;
+        validate_file_name(name)?;
+
+        let width = params
+            .get("width")
+            .and_then(Value::as_u64)
+            .unwrap_or(1024)
+            .try_into()
+            .map_err(|_| EngineError::config("texture paint width is too large"))?;
+        let height = params
+            .get("height")
+            .and_then(Value::as_u64)
+            .unwrap_or(1024)
+            .try_into()
+            .map_err(|_| EngineError::config("texture paint height is too large"))?;
+        let base_color = params
+            .get("base_color")
+            .and_then(Value::as_str)
+            .unwrap_or("#7aa2ff");
+
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+
+        let paint_path = format!("textures/{name}.vpaint");
+        let target = format!("textures/{name}.png");
+        let paint = TexturePaintDocument::new(width, height, target.clone(), base_color)?;
+        let content = paint.to_pretty_json()?;
+        let (asset_path, full_path) = write_project_asset(project, &paint_path, &content)?;
+        project.rescan_assets()?;
+        push_created_asset_console(&mut self.console, "texture paint", &full_path);
+
+        Ok(serde_json::json!({
+            "path": asset_path,
+            "target": target,
+            "full_path": full_path.to_string_lossy(),
+        }))
+    }
+
+    pub(crate) fn texture_paint_add_stroke(&mut self, params: &Value) -> EngineResult<Value> {
+        let asset_path = params
+            .get("asset")
+            .and_then(Value::as_str)
+            .ok_or_else(|| EngineError::config("missing 'asset'"))?;
+        let layer_name = params
+            .get("layer")
+            .and_then(Value::as_str)
+            .unwrap_or("paint");
+
+        let stroke = TexturePaintStroke::from_params(params)?;
+
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+        let asset_root = project.root.join(&project.manifest.asset_root);
+        let full_path = resolve_existing_relative_path(&asset_root, asset_path)?;
+        ensure_texture_paint_path(&full_path)?;
+        let mut paint = TexturePaintDocument::read_from_path(&full_path)?;
+        paint.add_stroke(layer_name, stroke);
+        paint.write_to_path(&full_path)?;
+        project.rescan_assets()?;
+
+        Ok(serde_json::json!({
+            "path": asset_path,
+            "layers": paint.layers.len(),
+            "strokes": paint.stroke_count(),
+        }))
+    }
+
+    pub(crate) fn texture_paint_bake(&mut self, params: &Value) -> EngineResult<Value> {
+        let asset_path = params
+            .get("asset")
+            .and_then(Value::as_str)
+            .ok_or_else(|| EngineError::config("missing 'asset'"))?;
+
+        let Some(project) = self.shell.project_mut() else {
+            return Err(EngineError::config("no project open"));
+        };
+        let asset_root = project.root.join(&project.manifest.asset_root);
+        let full_path = resolve_existing_relative_path(&asset_root, asset_path)?;
+        ensure_texture_paint_path(&full_path)?;
+        let paint = TexturePaintDocument::read_from_path(&full_path)?;
+        let target = params
+            .get("target")
+            .and_then(Value::as_str)
+            .unwrap_or(&paint.target);
+        let target_path = resolve_writable_relative_path(&asset_root, target)?;
+        paint.bake_to_png(&target_path)?;
+        project.rescan_assets()?;
+
+        self.console.push(engine_editor::ConsoleEntry {
+            timestamp: timestamp_now(),
+            level: engine_editor::ConsoleLevel::Info,
+            source: engine_editor::ConsoleSource {
+                subsystem: "assets".into(),
+                file: Some(target_path.clone()),
+                line: None,
+            },
+            message: format!("Baked texture paint: {}", target_path.display()),
+        });
+
+        Ok(serde_json::json!({
+            "path": asset_path,
+            "target": target,
+            "full_path": target_path.to_string_lossy(),
+        }))
+    }
+
     pub(crate) fn project_create_animation(&mut self, params: &Value) -> EngineResult<Value> {
         let name = params
             .get("name")
@@ -1244,5 +1356,503 @@ fn resolve_writable_project_source_path(
     } else {
         let asset_root = project.root.join(&project.manifest.asset_root);
         resolve_writable_relative_path(&asset_root, path)
+    }
+}
+
+const TEXTURE_PAINT_FORMAT: &str = "varg.texture_paint";
+const MAX_TEXTURE_PAINT_SIZE: u32 = 8192;
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct TexturePaintDocument {
+    format: String,
+    version: u32,
+    target: String,
+    width: u32,
+    height: u32,
+    color_space: String,
+    channels: String,
+    base_color: String,
+    layers: Vec<TexturePaintLayer>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct TexturePaintLayer {
+    name: String,
+    opacity: f32,
+    blend: String,
+    visible: bool,
+    strokes: Vec<TexturePaintStroke>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct TexturePaintStroke {
+    brush: String,
+    color: String,
+    size: f32,
+    opacity: f32,
+    space: String,
+    points: Vec<TexturePaintPoint>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+struct TexturePaintPoint {
+    u: f32,
+    v: f32,
+    #[serde(default = "default_pressure")]
+    pressure: f32,
+}
+
+fn default_pressure() -> f32 {
+    1.0
+}
+
+impl TexturePaintDocument {
+    fn new(width: u32, height: u32, target: String, base_color: &str) -> EngineResult<Self> {
+        validate_texture_paint_size(width, height)?;
+        parse_hex_rgba(base_color)?;
+        Ok(Self {
+            format: TEXTURE_PAINT_FORMAT.to_owned(),
+            version: 1,
+            target,
+            width,
+            height,
+            color_space: "srgb".to_owned(),
+            channels: "rgba".to_owned(),
+            base_color: base_color.to_owned(),
+            layers: vec![TexturePaintLayer {
+                name: "paint".to_owned(),
+                opacity: 1.0,
+                blend: "normal".to_owned(),
+                visible: true,
+                strokes: Vec::new(),
+            }],
+        })
+    }
+
+    fn read_from_path(path: &Path) -> EngineResult<Self> {
+        let content = std::fs::read_to_string(path).map_err(|source| EngineError::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let document: Self = serde_json::from_str(&content)
+            .map_err(|error| EngineError::config(format!("invalid texture paint file: {error}")))?;
+        document.validate()?;
+        Ok(document)
+    }
+
+    fn write_to_path(&self, path: &Path) -> EngineResult<()> {
+        let content = self.to_pretty_json()?;
+        std::fs::write(path, content).map_err(|source| EngineError::Filesystem {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
+
+    fn to_pretty_json(&self) -> EngineResult<String> {
+        serde_json::to_string_pretty(self)
+            .map_err(|error| EngineError::other(format!("texture paint serialize failed: {error}")))
+    }
+
+    fn validate(&self) -> EngineResult<()> {
+        if self.format != TEXTURE_PAINT_FORMAT {
+            return Err(EngineError::config("unsupported texture paint format"));
+        }
+        if self.version != 1 {
+            return Err(EngineError::config("unsupported texture paint version"));
+        }
+        validate_texture_paint_size(self.width, self.height)?;
+        parse_hex_rgba(&self.base_color)?;
+        for layer in &self.layers {
+            if layer.name.trim().is_empty() {
+                return Err(EngineError::config("texture paint layer name is empty"));
+            }
+            for stroke in &layer.strokes {
+                stroke.validate()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_stroke(&mut self, layer_name: &str, stroke: TexturePaintStroke) {
+        let layer_name = layer_name.trim();
+        let layer_name = if layer_name.is_empty() {
+            "paint"
+        } else {
+            layer_name
+        };
+        if let Some(layer) = self
+            .layers
+            .iter_mut()
+            .find(|layer| layer.name == layer_name)
+        {
+            layer.strokes.push(stroke);
+            return;
+        }
+        self.layers.push(TexturePaintLayer {
+            name: layer_name.to_owned(),
+            opacity: 1.0,
+            blend: "normal".to_owned(),
+            visible: true,
+            strokes: vec![stroke],
+        });
+    }
+
+    fn stroke_count(&self) -> usize {
+        self.layers
+            .iter()
+            .map(|layer| layer.strokes.len())
+            .sum::<usize>()
+    }
+
+    fn bake_to_png(&self, path: &Path) -> EngineResult<()> {
+        self.validate()?;
+        let base = parse_hex_rgba(&self.base_color)?;
+        let mut image = image::RgbaImage::from_pixel(self.width, self.height, image::Rgba(base));
+        for layer in &self.layers {
+            if !layer.visible {
+                continue;
+            }
+            let layer_opacity = layer.opacity.clamp(0.0, 1.0);
+            for stroke in &layer.strokes {
+                stroke.paint(&mut image, layer_opacity)?;
+            }
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| EngineError::Filesystem {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        image.save(path).map_err(|error| {
+            EngineError::other(format!(
+                "failed to write baked texture {}: {error}",
+                path.display()
+            ))
+        })
+    }
+}
+
+impl TexturePaintStroke {
+    fn from_params(params: &Value) -> EngineResult<Self> {
+        if let Some(stroke) = params.get("stroke") {
+            let stroke: Self = serde_json::from_value(stroke.clone()).map_err(|error| {
+                EngineError::config(format!("invalid texture paint stroke: {error}"))
+            })?;
+            stroke.validate()?;
+            return Ok(stroke);
+        }
+
+        let brush = params
+            .get("brush")
+            .and_then(Value::as_object)
+            .and_then(|brush| brush.get("shape"))
+            .and_then(Value::as_str)
+            .or_else(|| params.get("brush").and_then(Value::as_str))
+            .unwrap_or("soft_round")
+            .to_owned();
+        let color = params
+            .get("brush")
+            .and_then(Value::as_object)
+            .and_then(|brush| brush.get("color"))
+            .and_then(Value::as_str)
+            .or_else(|| params.get("color").and_then(Value::as_str))
+            .unwrap_or("#ffffff")
+            .to_owned();
+        let size = params
+            .get("brush")
+            .and_then(Value::as_object)
+            .and_then(|brush| brush.get("size"))
+            .and_then(Value::as_f64)
+            .or_else(|| params.get("size").and_then(Value::as_f64))
+            .unwrap_or(0.025) as f32;
+        let opacity = params
+            .get("brush")
+            .and_then(Value::as_object)
+            .and_then(|brush| brush.get("opacity"))
+            .and_then(Value::as_f64)
+            .or_else(|| params.get("opacity").and_then(Value::as_f64))
+            .unwrap_or(1.0) as f32;
+        let space = params
+            .get("space")
+            .and_then(Value::as_str)
+            .unwrap_or("uv")
+            .to_owned();
+        let points_value = params
+            .get("points")
+            .ok_or_else(|| EngineError::config("missing 'points'"))?;
+        let points = parse_texture_paint_points(points_value)?;
+
+        let stroke = Self {
+            brush,
+            color,
+            size,
+            opacity,
+            space,
+            points,
+        };
+        stroke.validate()?;
+        Ok(stroke)
+    }
+
+    fn validate(&self) -> EngineResult<()> {
+        if self.space != "uv" {
+            return Err(EngineError::config(
+                "only uv texture paint strokes are supported",
+            ));
+        }
+        if !matches!(self.brush.as_str(), "round" | "soft_round") {
+            return Err(EngineError::config("unsupported texture paint brush"));
+        }
+        if self.points.is_empty() {
+            return Err(EngineError::config("texture paint stroke has no points"));
+        }
+        if !(self.size.is_finite() && self.size > 0.0 && self.size <= 1.0) {
+            return Err(EngineError::config(
+                "texture paint stroke size must be in 0.0..=1.0 uv units",
+            ));
+        }
+        if !(self.opacity.is_finite() && self.opacity >= 0.0 && self.opacity <= 1.0) {
+            return Err(EngineError::config(
+                "texture paint stroke opacity must be in 0.0..=1.0",
+            ));
+        }
+        parse_hex_rgba(&self.color)?;
+        for point in &self.points {
+            if !(point.u.is_finite()
+                && point.v.is_finite()
+                && point.pressure.is_finite()
+                && point.u >= 0.0
+                && point.u <= 1.0
+                && point.v >= 0.0
+                && point.v <= 1.0
+                && point.pressure >= 0.0
+                && point.pressure <= 1.0)
+            {
+                return Err(EngineError::config(
+                    "texture paint points must contain finite u/v/pressure in 0.0..=1.0",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn paint(&self, image: &mut image::RgbaImage, layer_opacity: f32) -> EngineResult<()> {
+        let color = parse_hex_rgba(&self.color)?;
+        for point in &self.points {
+            paint_stamp(
+                image,
+                *point,
+                self.size,
+                self.opacity * layer_opacity,
+                self.brush == "soft_round",
+                color,
+            );
+        }
+        Ok(())
+    }
+}
+
+fn parse_texture_paint_points(value: &Value) -> EngineResult<Vec<TexturePaintPoint>> {
+    let array = value
+        .as_array()
+        .ok_or_else(|| EngineError::config("'points' must be an array"))?;
+    let mut points = Vec::with_capacity(array.len());
+    for point in array {
+        if let Some(object) = point.as_object() {
+            let u = object
+                .get("u")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| EngineError::config("texture paint point missing 'u'"))?;
+            let v = object
+                .get("v")
+                .and_then(Value::as_f64)
+                .ok_or_else(|| EngineError::config("texture paint point missing 'v'"))?;
+            let pressure = object
+                .get("pressure")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            points.push(TexturePaintPoint {
+                u: u as f32,
+                v: v as f32,
+                pressure: pressure as f32,
+            });
+        } else if let Some(array) = point.as_array() {
+            if array.len() < 2 {
+                return Err(EngineError::config(
+                    "texture paint point arrays must contain at least u and v",
+                ));
+            }
+            points.push(TexturePaintPoint {
+                u: array[0].as_f64().unwrap_or(f64::NAN) as f32,
+                v: array[1].as_f64().unwrap_or(f64::NAN) as f32,
+                pressure: array.get(2).and_then(Value::as_f64).unwrap_or(1.0) as f32,
+            });
+        } else {
+            return Err(EngineError::config(
+                "texture paint points must be objects or arrays",
+            ));
+        }
+    }
+    Ok(points)
+}
+
+fn validate_texture_paint_size(width: u32, height: u32) -> EngineResult<()> {
+    if width == 0
+        || height == 0
+        || width > MAX_TEXTURE_PAINT_SIZE
+        || height > MAX_TEXTURE_PAINT_SIZE
+    {
+        return Err(EngineError::config(format!(
+            "texture paint size must be between 1 and {MAX_TEXTURE_PAINT_SIZE}"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_texture_paint_path(path: &Path) -> EngineResult<()> {
+    if path.extension().and_then(|extension| extension.to_str()) != Some("vpaint") {
+        return Err(EngineError::config(
+            "texture paint asset must end with .vpaint",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_hex_rgba(input: &str) -> EngineResult<[u8; 4]> {
+    let hex = input.trim().strip_prefix('#').unwrap_or(input.trim());
+    let parse_pair = |pair: &str| {
+        u8::from_str_radix(pair, 16)
+            .map_err(|_| EngineError::config(format!("invalid hex color: {input}")))
+    };
+    match hex.len() {
+        6 => Ok([
+            parse_pair(&hex[0..2])?,
+            parse_pair(&hex[2..4])?,
+            parse_pair(&hex[4..6])?,
+            255,
+        ]),
+        8 => Ok([
+            parse_pair(&hex[0..2])?,
+            parse_pair(&hex[2..4])?,
+            parse_pair(&hex[4..6])?,
+            parse_pair(&hex[6..8])?,
+        ]),
+        _ => Err(EngineError::config(format!("invalid hex color: {input}"))),
+    }
+}
+
+fn paint_stamp(
+    image: &mut image::RgbaImage,
+    point: TexturePaintPoint,
+    size_uv: f32,
+    opacity: f32,
+    soft: bool,
+    color: [u8; 4],
+) {
+    let width = image.width();
+    let height = image.height();
+    let radius = ((size_uv * width.max(height) as f32) * point.pressure).max(1.0);
+    let center_x = point.u * width.saturating_sub(1) as f32;
+    let center_y = (1.0 - point.v) * height.saturating_sub(1) as f32;
+    let min_x = (center_x - radius).floor().max(0.0) as u32;
+    let max_x = (center_x + radius)
+        .ceil()
+        .min(width.saturating_sub(1) as f32) as u32;
+    let min_y = (center_y - radius).floor().max(0.0) as u32;
+    let max_y = (center_y + radius)
+        .ceil()
+        .min(height.saturating_sub(1) as f32) as u32;
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let dx = x as f32 - center_x;
+            let dy = y as f32 - center_y;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > radius {
+                continue;
+            }
+            let falloff = if soft {
+                1.0 - (distance / radius).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            let alpha = (opacity * falloff * (color[3] as f32 / 255.0)).clamp(0.0, 1.0);
+            if alpha <= 0.0 {
+                continue;
+            }
+            let pixel = image.get_pixel_mut(x, y);
+            for channel in 0..3 {
+                pixel[channel] = ((pixel[channel] as f32 * (1.0 - alpha))
+                    + (color[channel] as f32 * alpha))
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            pixel[3] = ((pixel[3] as f32 * (1.0 - alpha)) + (color[3] as f32 * alpha))
+                .round()
+                .clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+#[cfg(test)]
+mod texture_paint_tests {
+    use super::*;
+
+    #[test]
+    fn texture_paint_document_serializes_agent_friendly_strokes() {
+        let mut document =
+            TexturePaintDocument::new(64, 32, "textures/test.png".to_owned(), "#102030").unwrap();
+        document.add_stroke(
+            "moss",
+            TexturePaintStroke {
+                brush: "soft_round".to_owned(),
+                color: "#4f7f4a".to_owned(),
+                size: 0.1,
+                opacity: 0.7,
+                space: "uv".to_owned(),
+                points: vec![TexturePaintPoint {
+                    u: 0.5,
+                    v: 0.5,
+                    pressure: 0.8,
+                }],
+            },
+        );
+
+        let json = document.to_pretty_json().unwrap();
+        let parsed: TexturePaintDocument = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.format, TEXTURE_PAINT_FORMAT);
+        assert_eq!(parsed.stroke_count(), 1);
+        assert_eq!(parsed.layers[1].name, "moss");
+    }
+
+    #[test]
+    fn texture_paint_bake_writes_png_with_stroke_pixels() {
+        let temp = tempfile::tempdir().unwrap();
+        let png_path = temp.path().join("paint.png");
+        let mut document =
+            TexturePaintDocument::new(32, 32, "textures/paint.png".to_owned(), "#000000").unwrap();
+        document.add_stroke(
+            "paint",
+            TexturePaintStroke {
+                brush: "round".to_owned(),
+                color: "#ff0000".to_owned(),
+                size: 0.15,
+                opacity: 1.0,
+                space: "uv".to_owned(),
+                points: vec![TexturePaintPoint {
+                    u: 0.5,
+                    v: 0.5,
+                    pressure: 1.0,
+                }],
+            },
+        );
+
+        document.bake_to_png(&png_path).unwrap();
+        let baked = image::open(&png_path).unwrap().to_rgba8();
+
+        assert_eq!(baked.width(), 32);
+        assert_eq!(baked.height(), 32);
+        assert_eq!(baked.get_pixel(16, 15)[0], 255);
     }
 }

@@ -449,6 +449,51 @@ pub(crate) fn generate_plane() -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
+pub(crate) fn generate_sprite_quad(
+    width: f32,
+    height: f32,
+    centered: bool,
+    uv_min: [f32; 2],
+    uv_max: [f32; 2],
+) -> (Vec<Vertex>, Vec<u32>) {
+    let width = width.max(0.01);
+    let height = height.max(0.01);
+    let (left, right, bottom, top) = if centered {
+        (-width * 0.5, width * 0.5, -height * 0.5, height * 0.5)
+    } else {
+        (0.0, width, -height, 0.0)
+    };
+    let vertices = vec![
+        Vertex {
+            position: [left, bottom, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [uv_min[0], uv_min[1]],
+            tangent: [1.0, 0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [right, bottom, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [uv_max[0], uv_min[1]],
+            tangent: [1.0, 0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [right, top, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [uv_max[0], uv_max[1]],
+            tangent: [1.0, 0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [left, top, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            uv: [uv_min[0], uv_max[1]],
+            tangent: [1.0, 0.0, 0.0, 1.0],
+        },
+    ];
+    let indices = vec![0, 1, 2, 2, 3, 0];
+    let vertices = with_generated_tangents(vertices, &indices);
+    (vertices, indices)
+}
+
 pub(crate) fn generate_grid() -> Vec<Vertex> {
     let half = 50.0;
     let y = 0.01;

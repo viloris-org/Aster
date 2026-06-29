@@ -28,7 +28,8 @@ pub use scene::{
     MeshRendererComponentData, ObjectIdAllocator, Occluder2DComponentData,
     ParticleEmitterComponentData, RigidbodyComponentData, SCENE_FILE_VERSION, Scene, SceneFile,
     SceneMode, ScriptComponent, SerializedGameObject, SkinnedMeshRendererComponentData,
-    SkyboxComponentData, Sprite2DComponentData, TileMap2DComponentData, WindZoneComponentData,
+    SkyboxComponentData, Sprite2DComponentData, SpriteRegion2D, TileMap2DComponentData,
+    WindZoneComponentData,
 };
 pub use schema::{
     BuildConfiguration, BuildRenderSettings, ComponentFieldKind, ComponentFieldSchema,
