@@ -6042,13 +6042,19 @@ fn format_display_number(value: f32) -> String {
 }
 
 fn input_action_down(input: &engine_platform::InputState, action: &str) -> bool {
+    if input.action_down(action) {
+        return true;
+    }
     if let Some(keys) = default_action_keys(action) {
         return keys.iter().any(|key| input.key_down(*key));
     }
-    input.action_down(action)
+    false
 }
 
 fn input_action_pressed(input: &engine_platform::InputState, action: &str) -> bool {
+    if input.action_pressed(action) {
+        return true;
+    }
     if let Some(keys) = default_action_keys(action) {
         return keys.iter().any(|key| input.key_pressed(*key));
     }
@@ -6056,6 +6062,9 @@ fn input_action_pressed(input: &engine_platform::InputState, action: &str) -> bo
 }
 
 fn input_action_released(input: &engine_platform::InputState, action: &str) -> bool {
+    if input.action_released(action) {
+        return true;
+    }
     if let Some(keys) = default_action_keys(action) {
         return keys.iter().any(|key| input.key_released(*key));
     }

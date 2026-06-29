@@ -3,15 +3,15 @@
 use std::{collections::HashMap, fmt};
 
 use engine_core::{
-    AssetId, EngineError, EngineResult, EntityId,
     math::{Transform, Vec3},
+    AssetId, EngineError, EngineResult, EntityId,
 };
 use serde::Deserialize;
 
 use crate::{
     object_store::{ObjectImportMap, ObjectRef, ObjectStore},
     transform::TransformHierarchy,
-    world::{Entity, Lifecycle, World},
+    world::{Component, ComponentState, Entity, Lifecycle, World},
 };
 
 /// Scene file schema version.
@@ -2049,6 +2049,64 @@ impl Scene {
         self.active_mut().objects.world_mut()
     }
 
+    /// Inserts or replaces a Rust-native component on an active scene object.
+    pub fn insert_native_component<C: Component>(
+        &mut self,
+        entity: Entity,
+        component: C,
+    ) -> EngineResult<()> {
+        let state = self.active_mut();
+        Self::ensure_alive(state, entity)?;
+        state
+            .objects
+            .world_mut()
+            .insert_component(entity, component)
+    }
+
+    /// Removes a Rust-native component from an active scene object.
+    pub fn remove_native_component<C: Component>(&mut self, entity: Entity) -> EngineResult<bool> {
+        let state = self.active_mut();
+        Self::ensure_alive(state, entity)?;
+        state.objects.world_mut().remove_component::<C>(entity)
+    }
+
+    /// Returns whether an active scene object has a Rust-native component.
+    pub fn has_native_component<C: Component>(&self, entity: Entity) -> bool {
+        self.active().objects.world().has_component::<C>(entity)
+    }
+
+    /// Enables or disables lifecycle ticking for a Rust-native component.
+    pub fn set_native_component_enabled<C: Component>(
+        &mut self,
+        entity: Entity,
+        enabled: bool,
+    ) -> EngineResult<bool> {
+        let state = self.active_mut();
+        Self::ensure_alive(state, entity)?;
+        state
+            .objects
+            .world_mut()
+            .set_component_enabled::<C>(entity, enabled)
+    }
+
+    /// Returns runtime state for a Rust-native component.
+    pub fn native_component_state<C: Component>(&self, entity: Entity) -> Option<ComponentState> {
+        self.active().objects.world().component_state::<C>(entity)
+    }
+
+    /// Returns a mutable Rust-native component reference by concrete type.
+    pub fn native_component_mut<C: Component>(&mut self, entity: Entity) -> Option<&mut C> {
+        self.active_mut()
+            .objects
+            .world_mut()
+            .component_mut::<C>(entity)
+    }
+
+    /// Returns an immutable Rust-native component reference by concrete type.
+    pub fn native_component<C: Component>(&self, entity: Entity) -> Option<&C> {
+        self.active().objects.world().component::<C>(entity)
+    }
+
     /// Creates a new object at the scene root.
     pub fn create_object(&mut self, name: impl Into<String>) -> EngineResult<Entity> {
         self.active_mut().spawn_object(name)
@@ -2642,8 +2700,7 @@ mod tests {
         let mut scene = Scene::new();
         let entity = scene.create_object("Actor").unwrap();
         scene
-            .world_mut()
-            .insert_component(entity, LifecycleRecorder { stages: Vec::new() })
+            .insert_native_component(entity, LifecycleRecorder { stages: Vec::new() })
             .unwrap();
 
         scene.tick_runtime_frame();
@@ -2651,8 +2708,7 @@ mod tests {
         scene.tick_editor_frame();
 
         let stages = &scene
-            .world_mut()
-            .component_mut::<LifecycleRecorder>(entity)
+            .native_component::<LifecycleRecorder>(entity)
             .unwrap()
             .stages;
         assert_eq!(
@@ -2665,5 +2721,71 @@ mod tests {
                 "editor_update"
             ]
         );
+    }
+
+    #[test]
+    fn native_components_are_not_copied_into_serialized_play_state() {
+        let mut scene = Scene::new();
+        let edit_entity = scene.create_object("Actor").unwrap();
+        scene
+            .insert_native_component(edit_entity, LifecycleRecorder { stages: Vec::new() })
+            .unwrap();
+
+        scene.enter_play_mode().unwrap();
+        let play_entity = scene.find_by_name("Actor").unwrap();
+
+        assert!(!scene.has_native_component::<LifecycleRecorder>(play_entity));
+
+        scene
+            .insert_native_component(play_entity, LifecycleRecorder { stages: Vec::new() })
+            .unwrap();
+        assert!(scene
+            .set_native_component_enabled::<LifecycleRecorder>(play_entity, false)
+            .unwrap());
+
+        scene.exit_play_mode();
+
+        let state = scene
+            .native_component_state::<LifecycleRecorder>(edit_entity)
+            .unwrap();
+        assert!(state.is_enabled());
+        assert!(!state.has_started());
+    }
+
+    #[test]
+    fn scene_native_component_api_controls_lifecycle_state() {
+        let mut scene = Scene::new();
+        let entity = scene.create_object("Actor").unwrap();
+        scene
+            .insert_native_component(entity, LifecycleRecorder { stages: Vec::new() })
+            .unwrap();
+
+        assert!(scene.has_native_component::<LifecycleRecorder>(entity));
+        assert!(scene
+            .set_native_component_enabled::<LifecycleRecorder>(entity, false)
+            .unwrap());
+        scene.tick_runtime_frame();
+
+        let state = scene
+            .native_component_state::<LifecycleRecorder>(entity)
+            .unwrap();
+        assert!(!state.is_enabled());
+        assert!(!state.has_started());
+
+        assert!(scene
+            .set_native_component_enabled::<LifecycleRecorder>(entity, true)
+            .unwrap());
+        scene.tick_runtime_frame();
+
+        let stages = &scene
+            .native_component::<LifecycleRecorder>(entity)
+            .unwrap()
+            .stages;
+        assert_eq!(stages, &["start", "update", "late_update"]);
+
+        assert!(scene
+            .remove_native_component::<LifecycleRecorder>(entity)
+            .unwrap());
+        assert!(!scene.has_native_component::<LifecycleRecorder>(entity));
     }
 }

@@ -45,7 +45,10 @@ use engine_physics::{
 };
 #[cfg(feature = "runtime-game")]
 use engine_platform::GamepadProvider;
-use engine_platform::{ActionMap, InputState};
+use engine_platform::{
+    ActionMap, AxisType, DeadZone, GamepadAxis, GamepadButton, InputBindingV2, InputMap,
+    InputModifier, InputState, InputTrigger, KeyCode, MouseButton,
+};
 #[cfg(feature = "asset-import")]
 use engine_render::RenderMaterialTextures;
 use engine_render::{
@@ -726,6 +729,7 @@ impl<R: RenderDevice> RuntimeServices<R> {
         }
         self.time.update(dt);
         self.stats.frame_time_seconds = self.time.delta_seconds;
+        self.input.evaluate_mapped_actions(self.time.delta_seconds);
         self.stats.physics_steps = 0;
         self.ui_commands.clear();
         self.handle_pause_menu_input();
@@ -1410,12 +1414,13 @@ impl<R: RenderDevice> RuntimeServices<R> {
 
     /// Returns true if any key bound to `action_name` was pressed this frame.
     pub fn action_pressed(&self, action_name: &str) -> bool {
-        self.action_map.action_pressed(&self.input, action_name)
+        self.input.action_pressed(action_name)
+            || self.action_map.action_pressed(&self.input, action_name)
     }
 
     /// Returns true if any key bound to `action_name` is held (including the first frame).
     pub fn action_held(&self, action_name: &str) -> bool {
-        self.action_map.action_held(&self.input, action_name)
+        self.input.action_down(action_name) || self.action_map.action_held(&self.input, action_name)
     }
 
     /// Loads action bindings from a TOML file at the given path.
@@ -1425,6 +1430,14 @@ impl<R: RenderDevice> RuntimeServices<R> {
     /// [actions]
     /// MoveForward = ["W", "ArrowUp"]
     /// Jump = ["Space"]
+    ///
+    /// [contexts.Gameplay]
+    /// priority = 10
+    ///
+    /// [[contexts.Gameplay.bindings]]
+    /// action = "Jump"
+    /// keys = ["Space"]
+    /// triggers = ["Pressed"]
     /// ```
     /// Key names must match `KeyCode` variant names (Escape, Enter, Space,
     /// ArrowUp, ArrowDown, ArrowLeft, ArrowRight) or be a single character
@@ -1440,18 +1453,49 @@ impl<R: RenderDevice> RuntimeServices<R> {
                 path.display()
             ))
         })?;
-        let Some(actions) = doc.get("actions").and_then(|v| v.as_table()) else {
-            return Ok(());
-        };
-        for (name, keys) in actions {
-            if let Some(arr) = keys.as_array() {
-                for key_val in arr {
-                    if let Some(key_str) = key_val.as_str() {
-                        if let Some(key) = ActionMap::parse_key_name(key_str) {
-                            self.action_map.bind(name, key);
+        if let Some(actions) = doc.get("actions").and_then(|value| value.as_table()) {
+            for (name, keys) in actions {
+                if let Some(arr) = keys.as_array() {
+                    for key_val in arr {
+                        if let Some(key_str) = key_val.as_str() {
+                            if let Some(key) = ActionMap::parse_key_name(key_str) {
+                                self.action_map.bind(name, key);
+                            }
                         }
                     }
                 }
+            }
+        }
+
+        if let Some(contexts) = doc.get("contexts").and_then(|value| value.as_table()) {
+            for (name, context) in contexts {
+                let Some(context) = context.as_table() else {
+                    continue;
+                };
+                let mut map = InputMap {
+                    name: name.clone(),
+                    priority: context
+                        .get("priority")
+                        .and_then(toml::Value::as_integer)
+                        .unwrap_or_default() as i32,
+                    ..Default::default()
+                };
+
+                if let Some(bindings) = context.get("bindings").and_then(toml::Value::as_array) {
+                    for binding in bindings {
+                        let Some(binding) = binding.as_table() else {
+                            continue;
+                        };
+                        let Some(action) = binding.get("action").and_then(toml::Value::as_str)
+                        else {
+                            continue;
+                        };
+                        map.mappings
+                            .push((action.to_string(), parse_input_binding_table(binding)));
+                    }
+                }
+
+                self.input.set_input_map(map);
             }
         }
         Ok(())
@@ -3836,6 +3880,187 @@ fn parse_anti_aliasing(value: &str) -> AntiAliasingMode {
     }
 }
 
+fn parse_input_binding_table(binding: &toml::map::Map<String, toml::Value>) -> InputBindingV2 {
+    let axis_type = binding
+        .get("axis")
+        .and_then(toml::Value::as_str)
+        .and_then(parse_axis_type)
+        .unwrap_or(AxisType::Digital);
+
+    let mut parsed = InputBindingV2 {
+        axis_type,
+        dead_zone: binding
+            .get("deadzone")
+            .and_then(toml::Value::as_float)
+            .map(|inner| DeadZone {
+                inner: inner as f32,
+                outer: 1.0,
+            }),
+        buffer_frames: binding
+            .get("buffer_frames")
+            .and_then(toml::Value::as_integer)
+            .unwrap_or_default()
+            .max(0) as u32,
+        consume_lower_priority: binding
+            .get("consume")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false),
+        ..Default::default()
+    };
+
+    parsed.positive_keys = parse_key_array(binding.get("keys"));
+    parsed.positive_mouse = parse_mouse_button_array(binding.get("mouse"));
+    parsed.positive_gamepad = parse_gamepad_button_array(binding.get("gamepad"));
+    parsed.positive_gamepad_axes = parse_gamepad_axis_array(binding.get("gamepad_axes"));
+    parsed.negative_keys = parse_key_array(binding.get("negative_keys"));
+    parsed.negative_gamepad = parse_gamepad_button_array(binding.get("negative_gamepad"));
+    parsed.negative_gamepad_axes = parse_gamepad_axis_array(binding.get("negative_gamepad_axes"));
+    parsed.chord_keys = parse_key_array(binding.get("chords"));
+    parsed.modifiers = parse_modifier_array(binding.get("modifiers"));
+    parsed.triggers = parse_trigger_array(binding.get("triggers"));
+    parsed
+}
+
+fn parse_string_array(value: Option<&toml::Value>) -> Vec<&str> {
+    value
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_str)
+        .collect()
+}
+
+fn parse_key_array(value: Option<&toml::Value>) -> Vec<KeyCode> {
+    parse_string_array(value)
+        .into_iter()
+        .filter_map(ActionMap::parse_key_name)
+        .collect()
+}
+
+fn parse_mouse_button_array(value: Option<&toml::Value>) -> Vec<MouseButton> {
+    parse_string_array(value)
+        .into_iter()
+        .filter_map(parse_mouse_button)
+        .collect()
+}
+
+fn parse_gamepad_button_array(value: Option<&toml::Value>) -> Vec<GamepadButton> {
+    parse_string_array(value)
+        .into_iter()
+        .filter_map(parse_gamepad_button)
+        .collect()
+}
+
+fn parse_gamepad_axis_array(value: Option<&toml::Value>) -> Vec<GamepadAxis> {
+    parse_string_array(value)
+        .into_iter()
+        .filter_map(parse_gamepad_axis)
+        .collect()
+}
+
+fn parse_modifier_array(value: Option<&toml::Value>) -> Vec<InputModifier> {
+    parse_string_array(value)
+        .into_iter()
+        .filter_map(parse_input_modifier)
+        .collect()
+}
+
+fn parse_trigger_array(value: Option<&toml::Value>) -> Vec<InputTrigger> {
+    parse_string_array(value)
+        .into_iter()
+        .filter_map(parse_input_trigger)
+        .collect()
+}
+
+fn parse_axis_type(value: &str) -> Option<AxisType> {
+    match value {
+        "digital" | "Digital" => Some(AxisType::Digital),
+        "axis1d" | "Axis1D" | "1d" => Some(AxisType::Axis1D),
+        "axis2d" | "Axis2D" | "2d" => Some(AxisType::Axis2D),
+        _ => None,
+    }
+}
+
+fn parse_mouse_button(value: &str) -> Option<MouseButton> {
+    match value {
+        "Left" | "left" => Some(MouseButton::Left),
+        "Right" | "right" => Some(MouseButton::Right),
+        "Middle" | "middle" => Some(MouseButton::Middle),
+        _ => value
+            .strip_prefix("Other")
+            .and_then(|number| number.parse::<u16>().ok())
+            .map(MouseButton::Other),
+    }
+}
+
+fn parse_gamepad_button(value: &str) -> Option<GamepadButton> {
+    match value {
+        "A" => Some(GamepadButton::A),
+        "B" => Some(GamepadButton::B),
+        "X" => Some(GamepadButton::X),
+        "Y" => Some(GamepadButton::Y),
+        "LB" => Some(GamepadButton::LB),
+        "RB" => Some(GamepadButton::RB),
+        "LT" => Some(GamepadButton::LT),
+        "RT" => Some(GamepadButton::RT),
+        "Start" => Some(GamepadButton::Start),
+        "Select" | "Back" => Some(GamepadButton::Select),
+        "LeftStick" => Some(GamepadButton::LeftStick),
+        "RightStick" => Some(GamepadButton::RightStick),
+        "DPadUp" => Some(GamepadButton::DPadUp),
+        "DPadDown" => Some(GamepadButton::DPadDown),
+        "DPadLeft" => Some(GamepadButton::DPadLeft),
+        "DPadRight" => Some(GamepadButton::DPadRight),
+        _ => None,
+    }
+}
+
+fn parse_gamepad_axis(value: &str) -> Option<GamepadAxis> {
+    match value {
+        "LeftStickX" => Some(GamepadAxis::LeftStickX),
+        "LeftStickY" => Some(GamepadAxis::LeftStickY),
+        "RightStickX" => Some(GamepadAxis::RightStickX),
+        "RightStickY" => Some(GamepadAxis::RightStickY),
+        "LeftTrigger" => Some(GamepadAxis::LeftTrigger),
+        "RightTrigger" => Some(GamepadAxis::RightTrigger),
+        _ => None,
+    }
+}
+
+fn parse_input_modifier(value: &str) -> Option<InputModifier> {
+    match value {
+        "Negate" | "negate" => Some(InputModifier::Negate),
+        "ScaleByDeltaTime" | "scale_by_delta_time" | "delta_time" => {
+            Some(InputModifier::ScaleByDeltaTime)
+        }
+        _ => value
+            .strip_prefix("Scalar:")
+            .or_else(|| value.strip_prefix("scalar:"))
+            .and_then(|number| number.parse::<f32>().ok())
+            .map(InputModifier::Scalar)
+            .or_else(|| {
+                value
+                    .strip_prefix("ResponseCurve:")
+                    .or_else(|| value.strip_prefix("response_curve:"))
+                    .and_then(|number| number.parse::<f32>().ok())
+                    .map(|exponent| InputModifier::ResponseCurve { exponent })
+            }),
+    }
+}
+
+fn parse_input_trigger(value: &str) -> Option<InputTrigger> {
+    match value {
+        "Down" | "down" => Some(InputTrigger::Down),
+        "Pressed" | "pressed" => Some(InputTrigger::Pressed),
+        "Released" | "released" => Some(InputTrigger::Released),
+        _ => value
+            .strip_prefix("Hold:")
+            .or_else(|| value.strip_prefix("hold:"))
+            .and_then(|number| number.parse::<f32>().ok())
+            .map(|seconds| InputTrigger::Hold { seconds }),
+    }
+}
+
 /// Detects broad runtime conditions used by automatic scaling policy.
 pub fn runtime_scaling_context() -> RenderScalingContext {
     let platform = if cfg!(target_os = "android") {
@@ -5804,6 +6029,67 @@ mod tests {
                 .unwrap()
                 .contains(&KeyCode::Character('c')),
             "Crouch should be bound to C"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_input_context_bindings_from_toml() {
+        let dir =
+            std::env::temp_dir().join(format!("varg-input-context-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml_path = dir.join("input_bindings.toml");
+        std::fs::write(
+            &toml_path,
+            r#"
+[contexts.Gameplay]
+priority = 10
+
+[[contexts.Gameplay.bindings]]
+action = "Dash"
+keys = ["C"]
+triggers = ["Pressed"]
+
+[[contexts.Gameplay.bindings]]
+action = "LookX"
+axis = "Axis1D"
+gamepad_axes = ["RightStickX"]
+deadzone = 0.1
+modifiers = ["Scalar:0.5"]
+"#,
+        )
+        .unwrap();
+
+        let mut services = RuntimeServices::minimal(EngineConfig::default());
+        services.load_action_bindings(&toml_path).unwrap();
+
+        services
+            .input
+            .apply_event(engine_platform::InputEvent::KeyDown(
+                engine_platform::KeyCode::Character('c'),
+            ));
+        services.input.evaluate_mapped_actions(1.0 / 60.0);
+        assert!(services.action_pressed("Dash"));
+        assert!(services.action_held("Dash"));
+
+        services.input.end_frame();
+        services
+            .input
+            .apply_event(engine_platform::InputEvent::KeyUp(
+                engine_platform::KeyCode::Character('c'),
+            ));
+        services.input.evaluate_mapped_actions(1.0 / 60.0);
+        assert!(!services.action_held("Dash"));
+
+        let mut gamepad = engine_platform::GamepadState::connected(0, "Test Controller");
+        gamepad.right_stick_x = 0.6;
+        services.input.apply_gamepad_state(gamepad);
+        services.input.evaluate_mapped_actions(1.0 / 60.0);
+        let look_x = services.input.action_value("LookX");
+        assert!(
+            (0.25..0.35).contains(&look_x),
+            "LookX should apply deadzone and scalar modifier, got {look_x}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

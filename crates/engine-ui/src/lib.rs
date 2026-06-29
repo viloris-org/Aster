@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_GUI_TEXTURE: GuiTextureId = GuiTextureId(0);
 
 /// 2D vector for UI layout.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Vec2 {
     /// X component.
     pub x: f32,
@@ -25,6 +25,16 @@ impl Vec2 {
     /// Creates a new Vec2.
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
+    }
+
+    /// Returns this vector with each component at least `min`.
+    pub fn max(self, min: Self) -> Self {
+        Self::new(self.x.max(min.x), self.y.max(min.y))
+    }
+
+    /// Returns this vector with each component at most `max`.
+    pub fn min(self, max: Self) -> Self {
+        Self::new(self.x.min(max.x), self.y.min(max.y))
     }
 }
 
@@ -49,7 +59,7 @@ impl Rect {
 }
 
 /// Margin for UI elements.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Margin {
     /// Left margin.
     pub left: f32,
@@ -59,6 +69,179 @@ pub struct Margin {
     pub top: f32,
     /// Bottom margin.
     pub bottom: f32,
+}
+
+impl Margin {
+    /// Creates a margin where every side uses the same value.
+    pub const fn all(value: f32) -> Self {
+        Self {
+            left: value,
+            right: value,
+            top: value,
+            bottom: value,
+        }
+    }
+
+    /// Creates a margin from explicit side values.
+    pub const fn new(left: f32, right: f32, top: f32, bottom: f32) -> Self {
+        Self {
+            left,
+            right,
+            top,
+            bottom,
+        }
+    }
+}
+
+/// Visibility and hit-test policy for a control.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Visibility {
+    /// The control participates in layout, renders, and can receive input.
+    #[default]
+    Visible,
+    /// The control keeps its layout space but does not render or receive input.
+    Hidden,
+    /// The control is removed from layout, rendering, and input routing.
+    Collapsed,
+    /// The control renders but neither it nor its children receive pointer input.
+    HitTestInvisible,
+    /// The control renders and its children can receive pointer input, but the control itself cannot.
+    SelfHitTestInvisible,
+}
+
+impl Visibility {
+    /// Returns whether this visibility participates in layout.
+    pub fn participates_in_layout(self) -> bool {
+        !matches!(self, Self::Collapsed)
+    }
+
+    /// Returns whether this visibility should render.
+    pub fn renders(self) -> bool {
+        matches!(
+            self,
+            Self::Visible | Self::HitTestInvisible | Self::SelfHitTestInvisible
+        )
+    }
+
+    /// Returns whether this visibility accepts a hit on the control itself.
+    pub fn accepts_self_hit_test(self) -> bool {
+        matches!(self, Self::Visible)
+    }
+
+    /// Returns whether this visibility allows descendants to receive pointer input.
+    pub fn allows_child_hit_test(self) -> bool {
+        matches!(self, Self::Visible | Self::SelfHitTestInvisible)
+    }
+}
+
+/// Direction used by stack-style panel layout.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum StackDirection {
+    /// Children are arranged top to bottom.
+    #[default]
+    Vertical,
+    /// Children are arranged left to right.
+    Horizontal,
+}
+
+/// Alignment inside a layout slot.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Alignment {
+    /// Align to the leading edge.
+    #[default]
+    Start,
+    /// Align to the center.
+    Center,
+    /// Align to the trailing edge.
+    End,
+    /// Stretch to fill the available slot span.
+    Fill,
+}
+
+/// Per-axis size rule for a layout slot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum SizeRule {
+    /// Use the widget's measured desired size.
+    #[default]
+    Auto,
+    /// Use an explicit size in pixels.
+    Fixed(f32),
+    /// Share remaining parent space with other fill slots.
+    Fill {
+        /// Relative fill weight.
+        weight: f32,
+    },
+}
+
+impl SizeRule {
+    fn fill_weight(self) -> f32 {
+        match self {
+            Self::Fill { weight } => weight.max(0.0),
+            Self::Auto | Self::Fixed(_) => 0.0,
+        }
+    }
+}
+
+/// Parent-owned layout slot data for a control.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SlotLayout {
+    /// Outer margin around the control.
+    pub margin: Margin,
+    /// Width rule.
+    pub width: SizeRule,
+    /// Height rule.
+    pub height: SizeRule,
+    /// Minimum final size.
+    pub min_size: Vec2,
+    /// Maximum final size.
+    pub max_size: Vec2,
+    /// Horizontal alignment inside the allocated slot.
+    pub horizontal_alignment: Alignment,
+    /// Vertical alignment inside the allocated slot.
+    pub vertical_alignment: Alignment,
+}
+
+impl Default for SlotLayout {
+    fn default() -> Self {
+        Self {
+            margin: Margin::default(),
+            width: SizeRule::Auto,
+            height: SizeRule::Auto,
+            min_size: Vec2::default(),
+            max_size: Vec2::new(f32::INFINITY, f32::INFINITY),
+            horizontal_alignment: Alignment::Start,
+            vertical_alignment: Alignment::Start,
+        }
+    }
+}
+
+impl SlotLayout {
+    /// Creates a default slot layout.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns a slot with the supplied margin.
+    pub fn with_margin(mut self, margin: Margin) -> Self {
+        self.margin = margin;
+        self
+    }
+
+    /// Returns a slot with fixed width and height.
+    pub fn fixed(mut self, width: f32, height: f32) -> Self {
+        self.width = SizeRule::Fixed(width);
+        self.height = SizeRule::Fixed(height);
+        self
+    }
+
+    /// Returns a slot that fills both axes.
+    pub fn fill(mut self, weight: f32) -> Self {
+        self.width = SizeRule::Fill { weight };
+        self.height = SizeRule::Fill { weight };
+        self.horizontal_alignment = Alignment::Fill;
+        self.vertical_alignment = Alignment::Fill;
+        self
+    }
 }
 
 /// Style box types for rendering UI element backgrounds.
@@ -217,10 +400,37 @@ impl UiReply {
 /// Layout data for a control node.
 #[derive(Clone, Debug, Default)]
 struct LayoutData {
+    desired_size: Vec2,
     min_size: Vec2,
     position: Vec2,
     rect: Rect,
-    margin: Margin,
+    slot: SlotLayout,
+    needs_layout: bool,
+    needs_paint: bool,
+}
+
+/// Arranged control geometry after a layout pass.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArrangedControl {
+    /// Stable control name.
+    pub name: String,
+    /// Widget type name.
+    pub widget_type: &'static str,
+    /// Final screen-space rectangle.
+    pub rect: Rect,
+    /// Visibility policy used for this control.
+    pub visibility: Visibility,
+    /// Tree depth, with root children at depth 0.
+    pub depth: usize,
+}
+
+/// Counts controls marked dirty for layout or paint.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UiInvalidationStats {
+    /// Number of controls that need a layout pass.
+    pub layout_dirty: usize,
+    /// Number of controls that need paint data regeneration.
+    pub paint_dirty: usize,
 }
 
 /// Base control node in the UI tree.
@@ -233,10 +443,66 @@ pub struct ControlNode {
     pub children: Vec<ControlNode>,
     /// Whether this control is visible.
     pub visible: bool,
+    /// Visibility and hit-test policy.
+    pub visibility: Visibility,
     /// Whether this control is enabled.
     pub enabled: bool,
     /// Widget-specific data.
     widget: Box<dyn Widget>,
+}
+
+impl ControlNode {
+    /// Sets the local layout position.
+    pub fn set_position(&mut self, position: Vec2) {
+        self.layout.position = position;
+        self.invalidate_layout();
+    }
+
+    /// Sets the margin used by parent panel layout.
+    pub fn set_margin(&mut self, margin: Margin) {
+        self.layout.slot.margin = margin;
+        self.invalidate_layout();
+    }
+
+    /// Sets parent-owned slot layout data.
+    pub fn set_slot(&mut self, slot: SlotLayout) {
+        self.layout.slot = slot;
+        self.invalidate_layout();
+    }
+
+    /// Sets the visibility policy.
+    pub fn set_visibility(&mut self, visibility: Visibility) {
+        self.visibility = visibility;
+        self.visible = visibility.renders();
+        self.invalidate_layout();
+    }
+
+    /// Marks this node and its descendants as needing layout.
+    pub fn invalidate_layout(&mut self) {
+        self.layout.needs_layout = true;
+        self.layout.needs_paint = true;
+        for child in &mut self.children {
+            child.invalidate_layout();
+        }
+    }
+
+    /// Marks this node and its descendants as needing paint.
+    pub fn invalidate_paint(&mut self) {
+        self.layout.needs_paint = true;
+        for child in &mut self.children {
+            child.invalidate_paint();
+        }
+    }
+
+    fn effective_visibility(&self) -> Visibility {
+        if self.visible {
+            self.visibility
+        } else if self.visibility == Visibility::Collapsed {
+            Visibility::Collapsed
+        } else {
+            Visibility::Hidden
+        }
+    }
 }
 
 /// Widget trait for UI controls.
@@ -247,6 +513,10 @@ pub trait Widget: Any {
     fn measure(&self, theme: &Theme) -> Vec2;
     /// Returns the style box for rendering.
     fn style(&self, theme: &Theme) -> StyleBox;
+    /// Returns stack panel layout direction for widgets that arrange children.
+    fn stack_direction(&self) -> Option<StackDirection> {
+        Some(StackDirection::Vertical)
+    }
     /// Handles an event.
     fn handle_event(&mut self, event: &UiEvent, theme: &Theme) -> EventResult;
     /// Updates hover state for widgets that track it.
@@ -277,6 +547,48 @@ impl Widget for LabelWidget {
 
     fn style(&self, _theme: &Theme) -> StyleBox {
         StyleBox::Empty
+    }
+
+    fn stack_direction(&self) -> Option<StackDirection> {
+        None
+    }
+
+    fn handle_event(&mut self, _event: &UiEvent, _theme: &Theme) -> EventResult {
+        EventResult::Ignored
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/// A panel widget that lays out child controls in a stack.
+pub struct PanelWidget {
+    /// Stack direction used for child layout.
+    pub direction: StackDirection,
+    /// Optional background style.
+    pub background: StyleBox,
+}
+
+impl Widget for PanelWidget {
+    fn type_name(&self) -> &'static str {
+        "Panel"
+    }
+
+    fn measure(&self, _theme: &Theme) -> Vec2 {
+        Vec2::default()
+    }
+
+    fn style(&self, _theme: &Theme) -> StyleBox {
+        self.background.clone()
+    }
+
+    fn stack_direction(&self) -> Option<StackDirection> {
+        Some(self.direction)
     }
 
     fn handle_event(&mut self, _event: &UiEvent, _theme: &Theme) -> EventResult {
@@ -337,6 +649,10 @@ impl Widget for ButtonWidget {
         }
     }
 
+    fn stack_direction(&self) -> Option<StackDirection> {
+        None
+    }
+
     fn handle_event(&mut self, event: &UiEvent, _theme: &Theme) -> EventResult {
         match event {
             UiEvent::MouseMove { .. } => EventResult::Ignored,
@@ -380,6 +696,7 @@ pub struct ControlTree {
     focused: Option<String>,
     pointer_capture: Option<String>,
     hovered: Option<String>,
+    last_available: Vec2,
 }
 
 impl ControlTree {
@@ -391,15 +708,18 @@ impl ControlTree {
                 layout: LayoutData::default(),
                 children: Vec::new(),
                 visible: true,
+                visibility: Visibility::Visible,
                 enabled: true,
-                widget: Box::new(LabelWidget {
-                    text: String::new(),
+                widget: Box::new(PanelWidget {
+                    direction: StackDirection::Vertical,
+                    background: StyleBox::Empty,
                 }),
             },
             theme: Theme::default(),
             focused: None,
             pointer_capture: None,
             hovered: None,
+            last_available: Vec2::default(),
         }
     }
 
@@ -420,6 +740,7 @@ impl ControlTree {
             layout: LayoutData::default(),
             children: Vec::new(),
             visible: true,
+            visibility: Visibility::Visible,
             enabled: true,
             widget: Box::new(ButtonWidget {
                 text: text.into(),
@@ -437,15 +758,139 @@ impl ControlTree {
             layout: LayoutData::default(),
             children: Vec::new(),
             visible: true,
+            visibility: Visibility::Visible,
             enabled: true,
             widget: Box::new(LabelWidget { text: text.into() }),
         });
     }
 
+    /// Adds a stack panel to the root control.
+    pub fn add_panel(&mut self, name: impl Into<String>, direction: StackDirection) {
+        self.root.children.push(ControlNode {
+            name: name.into(),
+            layout: LayoutData::default(),
+            children: Vec::new(),
+            visible: true,
+            visibility: Visibility::Visible,
+            enabled: true,
+            widget: Box::new(PanelWidget {
+                direction,
+                background: StyleBox::Empty,
+            }),
+        });
+    }
+
+    /// Adds a label as a child of an existing control.
+    pub fn add_label_to(
+        &mut self,
+        parent: &str,
+        name: impl Into<String>,
+        text: impl Into<String>,
+    ) -> bool {
+        let Some(parent) = find_node_mut(&mut self.root, parent) else {
+            return false;
+        };
+        parent.children.push(ControlNode {
+            name: name.into(),
+            layout: LayoutData::default(),
+            children: Vec::new(),
+            visible: true,
+            visibility: Visibility::Visible,
+            enabled: true,
+            widget: Box::new(LabelWidget { text: text.into() }),
+        });
+        true
+    }
+
+    /// Adds a button as a child of an existing control.
+    pub fn add_button_to(
+        &mut self,
+        parent: &str,
+        name: impl Into<String>,
+        text: impl Into<String>,
+    ) -> bool {
+        let Some(parent) = find_node_mut(&mut self.root, parent) else {
+            return false;
+        };
+        parent.children.push(ControlNode {
+            name: name.into(),
+            layout: LayoutData::default(),
+            children: Vec::new(),
+            visible: true,
+            visibility: Visibility::Visible,
+            enabled: true,
+            widget: Box::new(ButtonWidget {
+                text: text.into(),
+                clicked: false,
+                pressed: false,
+                hovered: false,
+            }),
+        });
+        true
+    }
+
+    /// Adds a stack panel as a child of an existing control.
+    pub fn add_panel_to(
+        &mut self,
+        parent: &str,
+        name: impl Into<String>,
+        direction: StackDirection,
+    ) -> bool {
+        let Some(parent) = find_node_mut(&mut self.root, parent) else {
+            return false;
+        };
+        parent.children.push(ControlNode {
+            name: name.into(),
+            layout: LayoutData::default(),
+            children: Vec::new(),
+            visible: true,
+            visibility: Visibility::Visible,
+            enabled: true,
+            widget: Box::new(PanelWidget {
+                direction,
+                background: StyleBox::Empty,
+            }),
+        });
+        true
+    }
+
+    /// Sets a control's local position.
+    pub fn set_position(&mut self, name: &str, position: Vec2) -> bool {
+        find_node_mut(&mut self.root, name)
+            .map(|node| node.set_position(position))
+            .is_some()
+    }
+
+    /// Sets a control's margin.
+    pub fn set_margin(&mut self, name: &str, margin: Margin) -> bool {
+        find_node_mut(&mut self.root, name)
+            .map(|node| node.set_margin(margin))
+            .is_some()
+    }
+
+    /// Sets a control's parent-owned layout slot.
+    pub fn set_slot(&mut self, name: &str, slot: SlotLayout) -> bool {
+        find_node_mut(&mut self.root, name)
+            .map(|node| node.set_slot(slot))
+            .is_some()
+    }
+
+    /// Sets a control's visibility and hit-test policy.
+    pub fn set_visibility(&mut self, name: &str, visibility: Visibility) -> bool {
+        find_node_mut(&mut self.root, name)
+            .map(|node| node.set_visibility(visibility))
+            .is_some()
+    }
+
     /// Performs layout for all controls.
-    pub fn layout(&mut self, _available: Vec2) {
+    pub fn layout(&mut self, available: Vec2) {
         let theme = self.theme.clone();
-        layout_node(&mut self.root, &theme, Vec2::default());
+        self.last_available = available;
+        self.root.layout.position = Vec2::default();
+        self.root.layout.slot.width = SizeRule::Fixed(available.x);
+        self.root.layout.slot.height = SizeRule::Fixed(available.y);
+        layout_node(&mut self.root, &theme, Vec2::default(), available);
+        clear_layout_dirty(&mut self.root);
     }
 
     /// Routes an event through the control tree.
@@ -458,7 +903,7 @@ impl ControlTree {
         let theme = self.theme.clone();
         let mut reply = match event {
             UiEvent::MouseMove { x, y } => {
-                let hit = hit_test_node(&self.root, *x, *y);
+                let hit = hit_test_node(&self.root, *x, *y).map(|hit| hit.name);
                 self.set_hovered(hit.clone());
                 let result = if let Some(captor) = self.pointer_capture.clone().or(hit) {
                     route_event_to_node(&mut self.root, &captor, event, &theme)
@@ -473,7 +918,7 @@ impl ControlTree {
                 }
             }
             UiEvent::MouseDown { x, y, .. } => {
-                if let Some(target) = hit_test_node(&self.root, *x, *y) {
+                if let Some(target) = hit_test_node(&self.root, *x, *y).map(|hit| hit.name) {
                     let result = route_event_to_node(&mut self.root, &target, event, &theme);
                     if result == EventResult::Consumed {
                         UiReply {
@@ -494,7 +939,7 @@ impl ControlTree {
                 let target = self
                     .pointer_capture
                     .clone()
-                    .or_else(|| hit_test_node(&self.root, *x, *y));
+                    .or_else(|| hit_test_node(&self.root, *x, *y).map(|hit| hit.name));
                 let result = target
                     .as_deref()
                     .map(|name| route_event_to_node(&mut self.root, name, event, &theme))
@@ -532,7 +977,8 @@ impl ControlTree {
         self.apply_reply(&reply);
         if reply.release_pointer {
             self.set_hovered(
-                pointer_position(event).and_then(|(x, y)| hit_test_node(&self.root, x, y)),
+                pointer_position(event)
+                    .and_then(|(x, y)| hit_test_node(&self.root, x, y).map(|hit| hit.name)),
             );
         }
         if reply.result == EventResult::Consumed {
@@ -565,6 +1011,42 @@ impl ControlTree {
         commands
     }
 
+    /// Returns arranged control geometry from the most recent layout pass.
+    pub fn arranged_controls(&self) -> Vec<ArrangedControl> {
+        let mut controls = Vec::new();
+        for child in &self.root.children {
+            collect_arranged_node(child, 0, &mut controls);
+        }
+        controls
+    }
+
+    /// Returns the deepest hit control and its ancestor path at a screen-space point.
+    pub fn hit_test_path(&self, x: f32, y: f32) -> Option<HitTestPath> {
+        hit_test_node(&self.root, x, y)
+    }
+
+    /// Returns current layout and paint invalidation counts.
+    pub fn invalidation_stats(&self) -> UiInvalidationStats {
+        let mut stats = UiInvalidationStats::default();
+        count_invalidation(&self.root, &mut stats);
+        stats
+    }
+
+    /// Marks all controls as needing layout and paint.
+    pub fn invalidate_layout(&mut self) {
+        self.root.invalidate_layout();
+    }
+
+    /// Marks all controls as needing paint.
+    pub fn invalidate_paint(&mut self) {
+        self.root.invalidate_paint();
+    }
+
+    /// Returns the size supplied to the latest layout pass.
+    pub fn last_available_size(&self) -> Vec2 {
+        self.last_available
+    }
+
     /// Builds a GPU-ready GUI draw list for all visible controls.
     ///
     /// This is the retained UI renderer's low-level output. It currently draws
@@ -579,7 +1061,7 @@ impl ControlTree {
     }
 
     fn collect_node_draw(&self, node: &ControlNode, commands: &mut Vec<DrawCommand>) {
-        if !node.visible {
+        if !node.effective_visibility().renders() {
             return;
         }
         commands.push(DrawCommand {
@@ -624,40 +1106,361 @@ impl Default for ControlTree {
     }
 }
 
-fn layout_node(node: &mut ControlNode, theme: &Theme, origin: Vec2) {
-    node.layout.min_size = node.widget.measure(theme);
+fn layout_node(node: &mut ControlNode, theme: &Theme, origin: Vec2, available: Vec2) {
+    if !node.effective_visibility().participates_in_layout() {
+        node.layout.desired_size = Vec2::default();
+        node.layout.min_size = Vec2::default();
+        node.layout.rect = Rect::default();
+        return;
+    }
+
+    let widget_min = node.widget.measure(theme);
+    let direction = node.widget.stack_direction();
+    let desired = measure_node(node, theme);
+    let size = resolve_size(node.layout.slot, desired.max(widget_min), available);
+    node.layout.desired_size = desired;
+    node.layout.min_size = size;
     node.layout.rect = Rect {
         x: origin.x + node.layout.position.x,
         y: origin.y + node.layout.position.y,
-        width: node.layout.min_size.x,
-        height: node.layout.min_size.y,
+        width: size.x,
+        height: size.y,
     };
-    let mut y_offset = node.layout.margin.top;
+
+    if let Some(direction) = direction {
+        arrange_stack_children(node, theme, direction);
+    } else {
+        for child in &mut node.children {
+            layout_node(
+                child,
+                theme,
+                Vec2::new(node.layout.rect.x, node.layout.rect.y),
+                node.layout.min_size,
+            );
+        }
+    }
+}
+
+fn measure_node(node: &mut ControlNode, theme: &Theme) -> Vec2 {
+    if !node.effective_visibility().participates_in_layout() {
+        node.layout.desired_size = Vec2::default();
+        return Vec2::default();
+    }
+
+    let widget_min = node.widget.measure(theme);
+    let Some(direction) = node.widget.stack_direction() else {
+        node.layout.desired_size = widget_min;
+        return widget_min;
+    };
+
+    let mut desired = widget_min;
+    match direction {
+        StackDirection::Vertical => {
+            let mut width: f32 = 0.0;
+            let mut height: f32 = 0.0;
+            for child in &mut node.children {
+                let child_size = measure_node(child, theme);
+                if !child.effective_visibility().participates_in_layout() {
+                    continue;
+                }
+                let margin = child.layout.slot.margin;
+                width = width.max(margin.left + child_size.x + margin.right);
+                height += margin.top + child_size.y + margin.bottom;
+            }
+            desired = desired.max(Vec2::new(width, height));
+        }
+        StackDirection::Horizontal => {
+            let mut width: f32 = 0.0;
+            let mut height: f32 = 0.0;
+            for child in &mut node.children {
+                let child_size = measure_node(child, theme);
+                if !child.effective_visibility().participates_in_layout() {
+                    continue;
+                }
+                let margin = child.layout.slot.margin;
+                width += margin.left + child_size.x + margin.right;
+                height = height.max(margin.top + child_size.y + margin.bottom);
+            }
+            desired = desired.max(Vec2::new(width, height));
+        }
+    }
+    node.layout.desired_size = desired;
+    desired
+}
+
+fn arrange_stack_children(node: &mut ControlNode, theme: &Theme, direction: StackDirection) {
+    let content_size = node.layout.min_size;
+    let fixed_primary = stack_fixed_primary(&node.children, direction);
+    let fill_weight = stack_fill_weight(&node.children, direction);
+    let remaining_primary = (stack_primary(content_size, direction) - fixed_primary).max(0.0);
+    let mut cursor = 0.0;
+
     for child in &mut node.children {
-        let child_min_size = child.widget.measure(theme);
-        child.layout.position = Vec2::new(node.layout.margin.left, y_offset);
-        y_offset += child.layout.margin.top + child.layout.margin.bottom + child_min_size.y;
+        if !child.effective_visibility().participates_in_layout() {
+            layout_node(
+                child,
+                theme,
+                Vec2::new(node.layout.rect.x, node.layout.rect.y),
+                Vec2::default(),
+            );
+            continue;
+        }
+
+        let slot = child.layout.slot;
+        let desired = child.layout.desired_size;
+        let margin = slot.margin;
+        let primary_margin = stack_primary_margin(margin, direction);
+        let cross_margin = stack_cross_margin(margin, direction);
+        let slot_primary = match stack_size_rule(slot, direction) {
+            SizeRule::Fill { weight } if fill_weight > f32::EPSILON => {
+                remaining_primary * weight.max(0.0) / fill_weight
+            }
+            SizeRule::Fixed(value) => value.max(0.0),
+            SizeRule::Auto | SizeRule::Fill { .. } => stack_primary(desired, direction),
+        };
+        let slot_cross = (stack_cross(content_size, direction) - cross_margin).max(0.0);
+        let mut child_available = stack_vec(slot_primary, slot_cross, direction);
+        child_available = child_available.max(slot.min_size).min(slot.max_size);
+
+        let child_size = resolve_size(slot, desired, child_available);
+        let aligned = align_in_slot(slot, child_size, child_available, direction);
+        let position = stack_vec(
+            cursor + stack_leading_margin(margin, direction) + stack_primary(aligned, direction),
+            stack_leading_cross_margin(margin, direction) + stack_cross(aligned, direction),
+            direction,
+        );
+
+        child.layout.position = position;
         layout_node(
             child,
             theme,
             Vec2::new(node.layout.rect.x, node.layout.rect.y),
+            child_available,
         );
+        cursor += primary_margin + slot_primary;
     }
 }
 
-fn hit_test_node(node: &ControlNode, x: f32, y: f32) -> Option<String> {
-    if !node.visible || !node.enabled {
+fn resolve_size(slot: SlotLayout, desired: Vec2, available: Vec2) -> Vec2 {
+    let width = resolve_axis(slot.width, desired.x, available.x);
+    let height = resolve_axis(slot.height, desired.y, available.y);
+    Vec2::new(width, height)
+        .max(slot.min_size)
+        .min(slot.max_size)
+}
+
+fn resolve_axis(rule: SizeRule, desired: f32, available: f32) -> f32 {
+    match rule {
+        SizeRule::Auto => desired,
+        SizeRule::Fixed(value) => value.max(0.0),
+        SizeRule::Fill { .. } => available.max(0.0),
+    }
+}
+
+fn stack_fixed_primary(children: &[ControlNode], direction: StackDirection) -> f32 {
+    children
+        .iter()
+        .filter(|child| child.effective_visibility().participates_in_layout())
+        .map(|child| {
+            let margin = stack_primary_margin(child.layout.slot.margin, direction);
+            let size = match stack_size_rule(child.layout.slot, direction) {
+                SizeRule::Fill { .. } => 0.0,
+                SizeRule::Fixed(value) => value.max(0.0),
+                SizeRule::Auto => stack_primary(child.layout.desired_size, direction),
+            };
+            margin + size
+        })
+        .sum()
+}
+
+fn stack_fill_weight(children: &[ControlNode], direction: StackDirection) -> f32 {
+    children
+        .iter()
+        .filter(|child| child.effective_visibility().participates_in_layout())
+        .map(|child| stack_size_rule(child.layout.slot, direction).fill_weight())
+        .sum()
+}
+
+fn stack_size_rule(slot: SlotLayout, direction: StackDirection) -> SizeRule {
+    match direction {
+        StackDirection::Vertical => slot.height,
+        StackDirection::Horizontal => slot.width,
+    }
+}
+
+fn stack_primary(size: Vec2, direction: StackDirection) -> f32 {
+    match direction {
+        StackDirection::Vertical => size.y,
+        StackDirection::Horizontal => size.x,
+    }
+}
+
+fn stack_cross(size: Vec2, direction: StackDirection) -> f32 {
+    match direction {
+        StackDirection::Vertical => size.x,
+        StackDirection::Horizontal => size.y,
+    }
+}
+
+fn stack_vec(primary: f32, cross: f32, direction: StackDirection) -> Vec2 {
+    match direction {
+        StackDirection::Vertical => Vec2::new(cross, primary),
+        StackDirection::Horizontal => Vec2::new(primary, cross),
+    }
+}
+
+fn stack_primary_margin(margin: Margin, direction: StackDirection) -> f32 {
+    match direction {
+        StackDirection::Vertical => margin.top + margin.bottom,
+        StackDirection::Horizontal => margin.left + margin.right,
+    }
+}
+
+fn stack_cross_margin(margin: Margin, direction: StackDirection) -> f32 {
+    match direction {
+        StackDirection::Vertical => margin.left + margin.right,
+        StackDirection::Horizontal => margin.top + margin.bottom,
+    }
+}
+
+fn stack_leading_margin(margin: Margin, direction: StackDirection) -> f32 {
+    match direction {
+        StackDirection::Vertical => margin.top,
+        StackDirection::Horizontal => margin.left,
+    }
+}
+
+fn stack_leading_cross_margin(margin: Margin, direction: StackDirection) -> f32 {
+    match direction {
+        StackDirection::Vertical => margin.left,
+        StackDirection::Horizontal => margin.top,
+    }
+}
+
+fn align_in_slot(
+    slot: SlotLayout,
+    child_size: Vec2,
+    available: Vec2,
+    direction: StackDirection,
+) -> Vec2 {
+    let horizontal = align_offset(slot.horizontal_alignment, child_size.x, available.x);
+    let vertical = align_offset(slot.vertical_alignment, child_size.y, available.y);
+    match direction {
+        StackDirection::Vertical | StackDirection::Horizontal => Vec2::new(horizontal, vertical),
+    }
+}
+
+fn align_offset(alignment: Alignment, child: f32, available: f32) -> f32 {
+    match alignment {
+        Alignment::Start | Alignment::Fill => 0.0,
+        Alignment::Center => ((available - child) * 0.5).max(0.0),
+        Alignment::End => (available - child).max(0.0),
+    }
+}
+
+/// Result of a UI hit-test.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HitTestPath {
+    /// Deepest target control name.
+    pub name: String,
+    /// Ancestor path from root child to target.
+    pub path: Vec<String>,
+    /// Target rectangle.
+    pub rect: Rect,
+}
+
+fn hit_test_node(node: &ControlNode, x: f32, y: f32) -> Option<HitTestPath> {
+    let visibility = node.effective_visibility();
+    if !node.enabled || !visibility.renders() || !visibility.allows_child_hit_test() {
         return None;
     }
+    let mut path = Vec::new();
     for child in node.children.iter().rev() {
-        if let Some(hit) = hit_test_node(child, x, y) {
+        if let Some(hit) = hit_test_node_inner(child, x, y, &mut path) {
             return Some(hit);
         }
     }
-    if node.layout.rect.contains(x, y) {
-        Some(node.name.clone())
+    None
+}
+
+fn hit_test_node_inner(
+    node: &ControlNode,
+    x: f32,
+    y: f32,
+    path: &mut Vec<String>,
+) -> Option<HitTestPath> {
+    let visibility = node.effective_visibility();
+    if !node.enabled || !visibility.renders() {
+        return None;
+    }
+    path.push(node.name.clone());
+    if visibility.allows_child_hit_test() {
+        for child in node.children.iter().rev() {
+            if let Some(hit) = hit_test_node_inner(child, x, y, path) {
+                path.pop();
+                return Some(hit);
+            }
+        }
+    }
+    let hit = if visibility.accepts_self_hit_test() && node.layout.rect.contains(x, y) {
+        Some(HitTestPath {
+            name: node.name.clone(),
+            path: path.clone(),
+            rect: node.layout.rect,
+        })
     } else {
         None
+    };
+    path.pop();
+    hit
+}
+
+fn collect_arranged_node(node: &ControlNode, depth: usize, controls: &mut Vec<ArrangedControl>) {
+    let visibility = node.effective_visibility();
+    if !visibility.participates_in_layout() {
+        return;
+    }
+    controls.push(ArrangedControl {
+        name: node.name.clone(),
+        widget_type: node.widget.type_name(),
+        rect: node.layout.rect,
+        visibility,
+        depth,
+    });
+    for child in &node.children {
+        collect_arranged_node(child, depth + 1, controls);
+    }
+}
+
+fn find_node_mut<'a>(node: &'a mut ControlNode, name: &str) -> Option<&'a mut ControlNode> {
+    if node.name == name {
+        return Some(node);
+    }
+    for child in &mut node.children {
+        if let Some(hit) = find_node_mut(child, name) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+fn clear_layout_dirty(node: &mut ControlNode) {
+    node.layout.needs_layout = false;
+    node.layout.needs_paint = false;
+    for child in &mut node.children {
+        clear_layout_dirty(child);
+    }
+}
+
+fn count_invalidation(node: &ControlNode, stats: &mut UiInvalidationStats) {
+    if node.layout.needs_layout {
+        stats.layout_dirty += 1;
+    }
+    if node.layout.needs_paint {
+        stats.paint_dirty += 1;
+    }
+    for child in &node.children {
+        count_invalidation(child, stats);
     }
 }
 
@@ -667,7 +1470,7 @@ fn route_event_to_node(
     event: &UiEvent,
     theme: &Theme,
 ) -> EventResult {
-    if !node.visible || !node.enabled {
+    if !node.enabled || !node.effective_visibility().renders() {
         return EventResult::Ignored;
     }
     if node.name == target {
@@ -808,7 +1611,7 @@ impl UiDrawListBuilder {
 }
 
 fn render_node_to_gui(node: &ControlNode, theme: &Theme, builder: &mut UiDrawListBuilder) {
-    if !node.visible {
+    if !node.effective_visibility().renders() {
         return;
     }
     match node.widget.style(theme) {
@@ -906,5 +1709,148 @@ mod tests {
         let hovered = tree.build_gui_draw_list(Vec2::new(320.0, 180.0));
 
         assert_ne!(normal.vertices[0].color, hovered.vertices[0].color);
+    }
+
+    #[test]
+    fn panel_arranges_children_horizontally() {
+        let mut tree = ControlTree::new();
+        tree.add_panel("toolbar", StackDirection::Horizontal);
+        assert!(tree.add_button_to("toolbar", "select", "Select"));
+        assert!(tree.add_button_to("toolbar", "move", "Move"));
+        assert!(tree.set_margin("move", Margin::new(6.0, 0.0, 0.0, 0.0)));
+        tree.layout(Vec2::new(640.0, 360.0));
+
+        let arranged = tree.arranged_controls();
+        let select = arranged.iter().find(|item| item.name == "select").unwrap();
+        let move_button = arranged.iter().find(|item| item.name == "move").unwrap();
+
+        assert!(move_button.rect.x > select.rect.x + select.rect.width);
+        assert_eq!(select.depth, 1);
+        assert_eq!(move_button.widget_type, "Button");
+    }
+
+    #[test]
+    fn hidden_controls_keep_layout_but_do_not_render_or_hit_test() {
+        let mut tree = ControlTree::new();
+        tree.add_button("hidden", "Hidden");
+        tree.add_button("visible", "Visible");
+        assert!(tree.set_visibility("hidden", Visibility::Hidden));
+        tree.layout(Vec2::new(320.0, 180.0));
+
+        let arranged = tree.arranged_controls();
+        assert!(arranged.iter().any(|item| item.name == "hidden"));
+        assert_eq!(tree.hit_test_path(4.0, 4.0).map(|hit| hit.name), None);
+
+        let draw = tree.collect_draw_data();
+        assert_eq!(draw.len(), 1);
+    }
+
+    #[test]
+    fn collapsed_controls_do_not_take_layout_space() {
+        let mut tree = ControlTree::new();
+        tree.add_button("collapsed", "Collapsed");
+        tree.add_button("next", "Next");
+        assert!(tree.set_visibility("collapsed", Visibility::Collapsed));
+        tree.layout(Vec2::new(320.0, 180.0));
+
+        let arranged = tree.arranged_controls();
+        assert!(!arranged.iter().any(|item| item.name == "collapsed"));
+        let next = arranged.iter().find(|item| item.name == "next").unwrap();
+
+        assert_eq!(next.rect.y, 0.0);
+    }
+
+    #[test]
+    fn self_hit_test_invisible_panel_routes_to_child() {
+        let mut tree = ControlTree::new();
+        tree.add_panel("panel", StackDirection::Vertical);
+        assert!(tree.add_button_to("panel", "child", "Child"));
+        assert!(tree.set_visibility("panel", Visibility::SelfHitTestInvisible));
+        tree.layout(Vec2::new(320.0, 180.0));
+
+        let hit = tree.hit_test_path(4.0, 4.0).unwrap();
+
+        assert_eq!(hit.name, "child");
+        assert_eq!(hit.path, vec!["panel".to_string(), "child".to_string()]);
+    }
+
+    #[test]
+    fn hit_test_invisible_panel_blocks_descendant_hits() {
+        let mut tree = ControlTree::new();
+        tree.add_panel("panel", StackDirection::Vertical);
+        assert!(tree.add_button_to("panel", "child", "Child"));
+        assert!(tree.set_visibility("panel", Visibility::HitTestInvisible));
+        tree.layout(Vec2::new(320.0, 180.0));
+
+        assert_eq!(tree.hit_test_path(4.0, 4.0), None);
+    }
+
+    #[test]
+    fn fixed_slot_overrides_desired_size() {
+        let mut tree = ControlTree::new();
+        tree.add_button("wide", "Wide");
+        assert!(tree.set_slot("wide", SlotLayout::new().fixed(160.0, 40.0)));
+        tree.layout(Vec2::new(320.0, 180.0));
+
+        let arranged = tree.arranged_controls();
+        let wide = arranged.iter().find(|item| item.name == "wide").unwrap();
+
+        assert_eq!(wide.rect.width, 160.0);
+        assert_eq!(wide.rect.height, 40.0);
+    }
+
+    #[test]
+    fn fill_slot_consumes_remaining_stack_space() {
+        let mut tree = ControlTree::new();
+        tree.add_panel("column", StackDirection::Vertical);
+        assert!(tree.add_button_to("column", "header", "Header"));
+        assert!(tree.add_button_to("column", "body", "Body"));
+        assert!(tree.set_slot("column", SlotLayout::new().fixed(200.0, 120.0)));
+        assert!(tree.set_slot("header", SlotLayout::new().fixed(200.0, 20.0)));
+        assert!(tree.set_slot("body", SlotLayout::new().fill(1.0)));
+        tree.layout(Vec2::new(320.0, 180.0));
+
+        let arranged = tree.arranged_controls();
+        let body = arranged.iter().find(|item| item.name == "body").unwrap();
+
+        assert_eq!(body.rect.height, 100.0);
+        assert_eq!(body.rect.width, 200.0);
+    }
+
+    #[test]
+    fn slot_alignment_positions_child_inside_cross_axis() {
+        let mut tree = ControlTree::new();
+        tree.add_panel("row", StackDirection::Horizontal);
+        assert!(tree.add_button_to("row", "small", "S"));
+        assert!(tree.set_slot("row", SlotLayout::new().fixed(120.0, 80.0)));
+        assert!(tree.set_slot(
+            "small",
+            SlotLayout {
+                height: SizeRule::Fixed(20.0),
+                vertical_alignment: Alignment::Center,
+                ..SlotLayout::new()
+            },
+        ));
+        tree.layout(Vec2::new(320.0, 180.0));
+
+        let arranged = tree.arranged_controls();
+        let small = arranged.iter().find(|item| item.name == "small").unwrap();
+
+        assert_eq!(small.rect.y, 30.0);
+        assert_eq!(small.rect.height, 20.0);
+    }
+
+    #[test]
+    fn layout_clears_and_mutation_sets_invalidation() {
+        let mut tree = ControlTree::new();
+        tree.add_button("play", "Play");
+        tree.layout(Vec2::new(320.0, 180.0));
+        assert_eq!(tree.invalidation_stats(), UiInvalidationStats::default());
+
+        assert!(tree.set_margin("play", Margin::all(4.0)));
+        let stats = tree.invalidation_stats();
+
+        assert!(stats.layout_dirty > 0);
+        assert!(stats.paint_dirty > 0);
     }
 }

@@ -1,6 +1,6 @@
 //! Input map with named actions, bindings, dead zones, and chord detection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::input::{InputState, KeyCode, MouseButton};
 
@@ -88,6 +88,88 @@ pub enum AxisType {
     Axis2D,
 }
 
+/// How multiple bindings for the same logical action are accumulated.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AccumulationMode {
+    /// Use the binding with the largest absolute value.
+    #[default]
+    HighestAbsolute,
+    /// Add all binding values together and clamp to the action range.
+    Cumulative,
+}
+
+/// Per-binding value modifier, inspired by Unreal Enhanced Input modifiers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum InputModifier {
+    /// Inverts the value.
+    Negate,
+    /// Multiplies the value by a scalar.
+    Scalar(f32),
+    /// Multiplies the value by the frame delta time.
+    ScaleByDeltaTime,
+    /// Applies an inner/outer dead zone.
+    DeadZone(DeadZone),
+    /// Applies a signed exponential response curve.
+    ResponseCurve {
+        /// Signed exponent applied to the absolute value.
+        exponent: f32,
+    },
+}
+
+impl InputModifier {
+    fn apply(self, value: f32, delta_time: f32) -> f32 {
+        match self {
+            Self::Negate => -value,
+            Self::Scalar(scale) => value * scale,
+            Self::ScaleByDeltaTime => value * delta_time,
+            Self::DeadZone(dead_zone) => apply_deadzone(value, dead_zone),
+            Self::ResponseCurve { exponent } => {
+                let exponent = exponent.max(f32::EPSILON);
+                value.signum() * value.abs().powf(exponent)
+            }
+        }
+    }
+}
+
+/// Trigger condition for a binding.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum InputTrigger {
+    /// Binding is active while actuated.
+    Down,
+    /// Binding activates only on the frame it crosses the threshold.
+    Pressed,
+    /// Binding activates only on the frame it falls below the threshold.
+    Released,
+    /// Binding activates after being actuated for at least `seconds`.
+    Hold {
+        /// Required actuation duration.
+        seconds: f32,
+    },
+}
+
+/// Runtime state generated for a logical action.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ActionState {
+    /// Current action value.
+    pub value: f32,
+    /// Whether the action is currently actuated.
+    pub down: bool,
+    /// Whether the action began this frame.
+    pub pressed: bool,
+    /// Whether the action ended this frame.
+    pub released: bool,
+    /// Whether at least one trigger condition was satisfied this frame.
+    pub triggered: bool,
+    held_seconds: f32,
+}
+
+impl ActionState {
+    /// Returns an inactive action state.
+    pub fn inactive() -> Self {
+        Self::default()
+    }
+}
+
 /// A single input binding for an action.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputBinding {
@@ -113,6 +195,12 @@ pub struct InputBinding {
     pub chord_keys: Vec<KeyCode>,
     /// Axis type.
     pub axis_type: AxisType,
+    /// Value modifiers applied in declaration order.
+    pub modifiers: Vec<InputModifier>,
+    /// Trigger rules applied after modifiers.
+    pub triggers: Vec<InputTrigger>,
+    /// If true, lower-priority contexts cannot contribute this action.
+    pub consume_lower_priority: bool,
 }
 
 impl Default for InputBinding {
@@ -129,6 +217,9 @@ impl Default for InputBinding {
             buffer_frames: 0,
             chord_keys: Vec::new(),
             axis_type: AxisType::Digital,
+            modifiers: Vec::new(),
+            triggers: Vec::new(),
+            consume_lower_priority: false,
         }
     }
 }
@@ -157,28 +248,68 @@ impl InputBinding {
 }
 
 /// Data-driven input map that binds actions to physical inputs.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct InputMap {
     /// Map name.
     pub name: String,
     /// Named action bindings.
     pub actions: HashMap<String, InputBinding>,
+    /// Additional mappings. Use this when multiple physical bindings drive one action.
+    pub mappings: Vec<(String, InputBinding)>,
+    /// Context priority. Larger values override lower-priority contexts.
+    pub priority: i32,
+    /// Accumulation behavior per action.
+    pub accumulation: HashMap<String, AccumulationMode>,
 }
 
 impl InputMap {
     /// Evaluates all actions against the current input state.
     pub fn evaluate(&self, input: &InputState) -> HashMap<String, f32> {
-        let mut values = HashMap::new();
-        for (name, binding) in &self.actions {
-            let value = self.evaluate_binding(binding, input);
+        let mut values = HashMap::<String, f32>::new();
+        for (name, binding) in self.iter_mappings() {
+            let value = self.evaluate_binding(binding, input, 1.0 / 60.0);
             if value.abs() > f32::EPSILON {
-                values.insert(name.clone(), value);
+                accumulate_value(&mut values, name, value, self.accumulation_mode(name));
             }
         }
+        values.retain(|_, value| value.abs() > f32::EPSILON);
         values
     }
 
-    fn evaluate_binding(&self, binding: &InputBinding, input: &InputState) -> f32 {
+    /// Evaluates this map into full per-action state.
+    pub fn evaluate_actions(
+        &self,
+        input: &InputState,
+        previous: &HashMap<String, ActionState>,
+        delta_time: f32,
+    ) -> HashMap<String, ActionState> {
+        let mut values = HashMap::new();
+        let mut triggered = HashMap::new();
+        for (name, binding) in self.iter_mappings() {
+            let value = self.evaluate_binding(binding, input, delta_time);
+            let previous_state = previous.get(name).copied().unwrap_or_default();
+            let trigger_satisfied = triggers_satisfied(binding, value, previous_state, delta_time);
+            if value.abs() > f32::EPSILON {
+                accumulate_value(&mut values, name, value, self.accumulation_mode(name));
+            }
+            if trigger_satisfied {
+                triggered.insert(name.clone(), true);
+            }
+        }
+        action_states_from_values(values, previous, delta_time, &triggered)
+    }
+
+    fn accumulation_mode(&self, action: &str) -> AccumulationMode {
+        self.accumulation.get(action).copied().unwrap_or_default()
+    }
+
+    fn iter_mappings(&self) -> impl Iterator<Item = (&String, &InputBinding)> {
+        self.actions
+            .iter()
+            .chain(self.mappings.iter().map(|(name, binding)| (name, binding)))
+    }
+
+    fn evaluate_binding(&self, binding: &InputBinding, input: &InputState, delta_time: f32) -> f32 {
         let deadzone = binding.dead_zone.unwrap_or_default();
 
         let key_value = Self::key_axis_value(binding, input);
@@ -201,13 +332,17 @@ impl InputMap {
         match binding.axis_type {
             AxisType::Digital => {
                 if raw.abs() > deadzone.inner {
-                    raw.signum()
+                    apply_modifiers(raw.signum(), &binding.modifiers, delta_time)
                 } else {
                     0.0
                 }
             }
-            AxisType::Axis1D => apply_deadzone(raw, deadzone),
-            AxisType::Axis2D => raw,
+            AxisType::Axis1D => apply_modifiers(
+                apply_deadzone(raw, deadzone),
+                &binding.modifiers,
+                delta_time,
+            ),
+            AxisType::Axis2D => apply_modifiers(raw, &binding.modifiers, delta_time),
         }
     }
 
@@ -274,6 +409,95 @@ impl InputMap {
     }
 }
 
+/// A stack of active input mapping contexts.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InputMapStack {
+    contexts: Vec<InputMap>,
+    previous: HashMap<String, ActionState>,
+}
+
+impl InputMapStack {
+    /// Adds or replaces a mapping context by name.
+    pub fn add_context(&mut self, map: InputMap) {
+        if let Some(existing) = self
+            .contexts
+            .iter_mut()
+            .find(|existing| existing.name == map.name)
+        {
+            *existing = map;
+        } else {
+            self.contexts.push(map);
+        }
+        self.contexts.sort_by(|a, b| {
+            b.priority
+                .cmp(&a.priority)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+    }
+
+    /// Removes a mapping context by name.
+    pub fn remove_context(&mut self, name: &str) -> Option<InputMap> {
+        let index = self
+            .contexts
+            .iter()
+            .position(|context| context.name == name)?;
+        Some(self.contexts.remove(index))
+    }
+
+    /// Clears all contexts and previous action state.
+    pub fn clear(&mut self) {
+        self.contexts.clear();
+        self.previous.clear();
+    }
+
+    /// Returns active contexts in evaluation order.
+    pub fn contexts(&self) -> &[InputMap] {
+        &self.contexts
+    }
+
+    /// Evaluates all contexts and updates previous action state.
+    pub fn evaluate(
+        &mut self,
+        input: &InputState,
+        delta_time: f32,
+    ) -> HashMap<String, ActionState> {
+        let mut values = HashMap::new();
+        let mut consumed = HashSet::new();
+
+        for context in &self.contexts {
+            for (name, binding) in context.iter_mappings() {
+                if consumed.contains(name) {
+                    continue;
+                }
+                let value = context.evaluate_binding(binding, input, delta_time);
+                if value.abs() <= f32::EPSILON {
+                    continue;
+                }
+                accumulate_value(&mut values, name, value, context.accumulation_mode(name));
+                if binding.consume_lower_priority {
+                    consumed.insert(name.clone());
+                }
+            }
+        }
+        values.retain(|_, value| value.abs() > f32::EPSILON);
+
+        let mut triggered = HashMap::new();
+        for context in &self.contexts {
+            for (name, binding) in context.iter_mappings() {
+                let value = context.evaluate_binding(binding, input, delta_time);
+                let previous_state = self.previous.get(name).copied().unwrap_or_default();
+                if triggers_satisfied(binding, value, previous_state, delta_time) {
+                    triggered.insert(name.clone(), true);
+                }
+            }
+        }
+
+        let states = action_states_from_values(values, &self.previous, delta_time, &triggered);
+        self.previous = states.clone();
+        states
+    }
+}
+
 fn gamepad_axis_value(gamepad: &crate::gamepad::GamepadState, axis: GamepadAxis) -> f32 {
     match axis {
         GamepadAxis::LeftStickX => gamepad.left_stick_x,
@@ -295,6 +519,116 @@ fn apply_deadzone(value: f32, deadzone: DeadZone) -> f32 {
     }
     let scaled = (abs - deadzone.inner) / (deadzone.outer - deadzone.inner);
     value.signum() * scaled
+}
+
+fn apply_modifiers(value: f32, modifiers: &[InputModifier], delta_time: f32) -> f32 {
+    modifiers
+        .iter()
+        .copied()
+        .fold(value, |value, modifier| modifier.apply(value, delta_time))
+        .clamp(-1.0, 1.0)
+}
+
+fn accumulate_value(
+    values: &mut HashMap<String, f32>,
+    name: &str,
+    value: f32,
+    mode: AccumulationMode,
+) {
+    values
+        .entry(name.to_string())
+        .and_modify(|current| {
+            *current = match mode {
+                AccumulationMode::HighestAbsolute => {
+                    if value.abs() > current.abs() {
+                        value
+                    } else {
+                        *current
+                    }
+                }
+                AccumulationMode::Cumulative => (*current + value).clamp(-1.0, 1.0),
+            };
+        })
+        .or_insert(value.clamp(-1.0, 1.0));
+}
+
+fn action_states_from_values(
+    values: HashMap<String, f32>,
+    previous: &HashMap<String, ActionState>,
+    delta_time: f32,
+    triggered_overrides: &HashMap<String, bool>,
+) -> HashMap<String, ActionState> {
+    let mut states = HashMap::new();
+    for (name, value) in values {
+        let was_down = previous.get(&name).is_some_and(|state| state.down);
+        let down = value.abs() > f32::EPSILON;
+        let held_seconds = if down {
+            previous
+                .get(&name)
+                .map(|state| state.held_seconds)
+                .unwrap_or_default()
+                + delta_time.max(0.0)
+        } else {
+            0.0
+        };
+        let pressed = down && !was_down;
+        let released = !down && was_down;
+        let triggered = triggered_overrides
+            .get(&name)
+            .copied()
+            .unwrap_or(pressed || down);
+        states.insert(
+            name,
+            ActionState {
+                value,
+                down,
+                pressed,
+                released,
+                triggered,
+                held_seconds,
+            },
+        );
+    }
+
+    for (name, previous_state) in previous {
+        if previous_state.down && !states.contains_key(name) {
+            states.insert(
+                name.clone(),
+                ActionState {
+                    released: true,
+                    triggered: triggered_overrides.get(name).copied().unwrap_or(false),
+                    ..ActionState::inactive()
+                },
+            );
+        }
+    }
+
+    states
+}
+
+fn triggers_satisfied(
+    binding: &InputBinding,
+    value: f32,
+    previous: ActionState,
+    delta_time: f32,
+) -> bool {
+    let down = value.abs() > f32::EPSILON;
+    if binding.triggers.is_empty() {
+        return down && !previous.down || down;
+    }
+
+    let held_seconds = if down {
+        previous.held_seconds + delta_time.max(0.0)
+    } else {
+        0.0
+    };
+
+    binding.triggers.iter().any(|trigger| match *trigger {
+        InputTrigger::Down => down,
+        InputTrigger::Pressed => down && !previous.down,
+        InputTrigger::Released => !down && previous.down,
+        InputTrigger::Hold { seconds } => down && held_seconds >= seconds.max(0.0),
+    })
 }
 
 #[cfg(test)]
@@ -405,5 +739,138 @@ mod tests {
 
         let values = map.evaluate(&input);
         assert_eq!(values.get("MoveX"), Some(&-1.0));
+    }
+
+    #[test]
+    fn cumulative_action_values_cancel_each_other() {
+        let mut input = InputState::default();
+        input.apply_event(crate::input::InputEvent::KeyDown(KeyCode::Character('a')));
+        input.apply_event(crate::input::InputEvent::KeyDown(KeyCode::Character('d')));
+
+        let mut map = InputMap::default();
+        map.accumulation
+            .insert("MoveX".to_string(), AccumulationMode::Cumulative);
+        map.mappings.push((
+            "MoveX".to_string(),
+            InputBinding {
+                negative_keys: vec![KeyCode::Character('a')],
+                axis_type: AxisType::Axis1D,
+                ..Default::default()
+            },
+        ));
+        map.mappings.push((
+            "MoveX".to_string(),
+            InputBinding {
+                positive_keys: vec![KeyCode::Character('d')],
+                axis_type: AxisType::Axis1D,
+                ..Default::default()
+            },
+        ));
+
+        let values = map.evaluate(&input);
+        assert!(!values.contains_key("MoveX"));
+    }
+
+    #[test]
+    fn modifiers_apply_in_order() {
+        let mut input = InputState::default();
+        input.apply_event(crate::input::InputEvent::KeyDown(KeyCode::Character('w')));
+
+        let mut map = InputMap::default();
+        map.actions.insert(
+            "Throttle".to_string(),
+            InputBinding {
+                positive_keys: vec![KeyCode::Character('w')],
+                modifiers: vec![InputModifier::Scalar(0.5), InputModifier::Negate],
+                axis_type: AxisType::Axis1D,
+                ..Default::default()
+            },
+        );
+
+        let values = map.evaluate(&input);
+        assert_eq!(values.get("Throttle"), Some(&-0.5));
+    }
+
+    #[test]
+    fn mapping_stack_consumes_lower_priority_contexts() {
+        let mut input = InputState::default();
+        input.apply_event(crate::input::InputEvent::KeyDown(KeyCode::Character('e')));
+        input.apply_event(crate::input::InputEvent::KeyDown(KeyCode::Character('f')));
+
+        let mut gameplay = InputMap {
+            name: "Gameplay".to_string(),
+            priority: 0,
+            ..Default::default()
+        };
+        gameplay.actions.insert(
+            "Use".to_string(),
+            InputBinding {
+                positive_keys: vec![KeyCode::Character('f')],
+                ..Default::default()
+            },
+        );
+
+        let mut ui = InputMap {
+            name: "Ui".to_string(),
+            priority: 10,
+            ..Default::default()
+        };
+        ui.actions.insert(
+            "Use".to_string(),
+            InputBinding {
+                positive_keys: vec![KeyCode::Character('e')],
+                consume_lower_priority: true,
+                ..Default::default()
+            },
+        );
+
+        let mut stack = InputMapStack::default();
+        stack.add_context(gameplay);
+        stack.add_context(ui);
+
+        let states = stack.evaluate(&input, 1.0 / 60.0);
+        assert_eq!(states.get("Use").map(|state| state.value), Some(1.0));
+    }
+
+    #[test]
+    fn triggers_report_pressed_hold_and_released() {
+        let mut input = InputState::default();
+        let mut map = InputMap::default();
+        map.actions.insert(
+            "Charge".to_string(),
+            InputBinding {
+                positive_keys: vec![KeyCode::Space],
+                triggers: vec![InputTrigger::Pressed, InputTrigger::Hold { seconds: 0.2 }],
+                ..Default::default()
+            },
+        );
+
+        let mut previous = HashMap::new();
+        input.apply_event(crate::input::InputEvent::KeyDown(KeyCode::Space));
+        let first = map.evaluate_actions(&input, &previous, 0.1);
+        assert!(first.get("Charge").is_some_and(|state| state.pressed));
+        assert!(first.get("Charge").is_some_and(|state| state.triggered));
+
+        previous = first;
+        input.end_frame();
+        let held = map.evaluate_actions(&input, &previous, 0.11);
+        assert!(held.get("Charge").is_some_and(|state| state.triggered));
+
+        let mut release_map = InputMap::default();
+        release_map.actions.insert(
+            "Charge".to_string(),
+            InputBinding {
+                positive_keys: vec![KeyCode::Space],
+                triggers: vec![InputTrigger::Released],
+                ..Default::default()
+            },
+        );
+        input.apply_event(crate::input::InputEvent::KeyUp(KeyCode::Space));
+        let released = release_map.evaluate_actions(&input, &held, 0.1);
+        assert!(
+            released
+                .get("Charge")
+                .is_some_and(|state| state.released && state.triggered)
+        );
     }
 }

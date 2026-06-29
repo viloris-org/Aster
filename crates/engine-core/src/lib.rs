@@ -17,7 +17,8 @@ pub use error::{EngineError, EngineResult};
 pub use handle::{Generation, Handle, HandleAllocator};
 pub use ids::{AssetId, EntityId, ResourceId};
 pub use task::{
-    EngineTaskRuntime, TaskHandle, TaskJoinError, TaskPriority, TaskRuntimeConfig,
-    TaskRuntimeStats, shared_task_runtime,
+    EngineTaskRuntime, TaskConcurrencyLimiter, TaskConcurrencyLimiterStats, TaskDependency,
+    TaskEvent, TaskHandle, TaskJoinError, TaskPriority, TaskRuntimeConfig, TaskRuntimeStats,
+    shared_task_runtime,
 };
 pub use time::{FrameCounter, TimeState, TimeStep};

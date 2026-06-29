@@ -22,7 +22,8 @@ pub use gamepad::{GamepadId, GamepadProvider, GamepadState, NullGamepadProvider}
 pub use input::{ActionBinding, ActionMap, InputEvent, InputState, KeyCode, MouseButton};
 pub use input_buffer::InputBuffer;
 pub use input_map::{
-    AxisType, DeadZone, GamepadAxis, GamepadButton, InputBinding as InputBindingV2, InputMap,
+    AccumulationMode, ActionState, AxisType, DeadZone, GamepadAxis, GamepadButton,
+    InputBinding as InputBindingV2, InputMap, InputMapStack, InputModifier, InputTrigger,
 };
 pub use library::DynamicLibraryProvider;
 pub use window::{WindowDescriptor, WindowProvider};

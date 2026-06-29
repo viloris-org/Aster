@@ -3,7 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::gamepad::GamepadState;
-use crate::input_map::GamepadButton;
+use crate::input_map::{
+    ActionState, AxisType, GamepadButton, InputBinding as InputBindingV2, InputMap, InputMapStack,
+};
 
 /// Keyboard key codes used by the platform abstraction.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -128,6 +130,8 @@ pub struct InputState {
     mouse_delta: (f32, f32),
     wheel_delta: (f32, f32),
     actions: HashMap<String, ActionBinding>,
+    mapped_actions: HashMap<String, ActionState>,
+    input_maps: InputMapStack,
     gamepads: Vec<GamepadState>,
 }
 
@@ -214,6 +218,96 @@ impl InputState {
                 [KeyCode::Character('w'), KeyCode::ArrowUp],
             ),
         );
+
+        let mut map = InputMap {
+            name: "DefaultPlayer".to_string(),
+            ..Default::default()
+        };
+        map.actions.insert(
+            "MoveForward".to_string(),
+            InputBindingV2::digital([KeyCode::Character('w'), KeyCode::ArrowUp]),
+        );
+        map.actions.insert(
+            "MoveBackward".to_string(),
+            InputBindingV2::digital([KeyCode::Character('s'), KeyCode::ArrowDown]),
+        );
+        map.actions.insert(
+            "MoveRight".to_string(),
+            InputBindingV2::digital([KeyCode::Character('d'), KeyCode::ArrowRight]),
+        );
+        map.actions.insert(
+            "MoveLeft".to_string(),
+            InputBindingV2::digital([KeyCode::Character('a'), KeyCode::ArrowLeft]),
+        );
+        map.actions.insert(
+            "MoveX".to_string(),
+            InputBindingV2::axis(
+                [KeyCode::Character('a'), KeyCode::ArrowLeft],
+                [KeyCode::Character('d'), KeyCode::ArrowRight],
+            ),
+        );
+        map.actions.insert(
+            "MoveY".to_string(),
+            InputBindingV2::axis(
+                [KeyCode::Character('s'), KeyCode::ArrowDown],
+                [KeyCode::Character('w'), KeyCode::ArrowUp],
+            ),
+        );
+        map.actions.insert(
+            "Jump".to_string(),
+            InputBindingV2 {
+                positive_keys: vec![KeyCode::Space],
+                axis_type: AxisType::Digital,
+                ..Default::default()
+            },
+        );
+        map.actions.insert(
+            "Fire".to_string(),
+            InputBindingV2 {
+                positive_keys: vec![KeyCode::Character('f'), KeyCode::Character('e')],
+                axis_type: AxisType::Digital,
+                ..Default::default()
+            },
+        );
+        map.actions.insert(
+            "Interact".to_string(),
+            InputBindingV2 {
+                positive_keys: vec![KeyCode::Character('e')],
+                axis_type: AxisType::Digital,
+                ..Default::default()
+            },
+        );
+        map.actions.insert(
+            "Pause".to_string(),
+            InputBindingV2 {
+                positive_keys: vec![KeyCode::Escape],
+                axis_type: AxisType::Digital,
+                ..Default::default()
+            },
+        );
+        self.set_input_map(map);
+    }
+
+    /// Adds or replaces a mapping context.
+    pub fn set_input_map(&mut self, map: InputMap) {
+        self.input_maps.add_context(map);
+    }
+
+    /// Removes a mapping context by name.
+    pub fn remove_input_map(&mut self, name: &str) -> Option<InputMap> {
+        self.input_maps.remove_context(name)
+    }
+
+    /// Evaluates mapped actions for this frame.
+    pub fn evaluate_mapped_actions(&mut self, delta_time: f32) {
+        let mut maps = std::mem::take(&mut self.input_maps);
+        self.mapped_actions = maps.evaluate(self, delta_time);
+        self.input_maps = maps;
+    }
+
+    /// Returns current mapped action state.
+    pub fn action_state(&self, name: &str) -> ActionState {
+        self.mapped_actions.get(name).copied().unwrap_or_default()
     }
 
     /// Applies a platform input event.
@@ -328,11 +422,61 @@ impl InputState {
 
     /// Returns whether a digital action is currently active.
     pub fn action_down(&self, name: &str) -> bool {
-        self.action_value(name) > 0.0
+        self.mapped_actions
+            .get(name)
+            .map(|state| state.down)
+            .unwrap_or_else(|| self.action_value(name) > 0.0)
+    }
+
+    /// Returns whether an action was pressed this frame.
+    pub fn action_pressed(&self, name: &str) -> bool {
+        if let Some(state) = self.mapped_actions.get(name) {
+            return state.pressed;
+        }
+        let Some(binding) = self.actions.get(name) else {
+            return false;
+        };
+        binding
+            .positive_keys
+            .iter()
+            .any(|key| self.pressed_keys.contains(key))
+            || binding
+                .negative_keys
+                .iter()
+                .any(|key| self.pressed_keys.contains(key))
+    }
+
+    /// Returns whether an action trigger condition was satisfied this frame.
+    pub fn action_triggered(&self, name: &str) -> bool {
+        self.mapped_actions
+            .get(name)
+            .map(|state| state.triggered)
+            .unwrap_or_else(|| self.action_pressed(name))
+    }
+
+    /// Returns whether an action was released this frame.
+    pub fn action_released(&self, name: &str) -> bool {
+        if let Some(state) = self.mapped_actions.get(name) {
+            return state.released;
+        }
+        let Some(binding) = self.actions.get(name) else {
+            return false;
+        };
+        binding
+            .positive_keys
+            .iter()
+            .any(|key| self.released_keys.contains(key))
+            || binding
+                .negative_keys
+                .iter()
+                .any(|key| self.released_keys.contains(key))
     }
 
     /// Returns an action value in the `-1..=1` range for digital bindings.
     pub fn action_value(&self, name: &str) -> f32 {
+        if let Some(state) = self.mapped_actions.get(name) {
+            return state.value;
+        }
         let Some(binding) = self.actions.get(name) else {
             return 0.0;
         };

@@ -26,14 +26,16 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use std::sync::mpsc;
 #[cfg(any(feature = "importers", feature = "watch"))]
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::Receiver;
 #[cfg(feature = "importers")]
 use std::{io::Read, sync::mpsc::Sender};
 
-use engine_core::{AssetId, EngineError, EngineResult, Handle, HandleAllocator, ResourceId};
-#[cfg(feature = "importers")]
-use engine_core::{TaskPriority, shared_task_runtime};
+use engine_core::{
+    AssetId, EngineError, EngineResult, Handle, HandleAllocator, ResourceId, TaskPriority,
+    shared_task_runtime,
+};
 use serde::{Deserialize, Serialize};
 
 /// Current schema version for asset-side files.
@@ -1831,7 +1833,7 @@ impl ImportQueue {
         import: F,
     ) -> Vec<ImportOutcome>
     where
-        F: Fn(ImportTask) -> ImportOutcome + Sync,
+        F: Fn(ImportTask) -> ImportOutcome + Send + Sync + 'static,
     {
         let worker_count = worker_count.max(1);
         let tasks = self.imports.drain(..).collect::<Vec<_>>();
@@ -1839,21 +1841,22 @@ impl ImportQueue {
             return Vec::new();
         }
 
-        let chunk_size = tasks.len().div_ceil(worker_count);
-        let mut outcomes = std::thread::scope(|scope| {
-            let mut workers = Vec::new();
-            for chunk in tasks.chunks(chunk_size) {
-                let chunk = chunk.to_vec();
-                let import = &import;
-                workers
-                    .push(scope.spawn(move || chunk.into_iter().map(import).collect::<Vec<_>>()));
-            }
+        let runtime = shared_task_runtime();
+        let limiter = runtime.concurrency_limiter(worker_count, TaskPriority::Background);
+        let import = Arc::new(import);
+        let (outcome_sender, outcome_receiver) = mpsc::channel();
 
-            workers
-                .into_iter()
-                .flat_map(|worker| worker.join().unwrap_or_default())
-                .collect::<Vec<_>>()
-        });
+        for task in tasks {
+            let import = Arc::clone(&import);
+            let outcome_sender = outcome_sender.clone();
+            limiter.push("asset.import.batch", move |_| {
+                let _ = outcome_sender.send(import(task));
+            });
+        }
+        drop(outcome_sender);
+        limiter.wait();
+
+        let mut outcomes = outcome_receiver.into_iter().collect::<Vec<_>>();
 
         for outcome in &outcomes {
             if let Some(upload) = &outcome.upload {
@@ -4166,7 +4169,7 @@ mod tests {
             importer: "image".to_string(),
         });
 
-        let outcomes = queue.drain_imports_parallel(2, |_| ImportOutcome {
+        let outcomes = queue.drain_imports_parallel(2, move |_| ImportOutcome {
             guid: guid(1),
             diagnostics: Vec::new(),
             upload: Some(GpuUploadTask {

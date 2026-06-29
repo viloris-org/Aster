@@ -26,19 +26,19 @@ pub use scene::{
     EnvironmentComponentData, FluidVolumeComponentData, GameObject, LifecycleStage,
     Light2DComponentData, LightBakeMode, LightComponentData, LightKind, MaterialRef,
     MeshRendererComponentData, ObjectIdAllocator, Occluder2DComponentData,
-    ParticleEmitterComponentData, RigidbodyComponentData, SCENE_FILE_VERSION, Scene, SceneFile,
-    SceneMode, ScriptComponent, SerializedGameObject, SkinnedMeshRendererComponentData,
-    SkyboxComponentData, Sprite2DComponentData, SpriteRegion2D, TileMap2DComponentData,
-    WindZoneComponentData,
+    ParticleEmitterComponentData, RigidbodyComponentData, Scene, SceneFile, SceneMode,
+    ScriptComponent, SerializedGameObject, SkinnedMeshRendererComponentData, SkyboxComponentData,
+    Sprite2DComponentData, SpriteRegion2D, TileMap2DComponentData, WindZoneComponentData,
+    SCENE_FILE_VERSION,
 };
 pub use schema::{
-    BuildConfiguration, BuildRenderSettings, ComponentFieldKind, ComponentFieldSchema,
-    ComponentSchema, ComponentSchemaRegistry, EditorPreferences, FormatDiagnostic, FormatVersion,
-    PROJECT_MANIFEST_FILE_NAME, PrefabFile, ProjectManifest, SchemaEvolution,
-    project_manifest_path,
+    project_manifest_path, BuildConfiguration, BuildRenderSettings, ComponentFieldKind,
+    ComponentFieldSchema, ComponentSchema, ComponentSchemaRegistry, EditorPreferences,
+    FormatDiagnostic, FormatVersion, PrefabFile, ProjectManifest, SchemaEvolution,
+    PROJECT_MANIFEST_FILE_NAME,
 };
 pub use transform::TransformHierarchy;
-pub use world::{Component, ComponentStorage, Entity, World};
+pub use world::{Component, ComponentState, ComponentStorage, Entity, World};
 
 #[cfg(feature = "physics")]
 pub use physics::{ColliderComponent, RigidbodyComponent};
